@@ -304,6 +304,60 @@ impl Debug for TrackFlags {
     }
 }
 
+/// 32 bit fixed floating point
+#[derive(Clone, Copy)]
+pub struct FixedFloat32(u32);
+def_from_to_bytes_newtype!(FixedFloat32, u32);
+
+impl FixedFloat32 {
+    fn get(&self) -> f64 {
+        (self.0 >> 16) as f64 + ((self.0 & 0xffff) as f64 / 65536f64)
+    }
+    pub fn set(&mut self, value: f64) {
+        let int = (value as u32) << 16;
+        self.0 = int + ((value - (int as f64)) * 65536f64) as u32;
+    }
+}
+
+impl Debug for FixedFloat32 {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.get())
+    }
+}
+
+impl std::fmt::Display for FixedFloat32 {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.get())
+    }
+}
+
+/// 16 bit fixed floating point
+#[derive(Clone, Copy)]
+pub struct FixedFloat16(u16);
+def_from_to_bytes_newtype!(FixedFloat16, u16);
+
+impl FixedFloat16 {
+    fn get(&self) -> f64 {
+        (self.0 >> 8) as f64 + ((self.0 & 0xff) as f64 / 256f64)
+    }
+    pub fn set(&mut self, value: f64) {
+        let int = (value as u16) << 8;
+        self.0 = int + ((value - (int as f64)) * 256f64) as u16;
+    }
+}
+
+impl Debug for FixedFloat16 {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.get())
+    }
+}
+
+impl std::fmt::Display for FixedFloat16 {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.get())
+    }
+}
+
 def_struct!{ EditList,
     duration:   u32,
     media_time: u32,
