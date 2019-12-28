@@ -10,7 +10,7 @@ use crate::types::*;
 
 /// Trait to serialize and deserialize a box.
 pub trait BoxFromToBytes {
-    fn from_bytes<R: BoxReadBytes>(base: Option<Mp4Base>, bytes: &mut R) -> Self;
+    fn from_bytes<R: BoxReadBytes>(base: Mp4Base, bytes: &mut R) -> Self;
     fn to_bytes<W: BoxWriteBytes>(&self, bytes: &mut W);
     fn min_size() -> usize;
 }
@@ -43,30 +43,15 @@ pub struct Mp4Base {
 }
 
 impl Mp4Base {
-    // read all the subboxes that are present in this
-    // box at the current offset.
-    fn read_boxes<R: BoxReadBytes>(&mut self, bytes: &mut R) {
-        let maxpos = self.offset + self.size;
-        while bytes.pos() < maxpos - 8 {
-            let sub_box = Mp4Base::from_bytes(None, bytes);
-            self.boxes.push(sub_box.specialize(bytes));
-        }
-    }
-}
 
-impl Debug for Mp4Base {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.debug_struct("Mp4Box")
-            //.field("location", &format!("{}:{}", self.offset, self.size))
-            .field("fourcc", &self.fourcc)
-            .finish()
+    // This method is used instead of the trait method.
+    fn from_bytes<R: BoxReadBytes>(file: &mut R) -> Box<dyn MP4Box> {
+        let base = Mp4Base::read_header(file);
+        base.specialize(file)
     }
-}
-
-impl BoxFromToBytes for Mp4Base {
 
     // Read the header.
-    fn from_bytes<R: BoxReadBytes>(_base: Option<Mp4Base>, file: &mut R) -> Self {
+    fn read_header<R: BoxReadBytes>(file: &mut R) -> Self {
         let offset = file.pos();
         let orig_size = u32::from_bytes(file);
         let fourcc = FourCC::from_bytes(file);
@@ -85,8 +70,36 @@ impl BoxFromToBytes for Mp4Base {
         }
     }
 
-    // This is a generic, non-specialized box.
-    // Just write the data.
+    // read all the subboxes that are present in this
+    // box at the current offset.
+    fn read_boxes<R: BoxReadBytes>(&mut self, bytes: &mut R) {
+        let maxpos = self.offset + self.size;
+        while bytes.pos() < maxpos - 8 {
+            let sub_box = Mp4Base::read_header(bytes);
+            self.boxes.push(sub_box.specialize(bytes));
+        }
+    }
+}
+
+impl Debug for Mp4Base {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_struct("Mp4Box")
+            //.field("location", &format!("{}:{}", self.offset, self.size))
+            .field("fourcc", &self.fourcc)
+            .field("size", &format!("{}", self.size))
+            .finish()
+    }
+}
+
+impl BoxFromToBytes for Mp4Base {
+
+    // This trait method is never called, Mp4Base has a direct
+    // method called "from_bytes".
+    fn from_bytes<R: BoxReadBytes>(_base: Mp4Base, _file: &mut R) -> Self {
+        panic!("<Mp4Base as BoxFromToBytes> called, cannot happen");
+    }
+
+    // This is a generic, non-specialized box. Just write the data.
     fn to_bytes<W: BoxWriteBytes>(&self, file: &mut W) {
         self.orig_size.to_bytes(file);
         self.fourcc.to_bytes(file);
@@ -111,7 +124,7 @@ impl MP4Box for Mp4Base {
     fn boxes(&self) -> &Vec<Box<dyn MP4Box>> { &self.boxes }
 }
 
-
+/// Main entry point is via this struct.
 #[derive(Debug)]
 pub struct MP4 {
     size:   u64,
@@ -119,13 +132,14 @@ pub struct MP4 {
 }
 
 impl MP4 {
+    /// Read the structure of an entire MP4 file.
+    ///
+    /// It reads all the boxes into memory, except for "mdat" for abvious reasons.
     pub fn read<R: BoxReadBytes>(file: &mut R) -> MP4 {
         let mut boxes = Vec::new();
-        while file.left() > 0 {
-            println!("XXX 1 {}", file.left());
-            let b = Mp4Base::from_bytes(None, file);
-            println!("XXX 2 {}", file.left());
-            boxes.push(b.specialize(file));
+        while file.left() >= 8 {
+            let b = Mp4Base::from_bytes(file);
+            boxes.push(b);
         }
         MP4 {
             size:   file.pos(),
@@ -202,9 +216,8 @@ macro_rules! def_boxes {
             //
             // The base has already been read, so we pass that in, and read the rest.
             //
-            fn from_bytes<R: BoxReadBytes>(base: Option<Mp4Base>, file: &mut R) -> Self {
+            fn from_bytes<R: BoxReadBytes>(base: Mp4Base, file: &mut R) -> Self {
                 println!("XXX {}::from_bytes", stringify!($name));
-                let base = base.unwrap();
 
                 // Every member variable.
                 let mut res = def_struct!(@from_bytes $name, [ base, ], file, $(
@@ -273,7 +286,7 @@ macro_rules! def_boxes {
                 let mut file = file.limit(box_end);
                 let b: Box<dyn MP4Box> = match &self.fourcc.0.to_be_bytes()[..] {
                     $(
-                        $fourcc => Box::new($name::from_bytes(Some(self), &mut file)),
+                        $fourcc => Box::new($name::from_bytes(self, &mut file)),
                     )*
                     other => {
                         if other != b"mdat" {
@@ -429,6 +442,10 @@ def_boxes! {
     MetaData, b"meta", container: true, {
         version:    Version,
         flags:      u24,
+    },
+    Name, b"name", container: false, {
+        // XXX FIXME not strictly true; I think it's just a String.
+        name:       ZString,
     },
     AppleItemList, b"ilst", container: false, {
         list:       [AppleItem],

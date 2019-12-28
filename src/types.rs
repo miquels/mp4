@@ -54,7 +54,7 @@ macro_rules! def_from_to_bytes_versioned {
 /// Version is a magic variable. Every time you get or set
 /// it, it changes the version on the underlying source
 /// so that everything _after_ it is interpreted as that version.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub struct Version(u8);
 
 impl FromToBytes for Version {
@@ -69,6 +69,12 @@ impl FromToBytes for Version {
     }
     fn min_size() -> usize {
         u8::min_size()
+    }
+}
+
+impl Debug for Version {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
     }
 }
 
@@ -225,7 +231,7 @@ impl Display for ZString {
 
 impl Debug for ZString {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.as_str())
+        write!(f, "\"{}\"", self.as_str())
     }
 }
 
