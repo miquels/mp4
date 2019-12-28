@@ -1,94 +1,84 @@
-/// Common types, traits and macros used in and for Atoms.
+/// Definitions of types used in mp4 boxes.
 ///
-/// This module contains fundamental types used in Atoms (such as Time,
-/// ZString, IsoLanguageCode, etc), and also traits and macros to
-/// serialize / deserialize Atoms.
+/// This module contains fundamental types used in boxes (such as Time,
+/// ZString, IsoLanguageCode, etc).
 ///
-use std::any::Any;
-use std::convert::TryInto;
 use std::fmt::{Debug, Display};
-use std::io;
 use std::time::{Duration, SystemTime};
 
 use chrono::{self, offset::{Local, TimeZone}};
 
+use crate::fromtobytes::{FromToBytes, U24};
 use crate::io::{ReadBytes, WriteBytes};
 
-/// Trait to serialize and deserialize a type.
-pub trait FromToBytes {
-    fn from_bytes<R: ReadBytes>(bytes: &mut R) -> Self;
-    fn to_bytes<W: WriteBytes>(&self, bytes: &mut W);
-    fn min_size() -> usize;
-}
-
-// Convenience macro to implement FromToBytes for u* types.
-macro_rules! def_from_to_bytes {
-    ($type:ident) => {
-        impl FromToBytes for $type {
-            fn from_bytes<R: ReadBytes>(bytes: &mut R) -> Self {
-                let sz = std::mem::size_of::<$type>();
-                let data = bytes.read(sz as u64).unwrap();
-                $type::from_be_bytes(data.try_into().unwrap())
-            }
-            fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) {
-                bytes.write(&self.to_be_bytes()[..]).unwrap()
-            }
-            fn min_size() -> usize {
-                std::mem::size_of::<$type>()
-            }
-        }
-    }
-}
-
-// Define FromToBytes for u* types.
-def_from_to_bytes!(u8);
-def_from_to_bytes!(u16);
-def_from_to_bytes!(u32);
-def_from_to_bytes!(u64);
-def_from_to_bytes!(u128);
-
-// Convenience macro to implement FromToBytes for newtypes wrapping u* types.
+// Convenience macro to implement FromToBytes for newtypes.
 macro_rules! def_from_to_bytes_newtype {
-    ($newtype:ident, $type:ident) => {
+    ($newtype:ident, $type:ty) => {
         impl FromToBytes for $newtype {
             fn from_bytes<R: ReadBytes>(bytes: &mut R) -> Self {
-                let res = $type::from_bytes(bytes);
+                let res = <$type>::from_bytes(bytes);
                 $newtype(res)
             }
             fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) {
                 self.0.to_bytes(bytes);
             }
             fn min_size() -> usize {
-                $type::min_size()
+                <$type>::min_size()
             }
         }
     }
 }
 
-// U24 Only used internally, in def_struct we use "u24" and it's stored as a u32.
-#[derive(Clone, Copy)]
-pub(crate) struct U24(pub u32);
-
-impl FromToBytes for U24 {
-    fn from_bytes<R: ReadBytes>(bytes: &mut R) -> Self {
-        let data = bytes.read(3).unwrap();
-        let mut buf = [0u8; 4];
-        (&mut buf[1..]).copy_from_slice(&data);
-        U24(u32::from_be_bytes(buf))
+macro_rules! def_from_to_bytes_versioned {
+    ($newtype:ident) => {
+        impl FromToBytes for $newtype {
+            fn from_bytes<R: ReadBytes>(bytes: &mut R) -> Self {
+                match bytes.get_version() {
+                    1 => $newtype(u64::from_bytes(bytes)),
+                    _ => $newtype(u32::from_bytes(bytes) as u64),
+                }
+            }
+            fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) {
+                match bytes.get_version() {
+                    1 => self.0.to_bytes(bytes),
+                    _ => (std::cmp::min(self.0, std::u32::MAX as u64) as u32).to_bytes(bytes),
+                }
+            }
+            fn min_size() -> usize {
+                u32::min_size()
+            }
+        }
     }
-    fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) {
-        bytes.write(&self.0.to_be_bytes()[1..]).unwrap();
-    }
-    fn min_size() -> usize { 3 }
 }
 
-/// Time is a 32 bit value, measured in seconds since 01-01-1904 00:00:00
+/// Version is a magic variable. Every time you get or set
+/// it, it changes the version on the underlying source
+/// so that everything _after_ it is interpreted as that version.
+#[derive(Clone, Copy, Debug)]
+pub struct Version(u8);
+
+impl FromToBytes for Version {
+    fn from_bytes<R: ReadBytes>(bytes: &mut R) -> Self {
+        let version = u8::from_bytes(bytes);
+        bytes.set_version(version);
+        Version(version)
+    }
+    fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) {
+        self.0.to_bytes(bytes);
+        bytes.set_version(self.0);
+    }
+    fn min_size() -> usize {
+        u8::min_size()
+    }
+}
+
+/// Time is a 32/64 bit value, measured in seconds since 01-01-1904 00:00:00
 #[derive(Clone, Copy)]
-pub struct Time(pub u32);
-def_from_to_bytes_newtype!(Time, u32);
+pub struct Time(u64);
+def_from_to_bytes_versioned!(Time);
 
 // TZ=UTC date +%s -d "1904-01-01 00:00:00"
-const OFFSET_TO_UNIX: u32 = 2082844800;
+const OFFSET_TO_UNIX: u64 = 2082844800;
 
 impl Time {
     #[allow(dead_code)]
@@ -119,22 +109,37 @@ impl Debug for Time {
 pub struct FourCC(pub u32);
 def_from_to_bytes_newtype!(FourCC, u32);
 
-fn fmt_fourcc(fourcc: u32) -> String {
-    let c = fourcc.to_be_bytes();
-    for i in 0..3 {
-        if c[i] < 32 || c[i] > 126 {
-            return format!("0x{:x}", fourcc);
+impl FourCC {
+    fn fmt_fourcc(&self, dbg: bool) -> String {
+        let c = self.0.to_be_bytes();
+        for i in 0..4 {
+            if (c[i] < 32 || c[i] > 126) && !(i == 0 && c[i] == 0xa9) {
+                return format!("0x{:x}", self.0);
+            }
         }
+        let mut s = String::new();
+        if dbg {
+            s.push('"');
+        }
+        for i in 0..4 {
+            s.push(c[i] as char);
+        }
+        if dbg {
+            s.push('"');
+        }
+        s
     }
-    let mut v = vec![ b'\"' ];
-    v.extend_from_slice(&c[..]);
-    v.push(b'"');
-    String::from_utf8(v).unwrap()
 }
 
 impl Debug for FourCC {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", fmt_fourcc(self.0))
+        write!(f, "{}", self.fmt_fourcc(true))
+    }
+}
+
+impl std::fmt::Display for FourCC {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.fmt_fourcc(false))
     }
 }
 
@@ -304,59 +309,48 @@ impl Debug for TrackFlags {
     }
 }
 
-/// 32 bit fixed floating point
-#[derive(Clone, Copy)]
-pub struct FixedFloat32(u32);
-def_from_to_bytes_newtype!(FixedFloat32, u32);
+macro_rules! fixed_float {
+    ($name:ident, $type:ty) => {
+        #[derive(Clone, Copy)]
+        pub struct $name($type);
+        def_from_to_bytes_newtype!($name, $type);
 
-impl FixedFloat32 {
-    fn get(&self) -> f64 {
-        (self.0 >> 16) as f64 + ((self.0 & 0xffff) as f64 / 65536f64)
-    }
-    pub fn set(&mut self, value: f64) {
-        let int = (value as u32) << 16;
-        self.0 = int + ((value - (int as f64)) * 65536f64) as u32;
+        impl $name {
+            fn get(&self) -> f64 {
+                let max = 1 << (std::mem::size_of::<$type>() * 4);
+                (self.0 as f64) / (max as f64)
+            }
+
+            #[allow(dead_code)]
+            pub fn set(&mut self, value: f64) {
+                let max = (1 << (std::mem::size_of::<$type>() * 4)) as f64;
+                self.0 = if value <= 0f64 {
+                    0 as $type
+                } else if value >= (max as f64) {
+                    ((max * max) - 1f64) as $type
+                } else {
+                    (value * max) as $type
+                };
+            }
+        }
+
+        impl Debug for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(f, "{}", self.get())
+            }
+        }
+
+        impl std::fmt::Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(f, "{}", self.get())
+            }
+        }
     }
 }
 
-impl Debug for FixedFloat32 {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.get())
-    }
-}
-
-impl std::fmt::Display for FixedFloat32 {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.get())
-    }
-}
-
-/// 16 bit fixed floating point
-#[derive(Clone, Copy)]
-pub struct FixedFloat16(u16);
-def_from_to_bytes_newtype!(FixedFloat16, u16);
-
-impl FixedFloat16 {
-    fn get(&self) -> f64 {
-        (self.0 >> 8) as f64 + ((self.0 & 0xff) as f64 / 256f64)
-    }
-    pub fn set(&mut self, value: f64) {
-        let int = (value as u16) << 8;
-        self.0 = int + ((value - (int as f64)) * 256f64) as u16;
-    }
-}
-
-impl Debug for FixedFloat16 {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.get())
-    }
-}
-
-impl std::fmt::Display for FixedFloat16 {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.get())
-    }
-}
+// Some fixed float types.
+fixed_float!(FixedFloat32, u32);
+fixed_float!(FixedFloat16, u16);
 
 def_struct!{ EditList,
     duration:   u32,
@@ -368,5 +362,91 @@ def_struct!{ OpColor,
     red:    u16,
     green:  u16,
     blue:   u16,
+}
+
+/// Apple item.
+///
+/// We do our best to decode the text in an item, and that's
+/// it. If we fail, just skip it. Probably the best since this
+/// is not part of the ISO standard.
+pub struct AppleItem {
+    pub fourcc: FourCC,
+    pub data:   String,
+    blob:       Vec<u8>,
+}
+
+impl FromToBytes for AppleItem {
+    fn from_bytes<R: ReadBytes>(bytes: &mut R) -> Self {
+        // First read this box (e.g. an "©too").
+        let mut size = u32::from_bytes(bytes);
+        let fourcc = FourCC::from_bytes(bytes);
+        if size < 8 {
+            size = 8;
+        }
+        println!("XXX 1 size {} fourcc {}", size, fourcc);
+        let mut res = AppleItem{
+            fourcc,
+            data: String::new(),
+            blob: bytes.read((size - 8) as u64).unwrap().to_vec(),
+        };
+        let mut blob_slice = &res.blob[..];
+        let data = &mut blob_slice;
+
+        // Now read the sub-box. Again, length + fourcc.
+        let size = u32::from_bytes(data);
+        let fourcc = FourCC::from_bytes(data);
+
+        if fourcc.to_string() == "data" {
+            data.skip(2).unwrap();
+            let flag = u16::from_bytes(data);
+            if flag == 1 && size >= 16 {
+                data.skip(4).unwrap();
+                let text = data.read((size - 16)  as u64).unwrap();
+                res.data = String::from_utf8_lossy(text).to_string();
+            }
+        }
+        res
+    }
+
+    fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) {
+        if self.data.len() == 0 {
+            // No string data, just write the blob,
+            // i.e. write back what we read before.
+            if self.blob.len() > 0 {
+                let size = (8 + self.blob.len()) as u32;
+                size.to_bytes(bytes);
+                self.fourcc.to_bytes(bytes);
+                bytes.write(&self.blob[..]).unwrap();
+            }
+            return;
+        }
+
+        // Write the main box (e.g. ©too).
+        let mut size = (24 + self.data.len()) as u32;
+        size.to_bytes(bytes);
+        self.fourcc.to_bytes(bytes);
+
+        // Now write the data sub-box header (16 bytes)
+        size -= 8;
+        size.to_bytes(bytes);
+        bytes.write(b"data").unwrap();
+        bytes.skip(2).unwrap();
+        1u16.to_bytes(bytes);
+        bytes.skip(4).unwrap();
+
+        // And finally the data itself.
+        bytes.write(self.data.as_bytes()).unwrap();
+    }
+
+    fn min_size() -> usize { 16 }
+}
+
+impl Debug for AppleItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self.data.len() {
+            0 => write!(f, "{}: [{} bytes]", self.fourcc, self.blob.len()),
+            _ => write!(f, "{}: \"{}\"", self.fourcc, self.data),
+        }
+    }
 }
 

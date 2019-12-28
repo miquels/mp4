@@ -2,8 +2,8 @@
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
-/// &[u8] reader.
-pub trait ReadBytes {
+/// Byte reader in a stream.
+pub trait ReadBytes: CommonBytes {
     /// Read an exact number of bytes, return a reference to the buffer.
     fn read(&mut self, amount: u64) -> io::Result<&[u8]>;
     /// Skip some bytes in the input.
@@ -12,12 +12,22 @@ pub trait ReadBytes {
     fn left(&self) -> u64;
 }
 
-/// &[u8] writer.
-pub trait WriteBytes {
+/// Byte writer in a stream.
+pub trait WriteBytes: CommonBytes {
     /// Write an exact number of bytes.
     fn write(&mut self, data: &[u8]) -> io::Result<()>;
     /// Zero-fill some bytes in the output.
     fn skip(&mut self, amount: u64) -> io::Result<()>;
+}
+
+/// Common methods for both ReadBytes and WriteBytes.
+pub trait CommonBytes {
+    fn get_version(&self) -> u8 {
+        0
+    }
+    fn set_version(&mut self, _version: u8) {
+        unimplemented!()
+    }
 }
 
 /// Extended ReadBytes for an Mp4Box.
@@ -60,6 +70,7 @@ impl ReadBytes for &[u8] {
         (*self).len() as u64
     }
 }
+impl CommonBytes for &[u8] { }
 
 /// Implementation of WriteBytes on a byte slice.
 impl WriteBytes for &mut [u8] {
@@ -82,12 +93,14 @@ impl WriteBytes for &mut [u8] {
         Ok(())
     }
 }
+impl CommonBytes for &mut [u8] {}
 
 pub struct Mp4File {
     file: File,
     pos: u64,
     size: u64,
     buf: Vec<u8>,
+    version: u8,
 }
 
 impl Mp4File {
@@ -100,6 +113,7 @@ impl Mp4File {
             pos,
             size: meta.len(),
             buf: Vec::new(),
+            version: 0,
         }
     }
 }
@@ -131,6 +145,15 @@ impl ReadBytes for Mp4File {
         } else {
             self.size - self.pos
         }
+    }
+}
+
+impl CommonBytes for Mp4File {
+    fn get_version(&self) -> u8 {
+        self.version
+    }
+    fn set_version(&mut self, version: u8) {
+        self.version = version;
     }
 }
 
@@ -211,6 +234,15 @@ impl<'a> BoxReadBytes for Mp4FileLimited<'a> {
     }
 }
 
+impl<'a> CommonBytes for Mp4FileLimited<'a> {
+    fn get_version(&self) -> u8 {
+        self.inner.get_version()
+    }
+    fn set_version(&mut self, version: u8) {
+        self.inner.set_version(version);
+    }
+}
+
 impl<'a, B: ?Sized + ReadBytes + 'a> ReadBytes for Box<B> {
     fn read(&mut self, amount: u64) -> io::Result<&[u8]> { B::read(&mut *self, amount) }
     fn skip(&mut self, amount: u64) -> io::Result<()> { B::skip(&mut *self, amount) }
@@ -221,5 +253,10 @@ impl<'a, B: ?Sized + BoxReadBytes + 'a> BoxReadBytes for Box<B> {
     fn pos(&self) -> u64 { B::pos(&*self) }
     fn size(&self) -> u64 { B::size(&*self) }
     fn limit(&mut self, limit: u64) -> Box<dyn BoxReadBytes + '_> { B::limit(&mut *self, limit) }
+}
+
+impl<'a, B: ?Sized + CommonBytes + 'a> CommonBytes for Box<B> {
+    fn get_version(&self) -> u8 { B::get_version(&*self) }
+    fn set_version(&mut self, version: u8) { B::set_version(&mut *self, version) }
 }
 

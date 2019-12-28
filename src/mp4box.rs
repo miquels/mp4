@@ -1,9 +1,10 @@
-///
-/// This module contains macros to define a MP4 Box as a Rust struct.
-///
+//! macros to define a MP4 Box as a Rust struct.
+//!
 use std::any::Any;
 use std::fmt::Debug;
 use std::io;
+
+use crate::fromtobytes::FromToBytes;
 use crate::io::*;
 use crate::types::*;
 
@@ -14,7 +15,7 @@ pub trait BoxFromToBytes {
     fn min_size() -> usize;
 }
 
-// Trait implemented by every box.
+/// Trait implemented by every box.
 pub trait MP4Box: Debug + Any {
     fn offset(&self) -> u64;
     fn size(&self) -> u64;
@@ -30,13 +31,15 @@ impl<B: ?Sized + MP4Box> MP4Box for Box<B> {
     fn boxes(&self) -> &Vec<Box<dyn MP4Box>> { B::boxes(&*self) }
 }
 
-/// Basic structure of any box.
+// Basic structure of any box.
+#[doc(hidden)]
 pub struct Mp4Base {
     offset:         u64,
     size:           u64,
     orig_size:      u32,
     fourcc:         FourCC,
     boxes:          Vec<Box<dyn MP4Box>>,
+    blob:           Vec<u8>,
 }
 
 impl Mp4Base {
@@ -61,25 +64,36 @@ impl Debug for Mp4Base {
 }
 
 impl BoxFromToBytes for Mp4Base {
-    fn from_bytes<R: BoxReadBytes>(_base: Option<Mp4Base>, bytes: &mut R) -> Self {
-        let offset = bytes.pos();
-        let orig_size = u32::from_bytes(bytes);
-        let fourcc = FourCC::from_bytes(bytes);
+
+    // Read the header.
+    fn from_bytes<R: BoxReadBytes>(_base: Option<Mp4Base>, file: &mut R) -> Self {
+        let offset = file.pos();
+        let orig_size = u32::from_bytes(file);
+        let fourcc = FourCC::from_bytes(file);
         let size = match orig_size {
-            1 => u64::from_bytes(bytes),
+            0 => file.left(),
+            1 => u64::from_bytes(file),
             sz => sz as u64,
         };
-        let boxes = Vec::new();
         Mp4Base {
             offset,
             size,
             orig_size,
             fourcc,
-            boxes,
+            boxes: Vec::new(),
+            blob: Vec::new(),
         }
     }
-    fn to_bytes<W: BoxWriteBytes>(&self, bytes: &mut W) {
-        unimplemented!()
+
+    // This is a generic, non-specialized box.
+    // Just write the data.
+    fn to_bytes<W: BoxWriteBytes>(&self, file: &mut W) {
+        self.orig_size.to_bytes(file);
+        self.fourcc.to_bytes(file);
+        if self.orig_size == 1 {
+            self.size.to_bytes(file);
+        }
+        file.write(&self.blob[..]).unwrap();
     }
     fn min_size() -> usize {
         8
@@ -87,9 +101,13 @@ impl BoxFromToBytes for Mp4Base {
 }
 
 impl MP4Box for Mp4Base {
+    #[inline]
     fn offset(&self) -> u64 { self.offset }
+    #[inline]
     fn size(&self) -> u64 { self.size }
+    #[inline]
     fn fourcc(&self) -> FourCC { self.fourcc }
+    #[inline]
     fn boxes(&self) -> &Vec<Box<dyn MP4Box>> { &self.boxes }
 }
 
@@ -117,9 +135,13 @@ impl MP4 {
 }
 
 impl MP4Box for MP4 {
+    #[inline]
     fn offset(&self) -> u64 { 0 }
+    #[inline]
     fn size(&self) -> u64 { self.size }
+    #[inline]
     fn fourcc(&self) -> FourCC { FourCC(0) }
+    #[inline]
     fn boxes(&self) -> &Vec<Box<dyn MP4Box>> { &self.boxes }
 }
 
@@ -137,186 +159,13 @@ impl IndexU32 {
     }
 }
 
-macro_rules! def_struct {
-    // minimum size for a certain type. we hard-code u* here.
-    (@min_size u8) => { 1 };
-    (@min_size u16) => { 2 };
-    (@min_size u24) => { 3 };
-    (@min_size u32) => { 4 };
-    (@min_size u64) => { 8 };
-    (@min_size u128) => { 16 };
-    (@min_size [ $_type:ty ]) => { 0 };
-    (@min_size $type:ident) => {
-        $type::min_size()
-    };
-    (@min_size $amount:expr) => { $amount };
-
-    // Define a struct line by line using accumulation and recursion.
-    (@def_struct $name:ident, $( $field:tt: $type:tt $(as $as:tt)? ),* $(,)?) => {
-        def_struct!(@def_struct_ $name, [ $( $field: $type $(as $as)?, )* ] -> []);
-    };
-    // During definition of the struct, we skip all the "skip" defitions.
-    (@def_struct_ $name:ident, [ skip: $amount:tt, $($tt:tt)*] -> [ $($res:tt)* ]) => {
-        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* ]);
-    };
-    // Add normal field (as).
-    (@def_struct_ $name:ident, [ $field:ident: $_type:ident as $type:ident, $($tt:tt)*] -> [ $($res:tt)* ]) => {
-        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* $field: $type, ]);
-    };
-    // Add normal field (u24).
-    (@def_struct_ $name:ident, [ $field:ident: u24, $($tt:tt)*] -> [ $($res:tt)* ]) => {
-        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* $field: u32, ]);
-    };
-    // Add normal field (array).
-    (@def_struct_ $name:ident, [ $field:ident: [ $type:ident ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
-        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* $field: Vec<$type>, ]);
-    };
-    // Add normal field.
-    (@def_struct_ $name:ident, [ $field:ident: $type:ident, $($tt:tt)*] -> [ $($res:tt)* ]) => {
-        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* $field: $type, ]);
-    };
-    // Final.
-    (@def_struct_ $name: ident, [] -> [ $($res:tt)* ]) => {
-        pub struct $name { $(
-            $res
-        )* }
-    };
-
-    // Generate the from_bytes details for a struct.
-    (@from_bytes $name:ident, $base:tt, $stream:tt, $( $field:tt: $type:tt $(as $as:tt)? ),* $(,)?) => {
-        def_struct!(@from_bytes_ $name, $base, $stream, [ $( $field: $type $(as $as)?, )* ] -> [] []);
-    };
-    // Insert a skip instruction.
-    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ skip: $amount:tt, $($tt:tt)*]
-        -> [ $($set:tt)* ] [ $($fields:tt)* ] ) => {
-        def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [ $stream.skip($amount).unwrap(); ] ] [$($fields)*]);
-    };
-    // Set a field (as)
-    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: $in:tt as $out:tt, $($tt:tt)*]
-        -> [ $($set:tt)* ] [ $($fields:tt)* ]) => {
-        def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [ let $field = $in::from_bytes($stream) as $out; ] ] [ $($fields)* $field ]);
-    };
-    // Set a field (u24).
-    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: u24, $($tt:tt)*]
-        -> [ $($set:tt)* ] [ $($fields:tt)* ]) => {
-        def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [ let $field = U24::from_bytes($stream).0; ] ] [ $($fields)* $field ]);
-    };
-    // Set a field (array).
-    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: [$type:tt], $($tt:tt)*]
-        -> [ $($set:tt)* ] [ $($fields:tt)* ]) => {
-        def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [
-                let mut $field = Vec::new();
-                while $stream.left() >= $type::min_size() as u64 {
-                    println!("XXX left: {}", $stream.left());
-                    let v = $type::from_bytes($stream);
-                    $field.push(v);
-                }
-            ] ] [ $($fields)* $field ]);
-    };
-    // Set a field.
-    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: $type:tt, $($tt:tt)*]
-        -> [ $($set:tt)* ] [ $($fields:tt)* ]) => {
-        def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [ let $field = $type::from_bytes($stream); ] ] [ $($fields)* $field ]);
-    };
-    // Final.
-    (@from_bytes_ $name:ident, [ $($base:tt)* ], $_stream:tt, [] -> [ $([$($set:tt)*])* ] [ $($field:tt)* ]) => {
-        {
-        $(
-            $($set)*
-        )*
-        $name {
-            $($base)*
-            $(
-                $field,
-            )*
-        } }
-    };
-
-    // Generate the to_bytes details for a struct.
-    (@to_bytes $struct:expr, $stream:ident, $( $field:tt: $type:tt $(as $as:tt)? ),* $(,)?) => {
-        def_struct!(@to_bytes_ $struct, $stream, [ $( $field: $type $(as $as)?, )* ] -> []);
-    };
-    // Insert a skip instruction.
-    (@to_bytes_ $struct:expr, $stream:ident, [ skip: $amount:tt, $($tt:tt)*] -> [ $($set:tt)* ] ) => {
-        def_struct!(@to_bytes_ $struct, $stream, [ $($tt)* ] ->
-            [ $($set)* [ $stream.skip($amount).unwrap(); ] ] );
-    };
-    // Write a field value (as)
-    (@to_bytes_ $struct:expr, $stream:ident, [ $field:tt: $type:tt as $_type:tt, $($tt:tt)*] -> [ $($set:tt)* ]) => {
-        def_struct!(@to_bytes_ $struct, $stream, [ $($tt)* ] ->
-            [ $($set)* [ ($struct.$field as $type).to_bytes($stream); ] ]);
-    };
-    // Write a field value (u24).
-    (@to_bytes_ $struct:expr, $stream:ident, [ $field:tt: u24, $($tt:tt)*] -> [ $($set:tt)* ]) => {
-        def_struct!(@to_bytes_ $struct, $stream, [ $($tt)* ] ->
-            [ $($set)* [ U24($struct.$field as u32).to_bytes($stream); ] ]);
-    };
-    // Write a field value (array)
-    (@to_bytes_ $struct:expr, $stream:ident, [ $field:tt: [$type:tt], $($tt:tt)*] -> [ $($set:tt)* ]) => {
-        def_struct!(@to_bytes_ $struct, $stream, [ $($tt)* ] ->
-            [ $($set)* [ for v in &$struct.$field { v.to_bytes($stream); } ] ]);
-    };
-    // Write a field value.
-    (@to_bytes_ $struct:expr, $stream:ident, [ $field:tt: $type:tt, $($tt:tt)*] -> [ $($set:tt)* ]) => {
-        def_struct!(@to_bytes_ $struct, $stream, [ $($tt)* ] ->
-            [ $($set)* [ $struct.$field.to_bytes($stream); ] ]);
-    };
-    // Final.
-    (@to_bytes_ $_struct:expr, $_stream:tt, [] -> [ $([$($set:tt)*])* ] ) => {
-        {$(
-            $($set)*
-        )*}
-    };
+macro_rules! def_boxes {
 
     // Helper.
-    (@check_skip $this:expr, $dbg:expr, skip) => { };
-    (@check_skip $this:expr, $dbg:expr, $field:ident) => { $dbg.field(stringify!($field), &$this.$field); };
-
-    // Main entry point to define just one struct.
-    ($name:ident, $($field:tt: $type:tt $(as $as:tt)?),* $(,)?) => {
-        def_struct!(@def_struct $name,
-            $(
-                $field: $type $(as $as)?,
-            )*
-        );
-
-        // Debug implementation that skips "skip"
-        impl Debug for $name {
-            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                let mut dbg = f.debug_struct(stringify!($name));
-                $(
-                    def_struct!(@check_skip self, dbg,  $field);
-                )*
-                dbg.finish()
-            }
-        }
-
-        impl FromToBytes for $name {
-            fn from_bytes<R: ReadBytes>(stream: &mut R) -> Self {
-                def_struct!(@from_bytes $name, [], stream, $(
-                    $field: $type $(as $as)?,
-                )*)
-            }
-
-            fn to_bytes<W: WriteBytes>(&self, stream: &mut W) {
-                def_struct!(@to_bytes self, stream, $(
-                    $field: $type $(as $as)?,
-                )*);
-            }
-
-            fn min_size() -> usize {
-                $( def_struct!(@min_size $type) +)* 0
-            }
-        }
-    }
-}
-
-macro_rules! def_boxes {
+    (@set_version version, $stream:expr, $version:expr) => {
+        $stream.set_version($version);
+    };
+    (@set_version $($_tt:tt)*) => {};
 
     // Helper.
     (@is_container true) => { true };
@@ -350,23 +199,39 @@ macro_rules! def_boxes {
         }
 
         impl BoxFromToBytes for $name {
-            fn from_bytes<R: BoxReadBytes>(base: Option<Mp4Base>, stream: &mut R) -> Self {
+            //
+            // The base has already been read, so we pass that in, and read the rest.
+            //
+            fn from_bytes<R: BoxReadBytes>(base: Option<Mp4Base>, file: &mut R) -> Self {
                 println!("XXX {}::from_bytes", stringify!($name));
                 let base = base.unwrap();
-                let mut res = def_struct!(@from_bytes $name, [ base, ], stream, $(
+
+                // Every member variable.
+                let mut res = def_struct!(@from_bytes $name, [ base, ], file, $(
                     $field: $type $(as $as)?,
                 )*);
                 println!("XXX done!");
+
+                // Reset version.
+                file.set_version(0);
+
                 if def_boxes!(@is_container $container) {
-                    res.base.read_boxes(stream);
+                    res.base.read_boxes(file);
                 }
                 res
             }
 
-            fn to_bytes<W: BoxWriteBytes>(&self, stream: &mut W) {
-                def_struct!(@to_bytes self, stream, $(
+            fn to_bytes<W: BoxWriteBytes>(&self, file: &mut W) {
+                // First write the base, the the rest.
+                self.base.to_bytes(file);
+
+                // Every member variable.
+                def_struct!(@to_bytes self, file, $(
                     $field: $type $(as $as)?,
                 )*);
+
+                // Reset version.
+                file.set_version(0);
             }
 
             fn min_size() -> usize {
@@ -376,9 +241,13 @@ macro_rules! def_boxes {
             }
         }
         impl MP4Box for $name {
+            #[inline]
             fn offset(&self) -> u64 { self.base.offset }
+            #[inline]
             fn size(&self) -> u64 { self.base.size }
+            #[inline]
             fn fourcc(&self) -> FourCC { self.base.fourcc }
+            #[inline]
             fn boxes(&self) -> &Vec<Box<dyn MP4Box>> { &self.base.boxes }
         }
     };
@@ -390,16 +259,31 @@ macro_rules! def_boxes {
             def_boxes!(@def_box $name, $container, $fields);
         )*
 
-        // Now create the mapping from fourcc to struct.
         impl Mp4Base {
-            fn specialize<R: BoxReadBytes>(self, file: &mut R) -> Box<dyn MP4Box> {
+            // This function "specializes" the base box.
+            //
+            // If the FourCC is reckognized, we map that to a struct, call
+            // from_bytes on it, and Box it so that it becomes a Box<dyn MP4Box>.
+            //
+            // If we do not reckognize the box, we still read the data
+            // but just store it as-is so that we can write it out again.
+            //
+            fn specialize<R: BoxReadBytes>(mut self, file: &mut R) -> Box<dyn MP4Box> {
                 let box_end = self.offset + self.size;
                 let mut file = file.limit(box_end);
                 let b: Box<dyn MP4Box> = match &self.fourcc.0.to_be_bytes()[..] {
                     $(
                         $fourcc => Box::new($name::from_bytes(Some(self), &mut file)),
                     )*
-                    _ => Box::new(self),
+                    other => {
+                        if other != b"mdat" {
+                            // Not reckognized, just store as a blob.
+                            // Unless it is mdat, never store mdat as a blob in memory!
+                            let blob = file.read(0).unwrap();
+                            self.blob.extend_from_slice(blob);
+                        }
+                        Box::new(self)
+                    },
                 };
                 if file.pos() < box_end {
                     println!("XXX skipping to {}", box_end);
@@ -418,7 +302,7 @@ def_boxes! {
         compatible_brands:  [FourCC],
     },
     InitialObjectDescription, b"iods", container: false, {
-        version:        u8,
+        version:        Version,
         flags:          u24,
         audio_profile:  u8,
         video_profile:  u8,
@@ -430,7 +314,7 @@ def_boxes! {
     TrackBox, b"trak", container: true, {
     },
     TrackHeader, b"tkhd", container: false, {
-        version:    u8,
+        version:    Version,
         flags:      TrackFlags,
         cr_time:    Time,
         mod_time:   Time,
@@ -447,7 +331,7 @@ def_boxes! {
         height:     FixedFloat32,
     },
     Edits, b"edts", container: false, {
-        version:    u8,
+        version:    Version,
         flags:      u24,
         entries:    u32,
         table:      [EditList],
@@ -461,22 +345,37 @@ def_boxes! {
     DataInformationBox, b"dinf", container: true,  {
     },
     DataReference, b"dref", container: true, {
-        version:    u8,
+        version:    Version,
         flags:      u24,
         entries:    u32,
     },
     MediaInformationBox, b"minf", container: true,  {
     },
     VideoMediaInformation, b"vmhd", container: false, {
-        version:        u8,
+        version:        Version,
         flags:          u24,
         graphics_mode:  u16,
         opcolor:        OpColor,
     },
-    SampleTable, b"stbl", container: true, {
+    SoundMediaHeader, b"smhd", container: false, {
+        version:        Version,
+        flags:          u24,
+        balance:        u16,
+        skip:           2,
+    },
+    NullMediaHeader, b"nmhd", container: false, {
+    },
+    UserDataBox, b"udta", container: true, {
+        //udta_list:      [UserData],
+    },
+    TrackSelection, b"tsel", container: false, {
+        version:        Version,
+        flags:          u24,
+        switch_group:   u32,
+        attribute_list: [FourCC],
     },
     SampleDescription, b"stsd", container: false, {
-        version:    u8,
+        version:    Version,
         flags:      u24,
         entries:    u32,
         n1_size:    u32,
@@ -485,7 +384,7 @@ def_boxes! {
         dataref_idx:    u16,
     },
     MediaHeader, b"mdhd", container: false, {
-        version:    u8,
+        version:    Version,
         flags:      u24,
         cr_time:    Time,
         mod_time:   Time,
@@ -495,7 +394,7 @@ def_boxes! {
         quality:    u16,
     },
     MovieHeader, b"mvhd", container: false, {
-        version:    u8,
+        version:    Version,
         flags:      u24,
         cr_time:    Time,
         mod_time:   Time,
@@ -514,12 +413,25 @@ def_boxes! {
         next_track_id: u32,
     },
     Handler, b"hdlr", container: false, {
-        version:    u8 as u32,
+        version:    Version,
         flags:      u24,
         maintype:   FourCC,
         subtype:    FourCC,
         skip:       12,
         name:       ZString,
+    },
+    Free, b"free", container: false, {
+    },
+    Skip, b"skip", container: false, {
+    },
+    Wide, b"wide", container: false, {
+    },
+    MetaData, b"meta", container: true, {
+        version:    Version,
+        flags:      u24,
+    },
+    AppleItemList, b"ilst", container: false, {
+        list:       [AppleItem],
     },
 }
 
