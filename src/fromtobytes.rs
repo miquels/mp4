@@ -6,6 +6,7 @@
 //! primitive types u8/u16/u32/u64/u128.
 //!
 use std::convert::TryInto;
+use std::io::{self, ErrorKind::UnexpectedEof};
 use crate::io::{ReadBytes, WriteBytes};
 
 // Should the ReadBytes and WriteBytes traits also
@@ -13,8 +14,8 @@ use crate::io::{ReadBytes, WriteBytes};
 
 /// Trait to serialize and deserialize a type.
 pub trait FromToBytes {
-    fn from_bytes<R: ReadBytes>(bytes: &mut R) -> Self;
-    fn to_bytes<W: WriteBytes>(&self, bytes: &mut W);
+    fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> where Self: Sized;
+    fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) -> io::Result<()>;
     fn min_size() -> usize;
 }
 
@@ -22,13 +23,14 @@ pub trait FromToBytes {
 macro_rules! def_from_to_bytes {
     ($type:ident) => {
         impl FromToBytes for $type {
-            fn from_bytes<R: ReadBytes>(bytes: &mut R) -> Self {
+            fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> {
                 let sz = std::mem::size_of::<$type>();
-                let data = bytes.read(sz as u64).unwrap();
-                $type::from_be_bytes(data.try_into().unwrap())
+                let data = bytes.read(sz as u64)?;
+                let data = data.try_into().map_err(|_| UnexpectedEof)?;
+                $type::from_be_bytes(data)
             }
-            fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) {
-                bytes.write(&self.to_be_bytes()[..]).unwrap()
+            fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) -> io::Result<()> {
+                bytes.write(&self.to_be_bytes()[..])
             }
             fn min_size() -> usize {
                 std::mem::size_of::<$type>()
@@ -51,14 +53,14 @@ def_from_to_bytes!(u128);
 pub struct U24(pub u32);
 
 impl FromToBytes for U24 {
-    fn from_bytes<R: ReadBytes>(bytes: &mut R) -> Self {
-        let data = bytes.read(3).unwrap();
+    fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> {
+        let data = bytes.read(3)?;
         let mut buf = [0u8; 4];
         (&mut buf[1..]).copy_from_slice(&data);
-        U24(u32::from_be_bytes(buf))
+        Ok(U24(u32::from_be_bytes(buf)))
     }
-    fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) {
-        bytes.write(&self.0.to_be_bytes()[1..]).unwrap();
+    fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) -> io::Result<()> {
+        bytes.write(&self.0.to_be_bytes()[1..])
     }
     fn min_size() -> usize { 3 }
 }
@@ -94,7 +96,7 @@ macro_rules! def_struct {
     };
     (@min_size $amount:expr) => { $amount };
 
-    // Define a struct line by line using accumulation and recursion.
+    // @def_struct: Define a struct line by line using accumulation and recursion.
     (@def_struct $name:ident, $( $field:tt: $type:tt $(as $as:tt)? ),* $(,)?) => {
         def_struct!(@def_struct_ $name, [ $( $field: $type $(as $as)?, )* ] -> []);
     };
@@ -111,8 +113,9 @@ macro_rules! def_struct {
         def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* $field: u32, ]);
     };
     // Add normal field (array).
-    (@def_struct_ $name:ident, [ $field:ident: [ $type:ident ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
-        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* $field: Vec<$type>, ]);
+    (@def_struct_ $name:ident, [ $field:ident: [ $type:ty ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
+        //def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* $field: Vec<$type>, ]);
+        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* $field: Vec<u32>, ]);
     };
     // Add normal field.
     (@def_struct_ $name:ident, [ $field:ident: $type:ident, $($tt:tt)*] -> [ $($res:tt)* ]) => {
@@ -125,7 +128,7 @@ macro_rules! def_struct {
         )* }
     };
 
-    // Generate the from_bytes details for a struct.
+    // @from_bytes: Generate the from_bytes details for a struct.
     (@from_bytes $name:ident, $base:tt, $stream:tt, $( $field:tt: $type:tt $(as $as:tt)? ),* $(,)?) => {
         def_struct!(@from_bytes_ $name, $base, $stream, [ $( $field: $type $(as $as)?, )* ] -> [] []);
     };
@@ -139,23 +142,23 @@ macro_rules! def_struct {
     (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: $in:tt as $out:tt, $($tt:tt)*]
         -> [ $($set:tt)* ] [ $($fields:tt)* ]) => {
         def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [ let $field = $in::from_bytes($stream) as $out; ] ] [ $($fields)* $field ]);
+            [ $($set)* [ let $field = $in::from_bytes($stream)? as $out; ] ] [ $($fields)* $field ]);
     };
     // Set a field (u24).
     (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: u24, $($tt:tt)*]
         -> [ $($set:tt)* ] [ $($fields:tt)* ]) => {
         def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [ let $field = $crate::fromtobytes::U24::from_bytes($stream).0; ] ] [ $($fields)* $field ]);
+            [ $($set)* [ let $field = $crate::fromtobytes::U24::from_bytes($stream)?.0; ] ] [ $($fields)* $field ]);
     };
     // Set a field (array).
-    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: [$type:tt], $($tt:tt)*]
+    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: [$type:ty], $($tt:tt)*]
         -> [ $($set:tt)* ] [ $($fields:tt)* ]) => {
         def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
             [ $($set)* [
                 let mut $field = Vec::new();
-                while $stream.left() >= $type::min_size() as u64 {
+                while $stream.left() >= <$type>::min_size() as u64 {
                     println!("XXX left: {}", $stream.left());
-                    let v = $type::from_bytes($stream);
+                    let v = <$type>::from_bytes($stream)?;
                     $field.push(v);
                 }
             ] ] [ $($fields)* $field ]);
@@ -164,11 +167,11 @@ macro_rules! def_struct {
     (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: $type:tt, $($tt:tt)*]
         -> [ $($set:tt)* ] [ $($fields:tt)* ]) => {
         def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [ let $field = $type::from_bytes($stream); ] ] [ $($fields)* $field ]);
+            [ $($set)* [ let $field = $type::from_bytes($stream)?; ] ] [ $($fields)* $field ]);
     };
     // Final.
     (@from_bytes_ $name:ident, [ $($base:tt)* ], $_stream:tt, [] -> [ $([$($set:tt)*])* ] [ $($field:tt)* ]) => {
-        {
+        Ok({
         $(
             $($set)*
         )*
@@ -177,43 +180,46 @@ macro_rules! def_struct {
             $(
                 $field,
             )*
-        } }
+        } })
     };
 
-    // Generate the to_bytes details for a struct.
+    // @to_bytes: Generate the to_bytes details for a struct.
     (@to_bytes $struct:expr, $stream:ident, $( $field:tt: $type:tt $(as $as:tt)? ),* $(,)?) => {
         def_struct!(@to_bytes_ $struct, $stream, [ $( $field: $type $(as $as)?, )* ] -> []);
     };
     // Insert a skip instruction.
     (@to_bytes_ $struct:expr, $stream:ident, [ skip: $amount:tt, $($tt:tt)*] -> [ $($set:tt)* ] ) => {
         def_struct!(@to_bytes_ $struct, $stream, [ $($tt)* ] ->
-            [ $($set)* [ $stream.skip($amount).unwrap(); ] ] );
+            [ $($set)* [ $stream.skip($amount)?; ] ] );
     };
     // Write a field value (as)
     (@to_bytes_ $struct:expr, $stream:ident, [ $field:tt: $type:tt as $_type:tt, $($tt:tt)*] -> [ $($set:tt)* ]) => {
         def_struct!(@to_bytes_ $struct, $stream, [ $($tt)* ] ->
-            [ $($set)* [ ($struct.$field as $type).to_bytes($stream); ] ]);
+            [ $($set)* [ ($struct.$field as $type).to_bytes($stream)?; ] ]);
     };
     // Write a field value (u24).
     (@to_bytes_ $struct:expr, $stream:ident, [ $field:tt: u24, $($tt:tt)*] -> [ $($set:tt)* ]) => {
         def_struct!(@to_bytes_ $struct, $stream, [ $($tt)* ] ->
-            [ $($set)* [ $crate::fromtobytes::U24($struct.$field as u32).to_bytes($stream); ] ]);
+            [ $($set)* [ $crate::fromtobytes::U24($struct.$field as u32).to_bytes($stream)?; ] ]);
     };
     // Write a field value (array)
     (@to_bytes_ $struct:expr, $stream:ident, [ $field:tt: [$type:tt], $($tt:tt)*] -> [ $($set:tt)* ]) => {
         def_struct!(@to_bytes_ $struct, $stream, [ $($tt)* ] ->
-            [ $($set)* [ for v in &$struct.$field { v.to_bytes($stream); } ] ]);
+            [ $($set)* [ for v in &$struct.$field { v.to_bytes($stream)?; } ] ]);
     };
     // Write a field value.
     (@to_bytes_ $struct:expr, $stream:ident, [ $field:tt: $type:tt, $($tt:tt)*] -> [ $($set:tt)* ]) => {
         def_struct!(@to_bytes_ $struct, $stream, [ $($tt)* ] ->
-            [ $($set)* [ $struct.$field.to_bytes($stream); ] ]);
+            [ $($set)* [ $struct.$field.to_bytes($stream)?; ] ]);
     };
     // Final.
     (@to_bytes_ $_struct:expr, $_stream:tt, [] -> [ $([$($set:tt)*])* ] ) => {
-        {$(
-            $($set)*
-        )*}
+        {
+            $(
+                $($set)*
+            )*
+            Ok(())
+        }
     };
 
     // Helper.
@@ -240,16 +246,16 @@ macro_rules! def_struct {
         }
 
         impl FromToBytes for $name {
-            fn from_bytes<R: ReadBytes>(stream: &mut R) -> Self {
+            fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<Self> {
                 def_struct!(@from_bytes $name, [], stream, $(
                     $field: $type $(as $as)?,
                 )*)
             }
 
-            fn to_bytes<W: WriteBytes>(&self, stream: &mut W) {
+            fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
                 def_struct!(@to_bytes self, stream, $(
                     $field: $type $(as $as)?,
-                )*);
+                )*)
             }
 
             fn min_size() -> usize {
