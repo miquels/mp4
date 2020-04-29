@@ -3,28 +3,30 @@
 /// This module contains fundamental types used in boxes (such as Time,
 /// ZString, IsoLanguageCode, etc).
 ///
+use std::convert::TryInto;
 use std::fmt::{Debug, Display};
 use std::io;
 use std::time::{Duration, SystemTime};
 
 use chrono::{self, offset::{Local, TimeZone}};
 
-use crate::fromtobytes::{FromToBytes, U24};
-use crate::io::{ReadBytes, WriteBytes};
+use crate::fromtobytes::{FromBytes, ToBytes, ReadBytes, WriteBytes};
 
-// Convenience macro to implement FromToBytes for newtypes.
+// Convenience macro to implement FromBytes/ToBytes for newtypes.
 macro_rules! def_from_to_bytes_newtype {
     ($newtype:ident, $type:ty) => {
-        impl FromToBytes for $newtype {
+        impl FromBytes for $newtype {
             fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> {
                 let res = <$type>::from_bytes(bytes)?;
                 Ok($newtype(res))
             }
-            fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) -> io::Result<()> {
-                self.0.to_bytes(bytes)
-            }
             fn min_size() -> usize {
                 <$type>::min_size()
+            }
+        }
+        impl ToBytes for $newtype {
+            fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) -> io::Result<()> {
+                self.0.to_bytes(bytes)
             }
         }
     }
@@ -32,22 +34,24 @@ macro_rules! def_from_to_bytes_newtype {
 
 macro_rules! def_from_to_bytes_versioned {
     ($newtype:ident) => {
-        impl FromToBytes for $newtype {
+        impl FromBytes for $newtype {
             fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> {
-                Ok(match bytes.get_version() {
+                Ok(match bytes.version() {
                     1 => $newtype(u64::from_bytes(bytes)?),
                     _ => $newtype(u32::from_bytes(bytes)? as u64),
                 })
             }
+            fn min_size() -> usize {
+                u32::min_size()
+            }
+        }
+        impl ToBytes for $newtype {
             fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) -> io::Result<()> {
-                match bytes.get_version() {
+                match bytes.version() {
                     1 => self.0.to_bytes(bytes)?,
                     _ => (std::cmp::min(self.0, std::u32::MAX as u64) as u32).to_bytes(bytes)?,
                 }
                 Ok(())
-            }
-            fn min_size() -> usize {
-                u32::min_size()
             }
         }
     }
@@ -59,19 +63,21 @@ macro_rules! def_from_to_bytes_versioned {
 #[derive(Clone, Copy)]
 pub struct Version(u8);
 
-impl FromToBytes for Version {
+impl FromBytes for Version {
     fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> {
         let version = u8::from_bytes(bytes)?;
         bytes.set_version(version);
         Ok(Version(version))
     }
+    fn min_size() -> usize {
+        u8::min_size()
+    }
+}
+impl ToBytes for Version {
     fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) -> io::Result<()> {
         self.0.to_bytes(bytes)?;
         bytes.set_version(self.0);
         Ok(())
-    }
-    fn min_size() -> usize {
-        u8::min_size()
     }
 }
 
@@ -85,37 +91,39 @@ impl Debug for Version {
 #[derive(Clone)]
 pub struct Uuid(pub [u8; 16]);
 
-impl FromToBytes for Uuid {
+impl FromBytes for Uuid {
     fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> {
         let data = bytes.read(16)?;
-        let u = [0u8; 16];
+        let mut u = [0u8; 16];
         u.copy_from_slice(data);
         Ok(Uuid(u))
     }
 
-    fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) -> io::Result<()> {
-        bytes.write(&self.0[..])
-    }
     fn min_size() -> usize { 16 }
 }
 
+impl ToBytes for Uuid {
+    fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) -> io::Result<()> {
+        bytes.write(&self.0[..])
+    }
+}
 
 impl Display for Uuid {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         // 8-4-4-4-12
-        let p1 = u32::from_be_bytes(&(self.0)[0..4].try_into().unwrap());
-        let p2 = u16::from_be_bytes(&(self.0)[4..6].try_into().unwrap());
-        let p3 = u16::from_be_bytes(&(self.0)[6..8].try_into().unwrap());
-        let p4 = u16::from_be_bytes(&(self.0)[8..10].try_into().unwrap());
-        let p5 = u16::from_be_bytes(&(self.0)[10..12].try_into().unwrap());
-        let p6 = u32::from_be_bytes(&(self.0)[12..16].try_into().unwrap());
+        let p1 = u32::from_be_bytes((self.0)[0..4].try_into().unwrap());
+        let p2 = u16::from_be_bytes((self.0)[4..6].try_into().unwrap());
+        let p3 = u16::from_be_bytes((self.0)[6..8].try_into().unwrap());
+        let p4 = u16::from_be_bytes((self.0)[8..10].try_into().unwrap());
+        let p5 = u16::from_be_bytes((self.0)[10..12].try_into().unwrap());
+        let p6 = u32::from_be_bytes((self.0)[12..16].try_into().unwrap());
         write!(f, "{:08x}-{:04x}-{:04x}-{:04x}-{:04x}{:08x}", p1, p2, p3, p4, p5, p6)
     }
 }
 
 impl Debug for Uuid {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "\"{}\"", self.as_str())
+        write!(f, "\"{}\"", self)
     }
 }
 
@@ -158,6 +166,10 @@ pub struct FourCC(pub u32);
 def_from_to_bytes_newtype!(FourCC, u32);
 
 impl FourCC {
+    pub fn new(s: &str) -> FourCC {
+        s.as_bytes().into()
+    }
+
     fn fmt_fourcc(&self, dbg: bool) -> String {
         let c = self.to_be_bytes();
         for i in 0..4 {
@@ -178,15 +190,16 @@ impl FourCC {
         s
     }
 
-    const fn to_be_bytes(&self) -> [u8; 4] {
+    #[inline]
+    pub fn to_be_bytes(&self) -> [u8; 4] {
         self.0.to_be_bytes()
     }
 }
 
 // Let if (fourcc == b"moov") .. work
 impl std::cmp::PartialEq<&[u8]> for FourCC {
-    fn eq(&self, other: &[u8]) -> bool {
-        &(self.to_be_bytes())[..] == other
+    fn eq(&self, other: &&[u8]) -> bool {
+        &(self.to_be_bytes())[..] == *other
     }
 }
 
@@ -251,7 +264,7 @@ impl std::ops::Deref for ZString {
     }
 }
 
-impl FromToBytes for ZString {
+impl FromBytes for ZString {
     fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> {
         let data = bytes.read(0)?;
         let mut s = String::new();
@@ -267,6 +280,10 @@ impl FromToBytes for ZString {
         }
         Ok(ZString(s))
     }
+    fn min_size() -> usize { 0 }
+}
+
+impl ToBytes for ZString {
     fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) -> io::Result<()> {
         let mut v = Vec::new();
         for c in self.0.chars() {
@@ -278,7 +295,6 @@ impl FromToBytes for ZString {
         }
         bytes.write(&v)
     }
-    fn min_size() -> usize { 0 }
 }
 
 
@@ -297,7 +313,7 @@ impl Debug for ZString {
 /// Matrix.
 pub struct Matrix([[u32; 3]; 3]);
 
-impl FromToBytes for Matrix {
+impl FromBytes for Matrix {
     fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> {
         let mut m = [[0u32; 3]; 3];
         for x in 0 ..3 {
@@ -307,6 +323,9 @@ impl FromToBytes for Matrix {
         }
         Ok(Matrix(m))
     }
+    fn min_size() -> usize { 36 }
+}
+impl ToBytes for Matrix {
     fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) -> io::Result<()> {
         for x in 0 ..3 {
             for y in 0..3 {
@@ -316,7 +335,6 @@ impl FromToBytes for Matrix {
         }
         Ok(())
     }
-    fn min_size() -> usize { 36 }
 }
 
 impl Debug for Matrix {
@@ -334,19 +352,35 @@ macro_rules! impl_flags {
 
         /// 24 bits of flags.
         #[derive(Clone, Copy)]
-        pub struct $type(U24);
-        def_from_to_bytes_newtype!($type, U24);
+        pub struct $type(pub u32);
+
+        impl FromBytes for $type {
+            fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> {
+                let data = bytes.read(3)?;
+                let mut buf = [0u8; 4];
+                (&mut buf[1..]).copy_from_slice(&data);
+                Ok($type(u32::from_be_bytes(buf)))
+            }
+            fn min_size() -> usize { 3 }
+        }
+
+        impl ToBytes for $type {
+            fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) -> io::Result<()> {
+                bytes.write(&self.0.to_be_bytes()[1..])
+            }
+        }
+
 
         impl $type {
             pub fn get(&self, bit: u32) -> bool {
                 let mask = 1 << bit;
-                ((self.0).0 & mask) > 0
+                self.0 & mask > 0
             }
             pub fn set(&mut self, bit: u32, on: bool) {
                 if on {
-                    (self.0).0 |= 1u32 << bit;
+                    self.0 |= 1u32 << bit;
                 } else {
-                    (self.0).0 &= !(1u32 << bit)
+                    self.0 &= !(1u32 << bit)
                 }
             }
         }
@@ -408,9 +442,9 @@ macro_rules! fixed_float {
             pub fn set(&mut self, value: f64) {
                 let v = (value * (( 1 << $frac_bits) as f64)).round();
                 self.0 = if v > (std::$type::MAX as f64) {
-                    $type::MAX;
+                    std::$type::MAX
                 } else if v < (std::$type::MIN as f64) {
-                    $type::MIN;
+                    std::$type::MIN
                 } else {
                     v as $type
                 };
@@ -458,7 +492,7 @@ pub struct AppleItem {
     blob:       Vec<u8>,
 }
 
-impl FromToBytes for AppleItem {
+impl FromBytes for AppleItem {
     fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> {
         // First read this box (e.g. an "©too").
         let mut size = u32::from_bytes(bytes)?;
@@ -480,10 +514,10 @@ impl FromToBytes for AppleItem {
         let fourcc = FourCC::from_bytes(data)?;
 
         if fourcc.to_string() == "data" {
-            data.skip(2)?;
+            ReadBytes::skip(data, 2)?;
             let flag = u16::from_bytes(data)?;
             if flag == 1 && size >= 16 {
-                data.skip(4)?;
+                ReadBytes::skip(data, 4)?;
                 let text = data.read((size - 16)  as u64)?;
                 res.data = String::from_utf8_lossy(text).to_string();
             }
@@ -491,6 +525,10 @@ impl FromToBytes for AppleItem {
         Ok(res)
     }
 
+    fn min_size() -> usize { 16 }
+}
+
+impl ToBytes for AppleItem {
     fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) -> io::Result<()> {
         if self.data.len() == 0 {
             // No string data, just write the blob,
@@ -521,7 +559,6 @@ impl FromToBytes for AppleItem {
         bytes.write(self.data.as_bytes())
     }
 
-    fn min_size() -> usize { 16 }
 }
 
 impl Debug for AppleItem {
@@ -530,6 +567,20 @@ impl Debug for AppleItem {
             0 => write!(f, "{}: [{} bytes]", self.fourcc, self.blob.len()),
             _ => write!(f, "{}: \"{}\"", self.fourcc, self.data),
         }
+    }
+}
+
+// self.movie.and_then(|m| self.boxes[m as usize].downcast_ref::<Movie>())
+pub struct IndexU32(u32);
+impl IndexU32 {
+    pub fn get(self) -> Option<u32> {
+        match self.0 {
+            0xffffffff => None,
+            some => Some(some),
+        }
+    }
+    pub fn set(&mut self, val: Option<u32>) {
+        self.0 = val.unwrap_or(0xffffffff);
     }
 }
 

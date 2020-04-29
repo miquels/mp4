@@ -1,127 +1,304 @@
-//!
-use std::any::Any;
+
 use std::fmt::Debug;
 use std::io;
 
-use crate::fromtobytes::FromToBytes;
+use crate::fromtobytes::{FromBytes, ToBytes, ReadBytes, WriteBytes, BoxBytes};
 use crate::io::*;
 use crate::types::*;
 
-/// Common functionality for all boxes.
-pub trait MP4Box: Debug + Any + FromToBytes {
+/// Gets implemented for every box.
+pub trait BoxInfo {
+    /// The "fourcc" name of this box.
     fn fourcc(&self) -> FourCC;
+    /// Alignment of this box (as per spec)
     fn alignment(&self) -> usize;
-}
-
-/// Implemented if a box kan have sub-boxes.
-pub trait BoxChildren {
-    fn children(&self) -> Option<&[Box<dyn MP4Box>]> {
+    /// Sub-boxes if this is a container.
+    fn boxes(&self) -> Option<&[MP4Box]> {
         None
     }
 }
 
-/// Reads a box from a stream.
-pub fn read_box(stream: &mut dyn BoxReadBytes) -> io::Result<Box<dyn MP4Box>> {
-    let size = u32::read_bytes()?.from_be() as u64;
-    let fourcc = FourCC::read_bytes()?;
-    let limit = match size {
-        0 => stream.size() - stream.pos(),
-        1 => u64::read_bytes()?.saturating_sub(16),
-        x => x.saturating_sub(8),
-    };
-    let s = stream.limit(size);
-    let b = read_box_content(stream)?;
-    s.skip(s.left())?;
-    Ok(b)
+/// Headers + Content = IsoBox.
+pub struct IsoBox<C> {
+    fourcc: FourCC,
+    content: C,
 }
 
-// Implementations so we can return Box<Movie> as Box<dyn MP4Box>.
-impl<B: ?Sized + BoxChildren> BoxChildren for Box<B> {
-    fn children(&self) -> Option<&[Box<dyn MP4Box>]> { B::children(&*self) }
-}
-impl<B: ?Sized + MP4Box> MP4Box for Box<B> {
-    fn fourcc(&self) -> FourCC { B::fourcc(&*self) }
-    fn alignment(&self) -> usize { B::alignment(&*self) }
-}
-
-/// Main entry point is via this struct.
-#[derive(Debug)]
-pub struct MP4 {
-    size:   u64,
-    boxes:  Vec<Box<dyn MP4Box>>,
-}
-
-impl MP4 {
-    /// Read the structure of an entire MP4 file.
-    ///
-    /// It reads all the boxes into memory, except for "mdat" for abvious reasons.
-    pub fn read<R: BoxReadBytes>(file: &mut R) -> io::Result<MP4> {
-        let mut boxes = Vec::new();
-        while file.left() >= 8 {
-            let b = read_box(file)?;
-            boxes.push(b);
+impl<C> IsoBox<C> where C: FromBytes + ToBytes + BoxInfo {
+    /// Wrap a struct with a box header.
+    pub fn wrap(content: C) -> IsoBox<C> {
+        IsoBox {
+            fourcc: content.fourcc().clone(),
+            content,
         }
-        Ok(MP4 {
-            size:   file.pos(),
-            boxes:  boxes,
+    }
+}
+
+// Define FromBytes trait for IsoBox
+impl<C> FromBytes for IsoBox<C> where C: FromBytes + BoxInfo {
+    fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<IsoBox<C>> {
+
+        // Read the header.
+        let mut reader = BoxReader::new(stream)?;
+
+        // Read the body.
+        let content = C::from_bytes(&mut reader)?;
+
+        Ok(IsoBox {
+            fourcc: reader.fourcc,
+            content
         })
     }
 
-    /// Iterate over all boxes in this MP4 container.
-    pub fn boxes(&self) -> &[Box<dyn MP4Box>] {
-        &self.boxes[..]
+    fn min_size() -> usize {
+        8 + C::min_size()
     }
 }
 
-impl BoxChildren for MP4 {
-    fn children(&self) -> Option<&[Box<dyn MP4Box>]> {
-        Some(self.boxes())
+// Define ToBytes trait for IsoBox
+impl<C> ToBytes for IsoBox<C> where C: ToBytes + BoxInfo {
+    fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
+        let mut writer = BoxWriter::new(stream, self.content.fourcc())?;
+        writer.set_fourcc(writer.fourcc.clone());
+        self.content.to_bytes(&mut writer)?;
+        writer.finalize()
     }
 }
 
-// self.movie.and_then(|m| self.boxes[m as usize].downcast_ref::<Movie>())
-pub struct IndexU32(u32);
-impl IndexU32 {
-    pub fn get(self) -> Option<u32> {
-        match self.0 {
-            0xffffffff => None,
-            some => Some(some),
+// Define BoxInfo trait for the enum.
+impl<C> BoxInfo for IsoBox<C> where C: BoxInfo {
+    #[inline]
+    fn fourcc(&self) -> FourCC {
+        self.fourcc.clone()
+    }
+    #[inline]
+    fn alignment(&self) -> usize {
+        self.content.alignment()
+    }
+}
+
+//
+//
+// Helpers to read and write the box header.
+//
+//
+
+/// Reads the box header.
+pub struct BoxReader<R: ReadBytes> {
+    unget_buf: [u8; 16],
+    unget_wrpos: usize,
+    unget_rdpos: usize,
+    inner: ReadBytesLimit<R>,
+    pub fourcc: FourCC,
+}
+
+impl<R> BoxReader<R> where R: ReadBytes {
+    /// Read the box header, then return a size-limited reader.
+    pub fn new(mut stream: &mut R) -> io::Result<BoxReader<&mut R>> {
+        let size1 = u32::from_bytes(&mut stream)? as u64;
+        let fourcc = FourCC::from_bytes(&mut stream)?;
+        let size = match size1 {
+            0 => stream.size() - stream.pos(),
+            1 => u64::from_bytes(&mut stream)?.saturating_sub(16),
+            x => x.saturating_sub(8),
+        };
+        println!("XXX here size {}, size1 {}", size, size1);
+        Ok(BoxReader {
+            unget_buf: [0; 16],
+            unget_rdpos: 0,
+            unget_wrpos: 0,
+            fourcc,
+            inner: ReadBytesLimit::new(stream, size),
+        })
+    }
+
+    /// "unget" a number of bytes.
+    pub fn unget(&mut self, data: &[u8]) {
+        let pos = self.unget_wrpos;
+        let left = 16 - pos;
+        if data.len() > left {
+            panic!("BoxReader::unget({}): buffer overflow({} > {})", data.len(), data.len(), left);
         }
-    }
-    pub fn set(&mut self, val: Option<u32>) {
-        self.0 = val.unwrap_or(0xffffffff);
+        self.unget_buf[pos .. pos + data.len()].copy_from_slice(data);
+        self.unget_wrpos += data.len();
     }
 }
+
+// Delegate ReadBytes to the inner reader.
+impl<R> ReadBytes for BoxReader<R> where R: ReadBytes {
+    fn read(&mut self, amount: u64) -> io::Result<&[u8]> {
+        if self.unget_rdpos < self.unget_wrpos {
+            let bufsz = self.unget_wrpos - self.unget_rdpos;
+            let amount = amount as usize;
+            if amount > bufsz {
+                panic!("BoxReader::read({}): unget buffer underflow ({} < {}", amount, bufsz, amount);
+            }
+            let s = &self.unget_buf[self.unget_rdpos .. self.unget_rdpos + amount];
+            self.unget_rdpos += amount;
+            if self.unget_rdpos == self.unget_wrpos {
+                self.unget_rdpos = 0;
+                self.unget_wrpos = 0;
+            }
+            return Ok(s);
+        }
+        self.inner.read(amount)
+    }
+    fn skip(&mut self, amount: u64) -> io::Result<()> {
+        if self.unget_rdpos < self.unget_wrpos {
+            self.read(amount)?;
+            return Ok(());
+        }
+        self.inner.skip(amount)
+    }
+    fn left(&self) -> u64 {
+        let bufsz = self.unget_wrpos - self.unget_rdpos;
+        self.inner.left() + bufsz as u64
+    }
+}
+
+// Delegate BoxBytes to the inner reader.
+impl<R> BoxBytes for BoxReader<R> where R: ReadBytes {
+    fn pos(&self) -> u64 {
+        self.inner.pos()
+    }
+    fn seek(&mut self, pos: u64) -> io::Result<()> {
+        self.inner.seek(pos)
+    }
+    fn size(&self) -> u64 {
+        self.inner.size()
+    }
+    fn version(&self) -> u8 {
+        self.inner.version()
+    }
+    fn set_version(&mut self, version: u8) {
+        self.inner.set_version(version)
+    }
+    fn fourcc(&self) -> FourCC {
+        self.fourcc.clone()
+    }
+    fn set_fourcc(&mut self, fourcc: FourCC) {
+        self.fourcc = fourcc;
+    }
+    fn limit(&mut self, limit: u64) -> Box<dyn ReadBytes + '_> {
+        self.inner.limit(limit)
+    }
+}
+
+/// Writes the box header.
+pub struct BoxWriter<W: WriteBytes> {
+    fourcc: FourCC,
+    offset: u64,
+    inner: W,
+    finalized: bool,
+}
+
+impl<W> BoxWriter<W> where W: WriteBytes {
+    /// Write a provisional box header, then return a new stream. When
+    /// the stream is dropped, the box header is updated.
+    pub fn new(mut stream: W, fourcc: FourCC) -> io::Result<BoxWriter<W>> {
+        let offset = stream.pos();
+        0u32.to_bytes(&mut stream)?;
+        fourcc.to_bytes(&mut stream)?;
+        Ok(BoxWriter{
+            fourcc,
+            offset,
+            inner: stream,
+            finalized: false,
+        })
+    }
+
+    /// Finalize the box: seek back to the header and write the size.
+    ///
+    /// If you don't call this explicitly, it is done automatically when the
+    /// BoxWriter is dropped. Any I/O errors will result in panics.
+    pub fn finalize(&mut self) -> io::Result<()> {
+        self.finalized = true;
+        let pos = self.inner.pos();
+        self.inner.seek(self.offset)?;
+        let sz = pos - self.offset;
+        sz.to_bytes(&mut self.inner)?;
+        Ok(())
+    }
+}
+
+impl<W> Drop for BoxWriter<W> where W: WriteBytes {
+    fn drop(&mut self) {
+        self.finalize().unwrap();
+    }
+}
+
+// Delegate WriteBytes to the inner writer.
+impl<W> WriteBytes for BoxWriter<W> where W: WriteBytes {
+    fn write(&mut self, data: &[u8]) -> io::Result<()> { self.inner.write(data) }
+    fn skip(&mut self, amount: u64) -> io::Result<()> { self.inner.skip(amount) }
+}
+
+// Delegate BoxBytes to the inner writer.
+impl<W> BoxBytes for BoxWriter<W> where W: WriteBytes {
+    fn pos(&self) -> u64 { self.inner.pos() }
+    fn seek(&mut self, pos: u64) -> io::Result<()> { self.inner.seek(pos) }
+    fn version(&self) -> u8 { self.inner.version() }
+    fn set_version(&mut self, version: u8) { self.inner.set_version(version) }
+    fn fourcc(&self) -> FourCC { self.inner.fourcc() }
+    fn set_fourcc(&mut self, fourcc: FourCC) { self.inner.set_fourcc(fourcc) }
+}
+
+/// Read a collection of boxes from a stream.
+pub fn read_boxes<R: ReadBytes>(mut file: R) -> io::Result<Vec<MP4Box>> {
+    let mut boxes = Vec::new();
+    while file.left() >= 8 {
+        let b = MP4Box::from_bytes(&mut file)?;
+        boxes.push(b);
+    }
+    Ok(boxes)
+}
+
+//
+//
+// Helper types.
+//
+//
 
 /// Any unknown boxes we encounted are put into a GenericBox.
 pub struct GenericBox {
-    pub fourcc: FourCC,
-    pub data: Vec<u8>,
+    fourcc: FourCC,
+    data: Vec<u8>,
+    size: u64,
+    skip: bool,
 }
 
-impl GenericBox {
-    // overrides the trait method.
-    pub fn from_bytes<R: ReadBytes>(stream: &mut R, fourcc: FourCC) -> io::Result<GenericBox> {
-        GenericBox {
-            fourcc,
-            data: stream.read(0)?.to_vec(),
+impl FromBytes for GenericBox {
+    fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<GenericBox> {
+        let size = stream.left();
+        let data;
+        let skip;
+        if size < 65536 {
+            skip = false;
+            data = stream.read(size)?.to_vec();
+        } else {
+            skip = true;
+            stream.skip(size)?;
+            data = vec![];
         }
+        Ok(GenericBox {
+            fourcc: stream.fourcc(),
+            data,
+            skip,
+            size,
+        })
+    }
+    fn min_size() -> usize {
+        8
     }
 }
 
-impl FromToBytes for GenericBox {
-    fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<Self> {
-        unimplemented!()
-    }
+impl ToBytes for GenericBox {
     fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
         stream.write(&self.data)
     }
-    fn min_size() -> usize {
-        0
-    }
 }
 
-impl MP4Box for GenericBox {
+impl BoxInfo for GenericBox {
     #[inline]
     fn fourcc(&self) -> FourCC {
         self.fourcc.clone()
@@ -132,11 +309,11 @@ impl MP4Box for GenericBox {
     }
 }
 
-struct U8Array(usize);
+struct U8Array(u64);
 
 impl Debug for U8Array {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "u8[{}]", &self.0)
+        write!(f, "[u8; {}]", &self.0)
     }
 }
 
@@ -144,45 +321,126 @@ impl Debug for GenericBox {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let mut dbg = f.debug_struct("Box");
         dbg.field("fourcc", &self.fourcc);
-        dbg.field("data", &U8Array(self.data.len()));
+        dbg.field("data", &U8Array(self.size));
+        if self.skip {
+            dbg.field("skip", &true);
+        }
         dbg.finish()
     }
 }
 
+//
+//
+// Macro that is used to declare _all_ boxes.
+//
+//
+
 /// Declare a complete list of all boxes.
 macro_rules! def_boxes {
-    (@CHILDREN $struct:ty, -) => {};
-    (@CHILDREN $struct:ty, $field:ident) => {
-        impl BoxChildren for $struct {
+    /*
+    (@CHILDREN $name:ident, -) => {};
+    (@CHILDREN $name:ident, $field:ident) => {
+        impl BoxChildren for $name {
             fn children(&self) -> Option<&[Box<dyn MP4Box>]> {
                 Some(&self.$field[..])
             }
         }
     };
-    ($({ $fourcc:expr, $align:expr, $struct:ty, $children:tt }),+) => {
+    */
 
-        // Delegate reading a box to its struct based on the FourCC.
-        fn read_box_content(stream: &mut BoxReadBytes, fourcc: FourCC) => io::Result<Box<dyn MP4Box>> {
-            let b = match &($fourcc.to_be_bytes())[..] {
-                $(
-                    $fourcc => {
-                        // caller will have limited the size of the stream to
-                        // the box length, so after reading the contents,
-                        // skip what is left in case there was some unused
-                        // space at the end (might be because of alignment).
-                        let b = Box::new($struct::from_bytes(stream)?);
-                        stream.skip(stream.lef())?;
-                        b
-                    },
-                ),+
-                other => Box::new(GenericBox::from_bytes(stream, $fourcc.into())?),
-            };
-            Ok(b)
+    // def_box delegates most of the work to the def_box macro.
+    (@DEF $name:ident, $fourcc:expr, { $($tt:tt)* }) => {
+        def_box! {
+            $name, $fourcc, $($tt)*
+        }
+    };
+    // empty def_box.
+    (@DEF $name:ident, $fourcc:expr,) => {
+    };
+
+    ($($name:ident, $fourcc:expr, $align:expr $(=> $block:tt)? ; )+) => {
+
+        //
+        // First define the enum.
+        //
+
+        /// All the boxes we know.
+        #[derive(Debug)]
+        pub enum MP4Box {
+            $(
+                $name($name),
+            )+
+            GenericBox(GenericBox),
         }
 
+        // Define FromBytes trait for the enum.
+        impl FromBytes for MP4Box {
+            fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<MP4Box> {
+
+                // Read the header.
+                let mut reader = BoxReader::new(stream)?;
+                println!("XXX got reader for {:?} left {}", reader.fourcc, reader.left());
+
+                // Read the body.
+                let b = reader.fourcc.to_be_bytes();
+                let e = match std::str::from_utf8(&b[..]).unwrap_or("") {
+                    $(
+                        $fourcc => MP4Box::$name($name::from_bytes(&mut reader)?),
+                    )+
+                    _ => MP4Box::GenericBox(GenericBox::from_bytes(&mut reader)?),
+                };
+                Ok(e)
+            }
+
+            fn min_size() -> usize {
+                8
+            }
+        }
+
+        // Define ToBytes trait for the enum.
+        impl ToBytes for MP4Box {
+            fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
+                match self {
+                    $(
+                        &MP4Box::$name(ref b) => b.to_bytes(stream),
+                    )+
+                    &MP4Box::GenericBox(ref b) => b.to_bytes(stream),
+                }
+            }
+        }
+
+        // Define BoxInfo trait for the enum.
+        impl BoxInfo for MP4Box {
+            #[inline]
+            fn fourcc(&self) -> FourCC {
+                match self {
+                    $(
+                        &MP4Box::$name(ref b) => b.fourcc(),
+                    )+
+                    &MP4Box::GenericBox(ref b) => b.fourcc(),
+                }
+            }
+            #[inline]
+            fn alignment(&self) -> usize {
+                match self {
+                    $(
+                        &MP4Box::$name(ref b) => b.alignment(),
+                    )+
+                    &MP4Box::GenericBox(ref b) => b.alignment(),
+                }
+            }
+        }
+
+        //
+        // Now define the struct itself.
+        //
+
         $(
-            // Implement MP4Box trait for this struct.
-            impl MP4Box for $struct {
+            // Call def_box! if needed.
+            def_boxes!(@DEF $name, $fourcc, $($block)*);
+
+            // Implement BoxInfo trait for this struct.
+            impl BoxInfo for $name {
                 #[inline]
                 fn fourcc(&self) -> FourCC {
                     FourCC::new($fourcc)
@@ -194,10 +452,17 @@ macro_rules! def_boxes {
             }
 
             // Implement BoxChildren trait for this struct.
-            def_boxes!(@CHILDREN $struct, $children);
+            // def_boxes!(@CHILDREN $struct, $children);
+
         )+
     }
 }
+
+//
+//
+// Macro that is used to declare one box.
+//
+//
 
 // Define one box.
 macro_rules! def_box {
@@ -222,31 +487,19 @@ macro_rules! def_box {
             }
         }
 
-        impl FromToBytes for $name {
-            fn from_bytes<R: BoxReadBytes>(file: &mut R) -> io::Result<Self> {
+        impl FromBytes for $name {
+            #[allow(unused_variables)]
+            fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<$name> {
 
                 // Deserialize.
-                let res = def_struct!(@from_bytes $name, [], file, $(
-                    $field: $type $(as $as)?,
-                )*)?;
+                let r: io::Result<$name> = {
+                    def_struct!(@from_bytes $name, [], stream, $(
+                        $field: $type $(as $as)?,
+                    )*)
+                };
 
-                // Reset version.
-                file.set_version(0);
-
-                Ok(res)
-            }
-
-            fn to_bytes<W: BoxWriteBytes>(&self, file: &mut W) -> io::Result<()> {
-
-                // Serialize.
-                def_struct!(@to_bytes self, file, $(
-                    $field: $type $(as $as)?,
-                )*)?;
-
-                // Reset version.
-                file.set_version(0);
-
-                Ok(())
+                println!("XXX {:?}", r);
+                r
             }
 
             fn min_size() -> usize {
@@ -255,183 +508,201 @@ macro_rules! def_box {
                 )* 0
             }
         }
+
+        impl ToBytes for $name {
+            #[allow(unused_variables)]
+            fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
+
+                // Write the header.
+                let mut stream = BoxWriter::new(stream, self.fourcc())?;
+                let stream = &mut stream;
+
+                // Serialize.
+                def_struct!(@to_bytes self, stream, $(
+                    $field: $type $(as $as)?,
+                )*)
+            }
+        }
     };
 }
 
-def_box! { FileType, "ftyp",
-    major_brand:        FourCC,
-    minor_version:      u32,
-    compatible_brands:  [FourCC],
-}
+def_boxes! {
+    FileType, "ftyp", 8 => {
+        major_brand:        FourCC,
+        minor_version:      u32,
+        compatible_brands:  [FourCC],
+    };
 
-def_box! { InitialObjectDescription, "iods",
-    version:        Version,
-    flags:          u24,
-    audio_profile:  u8,
-    video_profile:  u8,
+    InitialObjectDescription, "iods", 8 => {
+        version:        Version,
+        flags:          Flags,
+        audio_profile:  u8,
+        video_profile:  u8,
+    };
 }
+/*
+    MovieBox, "moov", 8 => {
+        sub_boxes:      [MP4Box],
+    };
 
-def_box! { MovieBox, "moov",
-    sub_boxes:      [Box<dyn MP4Box>],
+    MovieFragmentBox, "moof", 8 => {
+        sub_boxes:      [MP4Box],
+    };
+
+    TrackBox, "trak", 8 => {
+        sub_boxes:      [MP4Box],
+    };
+
+    TrackHeader, "tkhd", 8 => {
+        version:    Version,
+        flags:      TrackFlags,
+        cr_time:    Time,
+        mod_time:   Time,
+        track_id:   u32,
+        skip:       4,
+        duration:   u32,
+        skip:       8,
+        layer:      u16,
+        alt_group:  u16,
+        volume:     FixedFloat8_8,
+        skip :      2,
+        matrix:     Matrix,
+        width:      FixedFloat16_16,
+        height:     FixedFloat16_16,
+    };
+
+    Edits, "edts", 8 => {
+        version:    Version,
+        flags:      Flags,
+        entries:    u32,
+        table:      [EditList],
+    };
+
+    MediaBox, "mdia", 8 => {
+        sub_boxes:      [MP4Box],
+    };
+
+    SampleTableBox, "stbl", 8 => {
+        sub_boxes:      [MP4Box],
+    };
+
+    BaseMediaInformationHeader, "gmhd", 8 => {
+        sub_boxes:      [MP4Box],
+    };
+
+    DataInformationBox, "dinf", 8 => {
+        sub_boxes:      [MP4Box],
+    };
+
+    DataReference, "dref", 8 => {
+        version:    Version,
+        flags:      Flags,
+        entries:    u32,
+    };
+
+    MediaInformationBox, "minf", 8 => {
+        sub_boxes:      [MP4Box],
+    };
+
+    VideoMediaInformation, "vmhd", 8 => {
+        version:        Version,
+        flags:          Flags,
+        graphics_mode:  u16,
+        opcolor:        OpColor,
+    };
+
+    SoundMediaHeader, "smhd", 8 => {
+        version:        Version,
+        flags:          Flags,
+        balance:        u16,
+        skip:           2,
+    };
+
+    NullMediaHeader, "nmhd", 8 => {
+    };
+
+    UserDataBox, "udta", 8 => {
+        sub_boxes:      [MP4Box],
+    };
+
+    TrackSelection, "tsel", 8 => {
+        version:        Version,
+        flags:          Flags,
+        switch_group:   u32,
+        attribute_list: [FourCC],
+    };
+
+    SampleDescription, "stsd", 8 => {
+        version:    Version,
+        flags:      Flags,
+        entries:    u32,
+        n1_size:    u32,
+        n1_format:  FourCC,
+        skip:       6,
+        dataref_idx:    u16,
+    };
+
+    MediaHeader, "mdhd", 8 => {
+        version:    Version,
+        flags:      Flags,
+        cr_time:    Time,
+        mod_time:   Time,
+        time_scale: u32,
+        duration:   u32,
+        language:   IsoLanguageCode,
+        quality:    u16,
+    };
+
+    MovieHeader, "mvhd", 8 => {
+        version:    Version,
+        flags:      Flags,
+        cr_time:    Time,
+        mod_time:   Time,
+        timescale:  u32,
+        duration:   u32,
+        pref_rate:  u32,
+        pref_vol:   u16,
+        skip:       10,
+        matrix:     Matrix,
+        preview_time:   u32,
+        preview_duration:   u32,
+        poster_time:    u32,
+        selection_time: u32,
+        selection_duration: u32,
+        current_time:   u32,
+        next_track_id: u32,
+    };
+
+    Handler, "hdlr", 8 => {
+        version:    Version,
+        flags:      Flags,
+        maintype:   FourCC,
+        subtype:    FourCC,
+        skip:       12,
+        name:       ZString,
+    };
+
+    Free, "free", 8 => {
+    };
+
+    Skip, "skip", 8 => {
+    };
+
+    Wide, "wide", 8 => {
+    };
+
+    MetaData, "meta", 8 => {
+        version:    Version,
+        flags:      Flags,
+        sub_boxes:  [MP4Box],
+    };
+
+    Name, "name", 8 => {
+        name:       ZString,
+    };
+
+    AppleItemList, "ilst", 8 => {
+        list:       [AppleItem],
+    }
 }
-
-def_box! { MovieFragmentBox, "moof",
-    sub_boxes:      [Box<dyn MP4Box>],
-}
-
-def_box! { TrackBox, "trak",
-    sub_boxes:      [Box<dyn MP4Box>],
-}
-
-def_box! { TrackHeader, "tkhd",
-    version:    Version,
-    flags:      TrackFlags,
-    cr_time:    Time,
-    mod_time:   Time,
-    track_id:   u32,
-    skip:       4,
-    duration:   u32,
-    skip:       8,
-    layer:      u16,
-    alt_group:  u16,
-    volume:     FixedFloat8_8,
-    skip :      2,
-    matrix:     Matrix,
-    width:      FixedFloat16_16,
-    height:     FixedFloat16_16,
-}
-
-def_box! { Edits, "edts",
-    version:    Version,
-    flags:      u24,
-    entries:    u32,
-    table:      [EditList],
-}
-
-def_box! { MediaBox, "mdia",
-    sub_boxes:      [Box<dyn MP4Box>],
-}
-
-def_box! { SampleTableBox, "stbl",
-    sub_boxes:      [Box<dyn MP4Box>],
-}
-
-def_box! { BaseMediaInformationHeader, "gmhd",
-    sub_boxes:      [Box<dyn MP4Box>],
-}
-
-def_box! { DataInformationBox, "dinf",
-    sub_boxes:      [Box<dyn MP4Box>],
-}
-
-def_box! { DataReference, "dref",
-    version:    Version,
-    flags:      Flags,
-    entries:    u32,
-}
-
-def_box! { MediaInformationBox, "minf",
-    sub_boxes:      [Box<dyn MP4Box>],
-}
-
-def_box! { VideoMediaInformation, "vmhd",
-    version:        Version,
-    flags:          Flags,
-    graphics_mode:  u16,
-    opcolor:        OpColor,
-}
-
-def_box! { SoundMediaHeader, "smhd",
-    version:        Version,
-    flags:          Flags,
-    balance:        u16,
-    skip:           2,
-}
-
-def_box! { NullMediaHeader, "nmhd",
-}
-
-def_box! { UserDataBox, "udta",
-    sub_boxes:      [Box<dyn MP4Box>],
-}
-
-def_box! { TrackSelection, "tsel",
-    version:        Version,
-    flags:          Flags,
-    switch_group:   u32,
-    attribute_list: [FourCC],
-}
-
-def_box! { SampleDescription, "stsd",
-    version:    Version,
-    flags:      Flags,
-    entries:    u32,
-    n1_size:    u32,
-    n1_format:  FourCC,
-    skip:       6,
-    dataref_idx:    u16,
-}
-
-def_box! { MediaHeader, "mdhd",
-    version:    Version,
-    flags:      Flags,
-    cr_time:    Time,
-    mod_time:   Time,
-    time_scale: u32,
-    duration:   u32,
-    language:   IsoLanguageCode,
-    quality:    u16,
-}
-
-def_box! { MovieHeader, "mvhd",
-    version:    Version,
-    flags:      Flags,
-    cr_time:    Time,
-    mod_time:   Time,
-    timescale:  u32,
-    duration:   u32,
-    pref_rate:  u32,
-    pref_vol:   u16,
-    skip:       10,
-    matrix:     Matrix,
-    preview_time:   u32,
-    preview_duration:   u32,
-    poster_time:    u32,
-    selection_time: u32,
-    selection_duration: u32,
-    current_time:   u32,
-    next_track_id: u32,
-}
-
-def_box! { Handler, "hdlr",
-    version:    Version,
-    flags:      Flags,
-    maintype:   FourCC,
-    subtype:    FourCC,
-    skip:       12,
-    name:       ZString,
-}
-
-def_box! { Free, "free",
-}
-
-def_box! { Skip, "skip",
-}
-
-def_box! { Wide, "wide",
-}
-
-def_box! { MetaData, "meta",
-    version:    Version,
-    flags:      Flags,
-    sub_boxes:  [Box<dyn MP4Box>],
-}
-
-def_box! { Name, "name",
-    name:       ZString,
-}
-
-def_box! { AppleItemList, "ilst",
-    list:       [AppleItem],
-}
-
+*/
