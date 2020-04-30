@@ -430,61 +430,6 @@ impl Debug for TrackFlags {
     }
 }
 
-macro_rules! fixed_float {
-    ($name:ident, $type:tt, $frac_bits:expr) => {
-        #[derive(Clone, Copy)]
-        pub struct $name($type);
-        def_from_to_bytes_newtype!($name, $type);
-
-        impl $name {
-            fn get(&self) -> f64 {
-                (self.0 as f64) / ((1 << $frac_bits) as f64)
-            }
-
-            #[allow(dead_code)]
-            pub fn set(&mut self, value: f64) {
-                let v = (value * (( 1 << $frac_bits) as f64)).round();
-                self.0 = if v > (std::$type::MAX as f64) {
-                    std::$type::MAX
-                } else if v < (std::$type::MIN as f64) {
-                    std::$type::MIN
-                } else {
-                    v as $type
-                };
-            }
-        }
-
-        impl Debug for $name {
-            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                write!(f, "{}", self.get())
-            }
-        }
-
-        impl std::fmt::Display for $name {
-            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                write!(f, "{}", self.get())
-            }
-        }
-    }
-}
-
-// Some fixed float types.
-fixed_float!(FixedFloat2_30, u32, 30);
-fixed_float!(FixedFloat16_16, u32, 16);
-fixed_float!(FixedFloat8_8, u16, 8);
-
-def_struct!{ EditListEntry,
-    duration:   u32,
-    media_time: u32,
-    media_rate: FixedFloat16_16,
-}
-
-def_struct!{ OpColor,
-    red:    u16,
-    green:  u16,
-    blue:   u16,
-}
-
 /// Apple item.
 ///
 /// We do our best to decode the text in an item, and that's
@@ -586,5 +531,110 @@ impl IndexU32 {
     pub fn set(&mut self, val: Option<u32>) {
         self.0 = val.unwrap_or(0xffffffff);
     }
+}
+
+/// Composition offset entry.
+#[derive(Debug)]
+pub struct CompositionOffsetEntry {
+    count:  u32,
+    offset: i32,
+}
+
+impl FromBytes for CompositionOffsetEntry {
+
+    // NOTE: This implementation is not _entirely_ correct. If in a
+    // version 0 entry the offset >= 2^31 it breaks horribly.
+    fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<Self> {
+        let count = u32::from_bytes(stream)?;
+        let offset = if stream.version() == 0 {
+            let offset = u32::from_bytes(stream)?;
+            std::cmp::min(offset, 0x7fffffff) as i32
+        } else {
+            i32::from_bytes(stream)?
+        };
+        Ok(CompositionOffsetEntry {
+            count,
+            offset,
+        })
+    }
+
+    fn min_size() -> usize { 8 }
+}
+
+impl ToBytes for CompositionOffsetEntry {
+    fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
+        self.count.to_bytes(stream)?;
+        self.offset.to_bytes(stream)?;
+        if self.offset < 0 {
+            stream.set_version(1);
+        }
+        Ok(())
+    }
+}
+
+macro_rules! fixed_float {
+    ($name:ident, $type:tt, $frac_bits:expr) => {
+        #[derive(Clone, Copy)]
+        pub struct $name($type);
+        def_from_to_bytes_newtype!($name, $type);
+
+        impl $name {
+            fn get(&self) -> f64 {
+                (self.0 as f64) / ((1 << $frac_bits) as f64)
+            }
+
+            #[allow(dead_code)]
+            pub fn set(&mut self, value: f64) {
+                let v = (value * (( 1 << $frac_bits) as f64)).round();
+                self.0 = if v > (std::$type::MAX as f64) {
+                    std::$type::MAX
+                } else if v < (std::$type::MIN as f64) {
+                    std::$type::MIN
+                } else {
+                    v as $type
+                };
+            }
+        }
+
+        impl Debug for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(f, "{}", self.get())
+            }
+        }
+
+        impl std::fmt::Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(f, "{}", self.get())
+            }
+        }
+    }
+}
+
+// Some fixed float types.
+fixed_float!(FixedFloat2_30, u32, 30);
+fixed_float!(FixedFloat16_16, u32, 16);
+fixed_float!(FixedFloat8_8, u16, 8);
+
+def_struct!{ OpColor,
+    red:    u16,
+    green:  u16,
+    blue:   u16,
+}
+
+def_struct!{ EditListEntry,
+    duration:   u32,
+    media_time: u32,
+    media_rate: FixedFloat16_16,
+}
+
+def_struct!{ TimeToSampleEntry,
+    count:  u32,
+    delta:  u32,
+}
+
+def_struct!{ SampleToChunkEntry,
+    first_chunk:                u32,
+    samples_per_chunk:          u32,
+    sample_description_index:   u32,
 }
 

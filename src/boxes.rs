@@ -6,13 +6,13 @@ use crate::types::*;
 use crate::mp4box::*;
 
 def_boxes! {
-    FileType, "ftyp", 8 => {
+    FileTypeBox, "ftyp", 8 => {
         major_brand:        FourCC,
         minor_version:      u32,
         compatible_brands:  [FourCC],
     };
 
-    InitialObjectDescription, "iods", 8 => {
+    InitialObjectDescriptionBox, "iods", 8 => {
         version:        Version,
         flags:          Flags,
         audio_profile:  u8,
@@ -31,7 +31,7 @@ def_boxes! {
         sub_boxes:      [MP4Box],
     };
 
-    TrackHeader, "tkhd", 8 => {
+    TrackHeaderBox, "tkhd", 8 => {
         version:    Version,
         flags:      TrackFlags,
         cr_time:    Time,
@@ -49,11 +49,11 @@ def_boxes! {
         height:     FixedFloat16_16,
     };
 
-    Edits, "edts", 8 => {
-        sub_boxes:  [IsoBox<EditList>],
+    EditBox, "edts", 8 => {
+        sub_boxes:  [IsoBox<EditListBox>],
     };
 
-    EditList, "elst", 8 => {
+    EditListBox, "elst", 8 => {
         version:                Version,
         flags:                  Flags,
         entry_count:            u32,
@@ -68,7 +68,7 @@ def_boxes! {
         sub_boxes:      [MP4Box],
     };
 
-    BaseMediaInformationHeader, "gmhd", 8 => {
+    BaseMediaInformationHeaderBox, "gmhd", 8 => {
         sub_boxes:      [MP4Box],
     };
 
@@ -76,20 +76,20 @@ def_boxes! {
         sub_boxes:      [MP4Box],
     };
 
-    DataReference, "dref", 8 => {
+    DataReferenceBox, "dref", 8 => {
         version:        Version,
         flags:          Flags,
         entry_count:    u32,
         entries:        [MP4Box, entry_count],
     };
 
-    DataEntryUrl, "url ", 8 => {
+    DataEntryUrlBox, "url ", 8 => {
         version:        Version,
         flags:          Flags,
         location:       ZString,
     };
 
-    DataEntryUrn, "urn ", 8 => {
+    DataEntryUrnBox, "urn ", 8 => {
         version:        Version,
         flags:          Flags,
         name:           ZString,
@@ -100,35 +100,35 @@ def_boxes! {
         sub_boxes:      [MP4Box],
     };
 
-    VideoMediaInformation, "vmhd", 8 => {
+    VideoMediaInformationBox, "vmhd", 8 => {
         version:        Version,
         flags:          Flags,
         graphics_mode:  u16,
         opcolor:        OpColor,
     };
 
-    SoundMediaHeader, "smhd", 8 => {
+    SoundMediaHeaderBox, "smhd", 8 => {
         version:        Version,
         flags:          Flags,
         balance:        u16,
         skip:           2,
     };
 
-    NullMediaHeader, "nmhd", 8 => {
+    NullMediaHeaderBox, "nmhd", 8 => {
     };
 
     UserDataBox, "udta", 8 => {
         sub_boxes:      [MP4Box],
     };
 
-    TrackSelection, "tsel", 8 => {
+    TrackSelectionBox, "tsel", 8 => {
         version:        Version,
         flags:          Flags,
         switch_group:   u32,
         attribute_list: [FourCC],
     };
 
-    SampleDescription, "stsd", 8 => {
+    SampleDescriptionBox, "stsd", 8 => {
         version:    Version,
         flags:      Flags,
         entries:    u32,
@@ -138,7 +138,7 @@ def_boxes! {
         dataref_idx:    u16,
     };
 
-    MediaHeader, "mdhd", 8 => {
+    MediaHeaderBox, "mdhd", 8 => {
         version:    Version,
         flags:      Flags,
         cr_time:    Time,
@@ -149,7 +149,7 @@ def_boxes! {
         quality:    u16,
     };
 
-    MovieHeader, "mvhd", 8 => {
+    MovieHeaderBox, "mvhd", 8 => {
         version:    Version,
         flags:      Flags,
         cr_time:    Time,
@@ -169,7 +169,7 @@ def_boxes! {
         next_track_id: u32,
     };
 
-    Handler, "hdlr", 8 => {
+    HandlerBox, "hdlr", 8 => {
         version:    Version,
         flags:      Flags,
         skip:       4,
@@ -178,13 +178,13 @@ def_boxes! {
         name:       ZString,
     };
 
-    MetaData, "meta", 8 => {
+    MetaBox, "meta", 8 => {
         version:    Version,
         flags:      Flags,
         sub_boxes:  [MP4Box],
     };
 
-    Name, "name", 8 => {
+    NameBox, "name", 8 => {
         name:       ZString,
     };
 
@@ -192,9 +192,41 @@ def_boxes! {
         list:       [AppleItem],
     };
 
+    TimeToSampleBox, "stts", 8 => {
+        version:        Version,
+        flags:          Flags,
+        entry_count:    u32,
+        entries:        [TimeToSampleEntry, entry_count],
+    };
+
+    SyncSampleBox, "stss", 8 => {
+        version:        Version,
+        flags:          Flags,
+        entry_count:    u32,
+        entries:        [u32, entry_count],
+    };
+
+    CompositionOffsetBox, "ctts", 8 => {
+        version:        Version,
+        flags:          Flags,
+        entry_count:    u32,
+        entries:        [CompositionOffsetEntry, entry_count],
+    };
+
+    SampleToChunkBox, "stsc", 8 => {
+        version:        Version,
+        flags:          Flags,
+        entry_count:    u32,
+        entries:        [SampleToChunkEntry, entry_count],
+    };
+
     // Below are boxes that are defined manually in boxes/*.rs
 
     Free, "free", 8 => free;
     Skip, "skip", 8;
     Wide, "wide", 8;
+    Mdat, "mdat", 8;
+
+    SampleSizeBox, "stsz", 8 => stsz;
+    CompactSampleSizeBox, "stz2", 8 => stz2;
 }

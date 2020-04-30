@@ -28,4 +28,5 @@ macro_rules! free_box {
 free_box!(Free);
 free_box!(Skip);
 free_box!(Wide);
+free_box!(Mdat);
 

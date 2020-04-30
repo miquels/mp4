@@ -159,6 +159,7 @@ macro_rules! def_from_to_bytes {
 // Define FromBytes/ToBytes for u* types.
 def_from_to_bytes!(u8);
 def_from_to_bytes!(u16);
+def_from_to_bytes!(i32);
 def_from_to_bytes!(u32);
 def_from_to_bytes!(u64);
 def_from_to_bytes!(u128);
@@ -181,6 +182,7 @@ macro_rules! def_struct {
     (@min_size u8) => { 1 };
     (@min_size u16) => { 2 };
     (@min_size u32) => { 4 };
+    (@min_size i32) => { 4 };
     (@min_size u64) => { 8 };
     (@min_size u128) => { 16 };
     (@min_size [ $_type:ty $(, $cnt:ident)? ]) => { 0 };
