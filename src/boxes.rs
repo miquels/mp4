@@ -220,6 +220,20 @@ def_boxes! {
         entries:        [SampleToChunkEntry, entry_count],
     };
 
+    ChunkOffsetBox, "stco", 8 => {
+        version:        Version,
+        flags:          Flags,
+        entry_count:    u32,
+        entries:        [u32, entry_count],
+    };
+
+    ChunkLargeOffsetBox, "co64", 8 => {
+        version:        Version,
+        flags:          Flags,
+        entry_count:    u32,
+        entries:        [u64, entry_count],
+    };
+
     // Below are boxes that are defined manually in boxes/*.rs
 
     Free, "free", 8 => free;
@@ -229,4 +243,5 @@ def_boxes! {
 
     SampleSizeBox, "stsz", 8 => stsz;
     CompactSampleSizeBox, "stz2", 8 => stz2;
+    SampleToGroupBox, "sbgp", 8 => sbgp;
 }

@@ -266,9 +266,7 @@ impl std::ops::Deref for ZString {
 
 impl FromBytes for ZString {
     fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> {
-        println!("XXX ZString start");
         let data = bytes.read(0)?;
-        println!("XXX ZString: read {} bytes", data.len());
         let mut s = String::new();
         let mut idx = 0;
         let maxlen = data.len();
@@ -449,7 +447,7 @@ impl FromBytes for AppleItem {
         if size < 8 {
             size = 8;
         }
-        println!("XXX 1 size {} fourcc {}", size, fourcc);
+        debug!("XXX 1 size {} fourcc {}", size, fourcc);
         let mut res = AppleItem{
             fourcc,
             data: String::new(),
@@ -636,5 +634,10 @@ def_struct!{ SampleToChunkEntry,
     first_chunk:                u32,
     samples_per_chunk:          u32,
     sample_description_index:   u32,
+}
+
+def_struct!{ SampleToGroupEntry,
+    sample_count:               u32,
+    group_description_index:    u32,
 }
 

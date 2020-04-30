@@ -111,7 +111,7 @@ impl<'a> BoxReader<'a> {
         };
 
         let maxsize = std::cmp::min(stream.size(), stream.pos() + size);
-        println!("XXX here {} size {}, size1 {} maxsize {} left {}", fourcc, size, size1, maxsize, stream.left());
+        debug!("XXX here {} size {}, size1 {} maxsize {} left {}", fourcc, size, size1, maxsize, stream.left());
         Ok(BoxReader {
             prev_version: stream.version(),
             maxsize,
@@ -124,7 +124,7 @@ impl<'a> BoxReader<'a> {
 impl <'a> Drop for BoxReader<'a> {
     fn drop(&mut self) {
         if self.pos() < self.maxsize {
-            println!("XXX BoxReader {} drop: skipping {}", self.fourcc, self.maxsize - self.pos());
+            debug!("XXX BoxReader {} drop: skipping {}", self.fourcc, self.maxsize - self.pos());
             let _ = self.skip(self.maxsize - self.pos());
         }
         if self.inner.version() != self.prev_version {
@@ -137,7 +137,7 @@ impl <'a> Drop for BoxReader<'a> {
 impl<'a> ReadBytes for BoxReader<'a> {
     fn read(&mut self, amount: u64) -> io::Result<&[u8]> {
         if amount == 0 {
-            println!("XXX self reader for {} amount 0 left {}", self.fourcc, self.left());
+            debug!("XXX self reader for {} amount 0 left {}", self.fourcc, self.left());
         }
         let amount = if amount == 0 {
             self.left()
@@ -289,7 +289,7 @@ impl FromBytes for GenericBox {
             data = vec![];
         } else if size < 65536 {
             if size == 0 || size == 3353696 {
-                println!("GenericBox::from_bytes: size {}", size);
+                debug!("GenericBox::from_bytes: size {}", size);
             }
             skip = false;
             data = stream.read(size)?.to_vec();
@@ -402,7 +402,7 @@ macro_rules! def_boxes {
 
                 // Read the header.
                 let mut reader = BoxReader::new(stream)?;
-                println!("XXX got reader for {:?} left {}", reader.fourcc, reader.left());
+                debug!("XXX got reader for {:?} left {}", reader.fourcc, reader.left());
 
                 // Read the body.
                 let b = reader.fourcc.to_be_bytes();
@@ -514,7 +514,7 @@ macro_rules! def_box {
             #[allow(unused_variables)]
             fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<$name> {
 
-                println!("XXX frombyting {}", stringify!($name));
+                debug!("XXX frombyting {}", stringify!($name));
 
                 // Deserialize.
                 let r: io::Result<$name> = {
@@ -523,7 +523,7 @@ macro_rules! def_box {
                     )*)
                 };
 
-                println!("XXX -- done frombyting {}", stringify!($name));
+                debug!("XXX -- done frombyting {}", stringify!($name));
 
                 r
             }

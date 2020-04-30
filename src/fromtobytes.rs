@@ -244,12 +244,12 @@ macro_rules! def_struct {
                 let mut count = $cnt;
                 // XXX while $stream.left() >= <$type>::min_size() as u64 && count > 0 {
                 while $stream.left() > 0 && count > 0 {
-                    println!("XXX left: {} count: {} going to read {}", $stream.left(), count, stringify!($type));
+                    debug!("XXX left: {} count: {} going to read {}", $stream.left(), count, stringify!($type));
                     let v = <$type>::from_bytes($stream)?;
                     $field.push(v);
                     count -= 1;
                 }
-                println!("XXX left2: {}", $stream.left());
+                debug!("XXX left2: {}", $stream.left());
             ] ] [ $($fields)* $field ]);
     };
     // Set a field (array).
@@ -260,11 +260,11 @@ macro_rules! def_struct {
                 let mut $field = Vec::new();
                 // XXX while $stream.left() >= <$type>::min_size() as u64 {
                 while $stream.left() > 0 {
-                    println!("XXX left: {} going to read {}", $stream.left(), stringify!($type));
+                    debug!("XXX left: {} going to read {}", $stream.left(), stringify!($type));
                     let v = <$type>::from_bytes($stream)?;
                     $field.push(v);
                 }
-                println!("XXX left2: {}", $stream.left());
+                debug!("XXX left2: {}", $stream.left());
             ] ] [ $($fields)* $field ]);
     };
     // Set a field.

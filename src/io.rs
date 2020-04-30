@@ -1,12 +1,11 @@
 use std::convert::TryInto;
-use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
 use crate::fromtobytes::{BoxBytes, ReadBytes, WriteBytes};
 use crate::types::FourCC;
 
-pub struct Mp4File {
-    file: File,
+pub struct Mp4File<F> {
+    file: Box<F>,
     pos: u64,
     size: u64,
     buf: Vec<u8>,
@@ -14,15 +13,19 @@ pub struct Mp4File {
     fourcc: FourCC,
 }
 
-impl Mp4File {
-    pub fn new(file: File) -> Mp4File {
+impl<F> Mp4File<F> {
+    pub fn new(file: F) -> Mp4File<F>
+    where
+        F: Seek,
+    {
         let mut file = file;
         let pos = file.seek(SeekFrom::Current(0)).unwrap();
-        let meta = file.metadata().unwrap();
+        let size = file.seek(SeekFrom::End(0)).unwrap();
+        file.seek(SeekFrom::Start(pos)).unwrap();
         Mp4File {
-            file,
+            file: Box::new(file),
             pos,
-            size: meta.len(),
+            size,
             buf: Vec::new(),
             version: 0,
             fourcc: FourCC(0),
@@ -30,7 +33,7 @@ impl Mp4File {
     }
 }
 
-impl ReadBytes for Mp4File {
+impl<F> ReadBytes for Mp4File<F> where F: Read + Seek {
 
     fn read(&mut self, amount: u64) -> io::Result<&[u8]> {
         let amount = if amount == 0 {
@@ -38,7 +41,7 @@ impl ReadBytes for Mp4File {
         } else {
             amount
         } as usize;
-        println!("XXX - read {} at pos {}", amount, self.pos);
+        debug!("XXX - read {} at pos {}", amount, self.pos);
         if amount == 0 {
             return Ok(b"");
         }
@@ -68,7 +71,7 @@ impl ReadBytes for Mp4File {
     }
 }
 
-impl WriteBytes for Mp4File {
+impl<F> WriteBytes for Mp4File<F> where F: Write + Seek {
     fn write(&mut self, data: &[u8]) -> io::Result<()> {
         self.file.write_all(data)?;
         self.pos += data.len() as u64;
@@ -80,7 +83,8 @@ impl WriteBytes for Mp4File {
         Ok(())
     }
 }
-impl BoxBytes for Mp4File {
+
+impl<F> BoxBytes for Mp4File<F> where F: Seek {
     fn pos(&self) -> u64 {
         self.pos
     }
