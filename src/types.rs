@@ -266,7 +266,9 @@ impl std::ops::Deref for ZString {
 
 impl FromBytes for ZString {
     fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> {
+        println!("XXX ZString start");
         let data = bytes.read(0)?;
+        println!("XXX ZString: read {} bytes", data.len());
         let mut s = String::new();
         let mut idx = 0;
         let maxlen = data.len();
