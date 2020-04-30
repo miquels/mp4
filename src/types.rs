@@ -570,6 +570,54 @@ impl ToBytes for CompositionOffsetEntry {
     }
 }
 
+/// 8.8.3.1 Sample Flags (ISO/IEC 14496-12:2015(E))
+///
+/// For the first four fields, see 8.6.4.3 (Semantics).
+/// The sample_is_non_sync_sample field  provides the same information as the sync sample table [8.6.2].
+#[derive(Debug)]
+pub struct SampleFlags {
+    pub is_leading: u8,
+    pub sample_depends_on: u8,
+    pub sample_is_depended_on: u8,
+    pub sample_has_redundancy: u8,
+    pub sample_padding_value: u8,
+    pub sample_is_non_sync_sample: bool,
+    pub sample_degradation_priority: u16,
+}
+
+impl FromBytes for SampleFlags {
+
+    fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<Self> {
+        let flags = u16::from_bytes(stream)?;
+        let sample_degradation_priority = u16::from_bytes(stream)?;
+        Ok(SampleFlags {
+            is_leading: ((flags & 0b0000110000000000) >> 10) as u8,
+            sample_depends_on: ((flags & 0b0000001100000000) >> 8) as u8,
+            sample_is_depended_on: ((flags & 0b0000000011000000) >> 6) as u8,
+            sample_has_redundancy: ((flags & 0b0000000000110000) >> 4) as u8,
+            sample_padding_value: ((flags & 0b0000000000001110) >> 1) as u8,
+            sample_is_non_sync_sample: (flags & 0b0000000000000001) > 0,
+            sample_degradation_priority,
+        })
+    }
+
+    fn min_size() -> usize { 4 }
+}
+
+impl ToBytes for SampleFlags {
+    fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
+        let flags = (((self.is_leading & 0b11) as u16) << 10) |
+            (((self.sample_depends_on & 0b11) as u16) << 8) |
+            (((self.sample_is_depended_on & 0b11) as u16) << 6) |
+            (((self.sample_has_redundancy & 0b11) as u16) << 4) |
+            (((self.sample_padding_value & 0b111) as u16) << 1) |
+            self.sample_is_non_sync_sample as u16;
+        flags.to_bytes(stream)?;
+        self.sample_degradation_priority.to_bytes(stream)?;
+        Ok(())
+    }
+}
+
 macro_rules! fixed_float {
     ($name:ident, $type:tt, $frac_bits:expr) => {
         #[derive(Clone, Copy)]

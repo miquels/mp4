@@ -23,10 +23,6 @@ def_boxes! {
         sub_boxes:      [MP4Box],
     };
 
-    MovieFragmentBox, "moof", 8 => {
-        sub_boxes:      [MP4Box],
-    };
-
     TrackBox, "trak", 8 => {
         sub_boxes:      [MP4Box],
     };
@@ -234,6 +230,45 @@ def_boxes! {
         entries:        [u64, entry_count],
     };
 
+    SubtitleMediaHeaderBox, "sthd", 8 => {
+        version:        Version,
+        flags:          Flags,
+    };
+
+    MovieExtendsBox, "mvex", 8 => {
+        sub_boxes:      [MP4Box],
+    };
+
+    TrackExtendsBox, "trex", 8 => {
+        version:        Version,
+        flags:          Flags,
+        track_id:       u32,
+        default_sample_description_index:   u32,
+        default_sample_duration:    u32,
+        default_sample_size:        u32,
+        default_sample_flags:       SampleFlags,
+    };
+
+    SegmentTypeBox, "styp", 8 => {
+        major_brand:        FourCC,
+        minor_version:      u32,
+        compatible_brands:  [FourCC],
+    };
+
+    MovieFragmentBox, "moof", 8 => {
+        sub_boxes:      [MP4Box],
+    };
+
+    MovieFragmentHeaderBox, "mfhd", 8 => {
+        version:        Version,
+        flags:          Flags,
+        sequence_number:    u32,
+    };
+
+    TrackFragmentBox, "traf", 8 => {
+        sub_boxes:      [MP4Box],
+    };
+
     // Below are boxes that are defined manually in boxes/*.rs
 
     Free, "free", 8 => free;
@@ -241,7 +276,16 @@ def_boxes! {
     Wide, "wide", 8;
     Mdat, "mdat", 8;
 
+    MovieExtendsHeaderBox, "mehd", 8 => mehd;
+
     SampleSizeBox, "stsz", 8 => stsz;
     CompactSampleSizeBox, "stz2", 8 => stz2;
     SampleToGroupBox, "sbgp", 8 => sbgp;
+
+    SegmentIndexBox, "sidx", 8 => sidx;
+
+    TrackFragmentHeaderBox, "tfhd", 8 => tfhd;
+    TrackFragmentBaseMediaDecodeTimeBox, "tfdt", 8 => tfdt;
+    TrackRunBox, "trun", 8 => trun;
+
 }
