@@ -311,15 +311,17 @@ impl Debug for ZString {
 }
 
 /// Matrix.
-pub struct Matrix([[u32; 3]; 3]);
+pub struct Matrix([(FixedFloat16_16, FixedFloat16_16, FixedFloat2_30); 3]);
 
 impl FromBytes for Matrix {
     fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> {
-        let mut m = [[0u32; 3]; 3];
+        let mut m = [(FixedFloat16_16(0), FixedFloat16_16(0), FixedFloat2_30(0)); 3];
         for x in 0 ..3 {
-            for y in 0..3 {
-                m[x][y] = u32::from_bytes(bytes)?;
-            }
+            m[x] = (
+                FixedFloat16_16::from_bytes(bytes)?,
+                FixedFloat16_16::from_bytes(bytes)?,
+                FixedFloat2_30::from_bytes(bytes)?
+            );
         }
         Ok(Matrix(m))
     }
@@ -328,10 +330,9 @@ impl FromBytes for Matrix {
 impl ToBytes for Matrix {
     fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) -> io::Result<()> {
         for x in 0 ..3 {
-            for y in 0..3 {
-                let n = (self.0)[x][y].to_be_bytes();
-                bytes.write(&n[..])?;
-            }
+            (self.0)[x].0.to_bytes(bytes)?;
+            (self.0)[x].1.to_bytes(bytes)?;
+            (self.0)[x].2.to_bytes(bytes)?;
         }
         Ok(())
     }
@@ -339,10 +340,10 @@ impl ToBytes for Matrix {
 
 impl Debug for Matrix {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "Matrix([{:x}][{:x}][{:x}] [{:x}][{:x}][{:x}] [{:x}][{:x}][{:x}])",
-               (self.0)[0][0], (self.0)[0][1], (self.0)[0][2],
-               (self.0)[1][0], (self.0)[1][1], (self.0)[1][2],
-               (self.0)[2][0], (self.0)[2][1], (self.0)[2][2],
+        write!(f, "Matrix([{}][{}][{}] [{}][{}][{}] [{}][{}][{}])",
+               (self.0)[0].0, (self.0)[0].1, (self.0)[0].2,
+               (self.0)[1].0, (self.0)[1].1, (self.0)[1].2,
+               (self.0)[2].0, (self.0)[2].1, (self.0)[2].2,
         )
     }
 }
@@ -390,7 +391,7 @@ macro_rules! impl_flags {
 impl_flags!(Flags);
 impl Debug for Flags {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "TrackFlags({:08x})", self.0)
+        write!(f, "Flags(0x{:x})", self.0)
     }
 }
 
@@ -466,13 +467,14 @@ macro_rules! fixed_float {
 }
 
 // Some fixed float types.
+fixed_float!(FixedFloat2_30, u32, 30);
 fixed_float!(FixedFloat16_16, u32, 16);
 fixed_float!(FixedFloat8_8, u16, 8);
 
-def_struct!{ EditList,
+def_struct!{ EditListEntry,
     duration:   u32,
     media_time: u32,
-    media_rate: u32,
+    media_rate: FixedFloat16_16,
 }
 
 def_struct!{ OpColor,

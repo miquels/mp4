@@ -64,10 +64,6 @@ pub trait BoxBytes {
     fn set_fourcc(&mut self, _fourcc: FourCC) {
         unimplemented!()
     }
-    /// Get a limited reader.
-    fn limit(&mut self, _limit: u64) -> Box<dyn ReadBytes + '_> {
-        unimplemented!()
-    }
 }
 
 /// Implementation of ReadBytes on a byte slice.
@@ -187,7 +183,7 @@ macro_rules! def_struct {
     (@min_size u32) => { 4 };
     (@min_size u64) => { 8 };
     (@min_size u128) => { 16 };
-    (@min_size [ $_type:ty ]) => { 0 };
+    (@min_size [ $_type:ty $(, $cnt:ident)? ]) => { 0 };
     (@min_size $type:ident) => {
         $type::min_size()
     };
@@ -206,7 +202,7 @@ macro_rules! def_struct {
         def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* $field: $type, ]);
     };
     // Add normal field (array).
-    (@def_struct_ $name:ident, [ $field:ident: [ $type:ty ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
+    (@def_struct_ $name:ident, [ $field:ident: [ $type:ty $(, $cnt:ident)? ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
         def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* $field: Vec<$type>, ]);
         //def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* $field: Vec<u32>, ]);
     };
@@ -237,14 +233,32 @@ macro_rules! def_struct {
         def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
             [ $($set)* [ let $field = $in::from_bytes($stream)? as $out; ] ] [ $($fields)* $field ]);
     };
+    // Set a field (array => size_field).
+    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: [$type:ty, $cnt:ident], $($tt:tt)*]
+        -> [ $($set:tt)* ] [ $($fields:tt)* ]) => {
+        def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
+            [ $($set)* [
+                let mut $field = Vec::new();
+                let mut count = $cnt;
+                // XXX while $stream.left() >= <$type>::min_size() as u64 && count > 0 {
+                while $stream.left() > 0 && count > 0 {
+                    println!("XXX left: {} count: {} going to read {}", $stream.left(), count, stringify!($type));
+                    let v = <$type>::from_bytes($stream)?;
+                    $field.push(v);
+                    count -= 1;
+                }
+                println!("XXX left2: {}", $stream.left());
+            ] ] [ $($fields)* $field ]);
+    };
     // Set a field (array).
     (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: [$type:ty], $($tt:tt)*]
         -> [ $($set:tt)* ] [ $($fields:tt)* ]) => {
         def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
             [ $($set)* [
                 let mut $field = Vec::new();
-                while $stream.left() >= <$type>::min_size() as u64 {
-                    println!("XXX left: {}", $stream.left());
+                // XXX while $stream.left() >= <$type>::min_size() as u64 {
+                while $stream.left() > 0 {
+                    println!("XXX left: {} going to read {}", $stream.left(), stringify!($type));
                     let v = <$type>::from_bytes($stream)?;
                     $field.push(v);
                 }
@@ -286,7 +300,12 @@ macro_rules! def_struct {
             [ $($set)* [ ($struct.$field as $type).to_bytes($stream)?; ] ]);
     };
     // Write a field value (array)
-    (@to_bytes_ $struct:expr, $stream:ident, [ $field:tt: [$type:tt], $($tt:tt)*] -> [ $($set:tt)* ]) => {
+    //(@to_bytes_ $struct:expr, $stream:ident, [ $field:tt: [$type:ty], $($tt:tt)*] -> [ $($set:tt)* ]) => {
+    //    def_struct!(@to_bytes_ $struct, $stream, [ $($tt)* ] ->
+    //        [ $($set)* [ for v in &$struct.$field { v.to_bytes($stream)?; } ] ]);
+    //};
+    // Write a field value (array => size_field)
+    (@to_bytes_ $struct:expr, $stream:ident, [ $field:tt: [$type:ty $(, $cnt:ident)? ], $($tt:tt)*] -> [ $($set:tt)* ]) => {
         def_struct!(@to_bytes_ $struct, $stream, [ $($tt)* ] ->
             [ $($set)* [ for v in &$struct.$field { v.to_bytes($stream)?; } ] ]);
     };

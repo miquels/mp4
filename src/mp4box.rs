@@ -3,7 +3,6 @@ use std::fmt::Debug;
 use std::io;
 
 use crate::fromtobytes::{FromBytes, ToBytes, ReadBytes, WriteBytes, BoxBytes};
-use crate::io::*;
 use crate::types::*;
 
 /// Gets implemented for every box.
@@ -77,6 +76,12 @@ impl<C> BoxInfo for IsoBox<C> where C: BoxInfo {
     }
 }
 
+impl<C> Debug for IsoBox<C> where C: Debug {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        Debug::fmt(&self.content, f)
+    }
+}
+
 //
 //
 // Helpers to read and write the box header.
@@ -84,88 +89,86 @@ impl<C> BoxInfo for IsoBox<C> where C: BoxInfo {
 //
 
 /// Reads the box header.
-pub struct BoxReader<R: ReadBytes> {
-    unget_buf: [u8; 16],
-    unget_wrpos: usize,
-    unget_rdpos: usize,
-    inner: ReadBytesLimit<R>,
+pub struct BoxReader<'a> {
+    maxsize: u64,
+    // We box it, since a BoxReader might contain a BoxReader.
+    inner: Box<dyn ReadBytes + 'a>,
     pub fourcc: FourCC,
 }
 
-impl<R> BoxReader<R> where R: ReadBytes {
+impl<'a> BoxReader<'a> {
     /// Read the box header, then return a size-limited reader.
-    pub fn new(mut stream: &mut R) -> io::Result<BoxReader<&mut R>> {
-        let size1 = u32::from_bytes(&mut stream)? as u64;
+    pub fn new(mut stream: &'a mut impl ReadBytes) -> io::Result<BoxReader<'a>> {
+
+        let size1 = u32::from_bytes(&mut stream)?;
         let fourcc = FourCC::from_bytes(&mut stream)?;
         let size = match size1 {
             0 => stream.size() - stream.pos(),
             1 => u64::from_bytes(&mut stream)?.saturating_sub(16),
-            x => x.saturating_sub(8),
+            x => x.saturating_sub(8) as u64,
         };
-        println!("XXX here size {}, size1 {}", size, size1);
+
+        let maxsize = std::cmp::min(stream.size(), stream.pos() + size);
+        println!("XXX here {} size {}, size1 {} maxsize {} left {}", fourcc, size, size1, maxsize, stream.left());
         Ok(BoxReader {
-            unget_buf: [0; 16],
-            unget_rdpos: 0,
-            unget_wrpos: 0,
+            maxsize,
+            inner: Box::new(stream),
             fourcc,
-            inner: ReadBytesLimit::new(stream, size),
         })
     }
+}
 
-    /// "unget" a number of bytes.
-    pub fn unget(&mut self, data: &[u8]) {
-        let pos = self.unget_wrpos;
-        let left = 16 - pos;
-        if data.len() > left {
-            panic!("BoxReader::unget({}): buffer overflow({} > {})", data.len(), data.len(), left);
+impl <'a> Drop for BoxReader<'a> {
+    fn drop(&mut self) {
+        if self.pos() < self.maxsize {
+            println!("XXX BoxReader {} drop: skipping {}", self.fourcc, self.maxsize - self.pos());
+            let _ = self.skip(self.maxsize - self.pos());
         }
-        self.unget_buf[pos .. pos + data.len()].copy_from_slice(data);
-        self.unget_wrpos += data.len();
     }
 }
 
 // Delegate ReadBytes to the inner reader.
-impl<R> ReadBytes for BoxReader<R> where R: ReadBytes {
+impl<'a> ReadBytes for BoxReader<'a> {
     fn read(&mut self, amount: u64) -> io::Result<&[u8]> {
-        if self.unget_rdpos < self.unget_wrpos {
-            let bufsz = self.unget_wrpos - self.unget_rdpos;
-            let amount = amount as usize;
-            if amount > bufsz {
-                panic!("BoxReader::read({}): unget buffer underflow ({} < {}", amount, bufsz, amount);
-            }
-            let s = &self.unget_buf[self.unget_rdpos .. self.unget_rdpos + amount];
-            self.unget_rdpos += amount;
-            if self.unget_rdpos == self.unget_wrpos {
-                self.unget_rdpos = 0;
-                self.unget_wrpos = 0;
-            }
-            return Ok(s);
+        let amount = if amount == 0 {
+            self.left()
+        } else {
+            amount
+        };
+        if self.inner.pos() + amount > self.maxsize {
+            return Err(io::ErrorKind::UnexpectedEof.into());
         }
         self.inner.read(amount)
     }
     fn skip(&mut self, amount: u64) -> io::Result<()> {
-        if self.unget_rdpos < self.unget_wrpos {
-            self.read(amount)?;
-            return Ok(());
+        if self.inner.pos() + amount > self.maxsize {
+            return Err(io::ErrorKind::UnexpectedEof.into());
         }
         self.inner.skip(amount)
     }
     fn left(&self) -> u64 {
-        let bufsz = self.unget_wrpos - self.unget_rdpos;
-        self.inner.left() + bufsz as u64
+        let pos = self.inner.pos();
+        if pos > self.maxsize {
+            0
+        } else {
+            self.maxsize - pos
+        }
     }
 }
 
 // Delegate BoxBytes to the inner reader.
-impl<R> BoxBytes for BoxReader<R> where R: ReadBytes {
+impl<'a> BoxBytes for BoxReader<'a> {
     fn pos(&self) -> u64 {
         self.inner.pos()
     }
     fn seek(&mut self, pos: u64) -> io::Result<()> {
+        if pos > self.maxsize {
+            return Err(io::ErrorKind::UnexpectedEof.into());
+        }
         self.inner.seek(pos)
     }
     fn size(&self) -> u64 {
-        self.inner.size()
+        self.maxsize
     }
     fn version(&self) -> u8 {
         self.inner.version()
@@ -178,9 +181,6 @@ impl<R> BoxBytes for BoxReader<R> where R: ReadBytes {
     }
     fn set_fourcc(&mut self, fourcc: FourCC) {
         self.fourcc = fourcc;
-    }
-    fn limit(&mut self, limit: u64) -> Box<dyn ReadBytes + '_> {
-        self.inner.limit(limit)
     }
 }
 
@@ -272,7 +272,14 @@ impl FromBytes for GenericBox {
         let size = stream.left();
         let data;
         let skip;
+        //if size == 0 {
+        //    skip = false;
+        //    data = vec![];
+        //} else
         if size < 65536 {
+            if size == 0 || size == 3353696 {
+                println!("GenericBox::from_bytes: size {}", size);
+            }
             skip = false;
             data = stream.read(size)?.to_vec();
         } else {
@@ -539,8 +546,7 @@ def_boxes! {
         audio_profile:  u8,
         video_profile:  u8,
     };
-}
-/*
+
     MovieBox, "moov", 8 => {
         sub_boxes:      [MP4Box],
     };
@@ -572,10 +578,14 @@ def_boxes! {
     };
 
     Edits, "edts", 8 => {
-        version:    Version,
-        flags:      Flags,
-        entries:    u32,
-        table:      [EditList],
+        sub_boxes:  [IsoBox<EditList>],
+    };
+
+    EditList, "elst", 8 => {
+        version:                Version,
+        flags:                  Flags,
+        entry_count:            u32,
+        entries:                [EditListEntry, entry_count],
     };
 
     MediaBox, "mdia", 8 => {
@@ -595,9 +605,25 @@ def_boxes! {
     };
 
     DataReference, "dref", 8 => {
-        version:    Version,
-        flags:      Flags,
-        entries:    u32,
+        version:        Version,
+        flags:          Flags,
+        entry_count:    u32,
+        entries:        [MP4Box, entry_count],
+    };
+
+    /*
+    DataEntryUrl, "url ", 8 => {
+        version:        Version,
+        flags:          Flags,
+        location:       ZString,
+    };
+    */
+
+    DataEntryUrn, "urn ", 8 => {
+        version:        Version,
+        flags:          Flags,
+        name:           ZString,
+        location:       ZString,
     };
 
     MediaInformationBox, "minf", 8 => {
@@ -676,8 +702,8 @@ def_boxes! {
     Handler, "hdlr", 8 => {
         version:    Version,
         flags:      Flags,
-        maintype:   FourCC,
-        subtype:    FourCC,
+        skip:       4,
+        handler_type:   FourCC,
         skip:       12,
         name:       ZString,
     };
@@ -703,6 +729,5 @@ def_boxes! {
 
     AppleItemList, "ilst", 8 => {
         list:       [AppleItem],
-    }
+    };
 }
-*/

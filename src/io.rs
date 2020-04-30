@@ -33,12 +33,13 @@ impl Mp4File {
 impl ReadBytes for Mp4File {
 
     fn read(&mut self, amount: u64) -> io::Result<&[u8]> {
+        let amount = if amount == 0 {
+            self.left()
+        } else {
+            amount
+        } as usize;
         println!("XXX - read {} at pos {}", amount, self.pos);
-        let amount = amount as usize;
-        if amount == 0 {
-            return Ok(b"");
-        }
-        if amount > 4096 {
+        if amount > 65536 {
             return Err(io::Error::new(io::ErrorKind::Other, format!("MP4File::read({}): too large", amount)));
         }
         if self.buf.len() < amount {
@@ -101,9 +102,6 @@ impl BoxBytes for Mp4File {
     fn set_fourcc(&mut self, fourcc: FourCC) {
         self.fourcc = fourcc;
     }
-    fn limit(&mut self, limit: u64) -> Box<dyn ReadBytes + '_> {
-        Box::new(ReadBytesLimit::new(self, limit))
-    }
 }
 
 pub struct ReadBytesLimit<R: ReadBytes> {
@@ -115,7 +113,8 @@ pub struct ReadBytesLimit<R: ReadBytes> {
 impl<R> ReadBytesLimit<R> where R: ReadBytes {
     pub fn new(file: R, limit: u64) -> ReadBytesLimit<R> {
         let prev_version = file.version();
-        let maxsize = file.pos() + limit;
+        let maxsize = std::cmp::min(file.size(), file.pos() + limit);
+        println!("XXX new ReadBytesLimit limit {} maxsize {}", limit, maxsize);
         ReadBytesLimit { inner: file, maxsize, prev_version }
     }
 }
@@ -131,9 +130,11 @@ impl<R> Drop for ReadBytesLimit<R> where R: ReadBytes {
 impl<R> ReadBytes for ReadBytesLimit<R> where R: ReadBytes {
 
     fn read(&mut self, amount: u64) -> io::Result<&[u8]> {
-        if amount == 0 {
-            return Ok(b"");
-        }
+        let amount = if amount == 0 {
+            self.left()
+        } else {
+            amount
+        };
         if self.inner.pos() + amount > self.maxsize {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
@@ -141,6 +142,7 @@ impl<R> ReadBytes for ReadBytesLimit<R> where R: ReadBytes {
     }
 
     fn skip(&mut self, amount: u64) -> io::Result<()> {
+        println!("XXX ReadBytesLimit::skip {} pos {} maxsize {}", amount, self.inner.pos(), self.maxsize);
         if self.inner.pos() + amount > self.maxsize {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
@@ -178,9 +180,6 @@ impl<R> BoxBytes for ReadBytesLimit<R> where R: ReadBytes {
     fn set_fourcc(&mut self, fourcc: FourCC) {
         self.inner.set_fourcc(fourcc);
     }
-    fn limit(&mut self, limit: u64) -> Box<dyn ReadBytes + '_> {
-        self.inner.limit(limit)
-    }
 }
 
 impl<'a, B: ?Sized + ReadBytes + 'a> ReadBytes for Box<B> {
@@ -197,6 +196,5 @@ impl<'a, B: ?Sized + BoxBytes + 'a> BoxBytes for Box<B> {
     fn set_version(&mut self, version: u8) { B::set_version(&mut *self, version) }
     fn fourcc(&self) -> FourCC { B::fourcc(&*self) }
     fn set_fourcc(&mut self, fourcc: FourCC) { B::set_fourcc(&mut *self, fourcc) }
-    fn limit(&mut self, limit: u64) -> Box<dyn ReadBytes + '_> { B::limit(&mut *self, limit) }
 }
 
