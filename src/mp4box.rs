@@ -1,9 +1,8 @@
-
 use std::fmt::Debug;
 use std::io;
 
 use crate::boxes::MP4Box;
-use crate::fromtobytes::{FromBytes, ToBytes, ReadBytes, WriteBytes, BoxBytes};
+use crate::fromtobytes::{BoxBytes, FromBytes, ReadBytes, ToBytes, WriteBytes};
 use crate::types::*;
 
 /// Gets implemented for every box.
@@ -20,11 +19,14 @@ pub trait BoxInfo {
 
 /// Headers + Content = IsoBox.
 pub struct IsoBox<C> {
-    fourcc: FourCC,
+    fourcc:  FourCC,
     content: C,
 }
 
-impl<C> IsoBox<C> where C: FromBytes + ToBytes + BoxInfo {
+impl<C> IsoBox<C>
+where
+    C: FromBytes + ToBytes + BoxInfo,
+{
     /// Wrap a struct with a box header.
     pub fn wrap(content: C) -> IsoBox<C> {
         IsoBox {
@@ -35,9 +37,11 @@ impl<C> IsoBox<C> where C: FromBytes + ToBytes + BoxInfo {
 }
 
 // Define FromBytes trait for IsoBox
-impl<C> FromBytes for IsoBox<C> where C: FromBytes + BoxInfo {
+impl<C> FromBytes for IsoBox<C>
+where
+    C: FromBytes + BoxInfo,
+{
     fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<IsoBox<C>> {
-
         // Read the header.
         let mut reader = BoxReader::new(stream)?;
 
@@ -46,7 +50,7 @@ impl<C> FromBytes for IsoBox<C> where C: FromBytes + BoxInfo {
 
         Ok(IsoBox {
             fourcc: reader.fourcc,
-            content
+            content,
         })
     }
 
@@ -56,7 +60,10 @@ impl<C> FromBytes for IsoBox<C> where C: FromBytes + BoxInfo {
 }
 
 // Define ToBytes trait for IsoBox
-impl<C> ToBytes for IsoBox<C> where C: ToBytes + BoxInfo {
+impl<C> ToBytes for IsoBox<C>
+where
+    C: ToBytes + BoxInfo,
+{
     fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
         let mut writer = BoxWriter::new(stream, self.content.fourcc())?;
         writer.set_fourcc(writer.fourcc.clone());
@@ -66,7 +73,10 @@ impl<C> ToBytes for IsoBox<C> where C: ToBytes + BoxInfo {
 }
 
 // Define BoxInfo trait for the enum.
-impl<C> BoxInfo for IsoBox<C> where C: BoxInfo {
+impl<C> BoxInfo for IsoBox<C>
+where
+    C: BoxInfo,
+{
     #[inline]
     fn fourcc(&self) -> FourCC {
         self.fourcc.clone()
@@ -77,7 +87,10 @@ impl<C> BoxInfo for IsoBox<C> where C: BoxInfo {
     }
 }
 
-impl<C> Debug for IsoBox<C> where C: Debug {
+impl<C> Debug for IsoBox<C>
+where
+    C: Debug,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         Debug::fmt(&self.content, f)
     }
@@ -91,17 +104,16 @@ impl<C> Debug for IsoBox<C> where C: Debug {
 
 /// Reads the box header.
 pub struct BoxReader<'a> {
-    maxsize: u64,
+    maxsize:      u64,
     prev_version: u8,
     // We box it, since a BoxReader might contain a BoxReader.
-    inner: Box<dyn ReadBytes + 'a>,
-    pub fourcc: FourCC,
+    inner:        Box<dyn ReadBytes + 'a>,
+    pub fourcc:   FourCC,
 }
 
 impl<'a> BoxReader<'a> {
     /// Read the box header, then return a size-limited reader.
     pub fn new(mut stream: &'a mut impl ReadBytes) -> io::Result<BoxReader<'a>> {
-
         let size1 = u32::from_bytes(&mut stream)?;
         let fourcc = FourCC::from_bytes(&mut stream)?;
         let size = match size1 {
@@ -111,7 +123,14 @@ impl<'a> BoxReader<'a> {
         };
 
         let maxsize = std::cmp::min(stream.size(), stream.pos() + size);
-        debug!("XXX here {} size {}, size1 {} maxsize {} left {}", fourcc, size, size1, maxsize, stream.left());
+        debug!(
+            "XXX here {} size {}, size1 {} maxsize {} left {}",
+            fourcc,
+            size,
+            size1,
+            maxsize,
+            stream.left()
+        );
         Ok(BoxReader {
             prev_version: stream.version(),
             maxsize,
@@ -121,10 +140,14 @@ impl<'a> BoxReader<'a> {
     }
 }
 
-impl <'a> Drop for BoxReader<'a> {
+impl<'a> Drop for BoxReader<'a> {
     fn drop(&mut self) {
         if self.pos() < self.maxsize {
-            debug!("XXX BoxReader {} drop: skipping {}", self.fourcc, self.maxsize - self.pos());
+            debug!(
+                "XXX BoxReader {} drop: skipping {}",
+                self.fourcc,
+                self.maxsize - self.pos()
+            );
             let _ = self.skip(self.maxsize - self.pos());
         }
         if self.inner.version() != self.prev_version {
@@ -137,13 +160,13 @@ impl <'a> Drop for BoxReader<'a> {
 impl<'a> ReadBytes for BoxReader<'a> {
     fn read(&mut self, amount: u64) -> io::Result<&[u8]> {
         if amount == 0 {
-            debug!("XXX self reader for {} amount 0 left {}", self.fourcc, self.left());
+            debug!(
+                "XXX self reader for {} amount 0 left {}",
+                self.fourcc,
+                self.left()
+            );
         }
-        let amount = if amount == 0 {
-            self.left()
-        } else {
-            amount
-        };
+        let amount = if amount == 0 { self.left() } else { amount };
         if amount == 0 {
             return Ok(b"");
         }
@@ -198,20 +221,23 @@ impl<'a> BoxBytes for BoxReader<'a> {
 
 /// Writes the box header.
 pub struct BoxWriter<W: WriteBytes> {
-    fourcc: FourCC,
-    offset: u64,
-    inner: W,
+    fourcc:    FourCC,
+    offset:    u64,
+    inner:     W,
     finalized: bool,
 }
 
-impl<W> BoxWriter<W> where W: WriteBytes {
+impl<W> BoxWriter<W>
+where
+    W: WriteBytes,
+{
     /// Write a provisional box header, then return a new stream. When
     /// the stream is dropped, the box header is updated.
     pub fn new(mut stream: W, fourcc: FourCC) -> io::Result<BoxWriter<W>> {
         let offset = stream.pos();
         0u32.to_bytes(&mut stream)?;
         fourcc.to_bytes(&mut stream)?;
-        Ok(BoxWriter{
+        Ok(BoxWriter {
             fourcc,
             offset,
             inner: stream,
@@ -233,26 +259,51 @@ impl<W> BoxWriter<W> where W: WriteBytes {
     }
 }
 
-impl<W> Drop for BoxWriter<W> where W: WriteBytes {
+impl<W> Drop for BoxWriter<W>
+where
+    W: WriteBytes,
+{
     fn drop(&mut self) {
         self.finalize().unwrap();
     }
 }
 
 // Delegate WriteBytes to the inner writer.
-impl<W> WriteBytes for BoxWriter<W> where W: WriteBytes {
-    fn write(&mut self, data: &[u8]) -> io::Result<()> { self.inner.write(data) }
-    fn skip(&mut self, amount: u64) -> io::Result<()> { self.inner.skip(amount) }
+impl<W> WriteBytes for BoxWriter<W>
+where
+    W: WriteBytes,
+{
+    fn write(&mut self, data: &[u8]) -> io::Result<()> {
+        self.inner.write(data)
+    }
+    fn skip(&mut self, amount: u64) -> io::Result<()> {
+        self.inner.skip(amount)
+    }
 }
 
 // Delegate BoxBytes to the inner writer.
-impl<W> BoxBytes for BoxWriter<W> where W: WriteBytes {
-    fn pos(&self) -> u64 { self.inner.pos() }
-    fn seek(&mut self, pos: u64) -> io::Result<()> { self.inner.seek(pos) }
-    fn version(&self) -> u8 { self.inner.version() }
-    fn set_version(&mut self, version: u8) { self.inner.set_version(version) }
-    fn fourcc(&self) -> FourCC { self.inner.fourcc() }
-    fn set_fourcc(&mut self, fourcc: FourCC) { self.inner.set_fourcc(fourcc) }
+impl<W> BoxBytes for BoxWriter<W>
+where
+    W: WriteBytes,
+{
+    fn pos(&self) -> u64 {
+        self.inner.pos()
+    }
+    fn seek(&mut self, pos: u64) -> io::Result<()> {
+        self.inner.seek(pos)
+    }
+    fn version(&self) -> u8 {
+        self.inner.version()
+    }
+    fn set_version(&mut self, version: u8) {
+        self.inner.set_version(version)
+    }
+    fn fourcc(&self) -> FourCC {
+        self.inner.fourcc()
+    }
+    fn set_fourcc(&mut self, fourcc: FourCC) {
+        self.inner.set_fourcc(fourcc)
+    }
 }
 
 /// Read a collection of boxes from a stream.
@@ -274,9 +325,9 @@ pub fn read_boxes<R: ReadBytes>(mut file: R) -> io::Result<Vec<MP4Box>> {
 /// Any unknown boxes we encounted are put into a GenericBox.
 pub struct GenericBox {
     fourcc: FourCC,
-    data: Vec<u8>,
-    size: u64,
-    skip: bool,
+    data:   Vec<u8>,
+    size:   u64,
+    skip:   bool,
 }
 
 impl FromBytes for GenericBox {

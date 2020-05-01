@@ -5,12 +5,12 @@ use crate::fromtobytes::{BoxBytes, ReadBytes, WriteBytes};
 use crate::types::FourCC;
 
 pub struct Mp4File<F> {
-    file: Box<F>,
-    pos: u64,
-    size: u64,
-    buf: Vec<u8>,
+    file:    Box<F>,
+    pos:     u64,
+    size:    u64,
+    buf:     Vec<u8>,
     version: u8,
-    fourcc: FourCC,
+    fourcc:  FourCC,
 }
 
 impl<F> Mp4File<F> {
@@ -33,20 +33,21 @@ impl<F> Mp4File<F> {
     }
 }
 
-impl<F> ReadBytes for Mp4File<F> where F: Read + Seek {
-
+impl<F> ReadBytes for Mp4File<F>
+where
+    F: Read + Seek,
+{
     fn read(&mut self, amount: u64) -> io::Result<&[u8]> {
-        let amount = if amount == 0 {
-            self.left()
-        } else {
-            amount
-        } as usize;
+        let amount = if amount == 0 { self.left() } else { amount } as usize;
         debug!("XXX - read {} at pos {}", amount, self.pos);
         if amount == 0 {
             return Ok(b"");
         }
         if amount > 65536 {
-            return Err(io::Error::new(io::ErrorKind::Other, format!("MP4File::read({}): too large", amount)));
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("MP4File::read({}): too large", amount),
+            ));
         }
         if self.buf.len() < amount {
             self.buf.resize(amount, 0);
@@ -71,7 +72,10 @@ impl<F> ReadBytes for Mp4File<F> where F: Read + Seek {
     }
 }
 
-impl<F> WriteBytes for Mp4File<F> where F: Write + Seek {
+impl<F> WriteBytes for Mp4File<F>
+where
+    F: Write + Seek,
+{
     fn write(&mut self, data: &[u8]) -> io::Result<()> {
         self.file.write_all(data)?;
         self.pos += data.len() as u64;
@@ -84,7 +88,10 @@ impl<F> WriteBytes for Mp4File<F> where F: Write + Seek {
     }
 }
 
-impl<F> BoxBytes for Mp4File<F> where F: Seek {
+impl<F> BoxBytes for Mp4File<F>
+where
+    F: Seek,
+{
     fn pos(&self) -> u64 {
         self.pos
     }
@@ -112,18 +119,37 @@ impl<F> BoxBytes for Mp4File<F> where F: Seek {
 }
 
 impl<'a, B: ?Sized + ReadBytes + 'a> ReadBytes for Box<B> {
-    fn read(&mut self, amount: u64) -> io::Result<&[u8]> { B::read(&mut *self, amount) }
-    fn skip(&mut self, amount: u64) -> io::Result<()> { B::skip(&mut *self, amount) }
-    fn left(&self) -> u64 { B::left(&*self) }
+    fn read(&mut self, amount: u64) -> io::Result<&[u8]> {
+        B::read(&mut *self, amount)
+    }
+    fn skip(&mut self, amount: u64) -> io::Result<()> {
+        B::skip(&mut *self, amount)
+    }
+    fn left(&self) -> u64 {
+        B::left(&*self)
+    }
 }
 
 impl<'a, B: ?Sized + BoxBytes + 'a> BoxBytes for Box<B> {
-    fn pos(&self) -> u64 { B::pos(&*self) }
-    fn seek(&mut self, pos: u64) -> io::Result<()> { B::seek(&mut *self, pos) }
-    fn size(&self) -> u64 { B::size(&*self) }
-    fn version(&self) -> u8 { B::version(&*self) }
-    fn set_version(&mut self, version: u8) { B::set_version(&mut *self, version) }
-    fn fourcc(&self) -> FourCC { B::fourcc(&*self) }
-    fn set_fourcc(&mut self, fourcc: FourCC) { B::set_fourcc(&mut *self, fourcc) }
+    fn pos(&self) -> u64 {
+        B::pos(&*self)
+    }
+    fn seek(&mut self, pos: u64) -> io::Result<()> {
+        B::seek(&mut *self, pos)
+    }
+    fn size(&self) -> u64 {
+        B::size(&*self)
+    }
+    fn version(&self) -> u8 {
+        B::version(&*self)
+    }
+    fn set_version(&mut self, version: u8) {
+        B::set_version(&mut *self, version)
+    }
+    fn fourcc(&self) -> FourCC {
+        B::fourcc(&*self)
+    }
+    fn set_fourcc(&mut self, fourcc: FourCC) {
+        B::set_fourcc(&mut *self, fourcc)
+    }
 }
-

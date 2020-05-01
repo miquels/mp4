@@ -8,9 +8,12 @@ use std::fmt::{Debug, Display};
 use std::io;
 use std::time::{Duration, SystemTime};
 
-use chrono::{self, offset::{Local, TimeZone}};
+use chrono::{
+    self,
+    offset::{Local, TimeZone},
+};
 
-use crate::fromtobytes::{FromBytes, ToBytes, ReadBytes, WriteBytes};
+use crate::fromtobytes::{FromBytes, ReadBytes, ToBytes, WriteBytes};
 
 // Convenience macro to implement FromBytes/ToBytes for newtypes.
 macro_rules! def_from_to_bytes_newtype {
@@ -29,7 +32,7 @@ macro_rules! def_from_to_bytes_newtype {
                 self.0.to_bytes(bytes)
             }
         }
-    }
+    };
 }
 
 macro_rules! def_from_to_bytes_versioned {
@@ -64,7 +67,7 @@ macro_rules! def_from_to_bytes_versioned {
                 $newtype(t)
             }
         }
-    }
+    };
 }
 
 /// Version is a magic variable. Every time you get or set
@@ -109,7 +112,9 @@ impl FromBytes for Uuid {
         Ok(Uuid(u))
     }
 
-    fn min_size() -> usize { 16 }
+    fn min_size() -> usize {
+        16
+    }
 }
 
 impl ToBytes for Uuid {
@@ -127,7 +132,11 @@ impl Display for Uuid {
         let p4 = u16::from_be_bytes((self.0)[8..10].try_into().unwrap());
         let p5 = u16::from_be_bytes((self.0)[10..12].try_into().unwrap());
         let p6 = u32::from_be_bytes((self.0)[12..16].try_into().unwrap());
-        write!(f, "{:08x}-{:04x}-{:04x}-{:04x}-{:04x}{:08x}", p1, p2, p3, p4, p5, p6)
+        write!(
+            f,
+            "{:08x}-{:04x}-{:04x}-{:04x}-{:04x}{:08x}",
+            p1, p2, p3, p4, p5, p6
+        )
     }
 }
 
@@ -294,7 +303,9 @@ impl FromBytes for ZString {
         }
         Ok(ZString(s))
     }
-    fn min_size() -> usize { 0 }
+    fn min_size() -> usize {
+        0
+    }
 }
 
 impl ToBytes for ZString {
@@ -330,20 +341,22 @@ pub struct Matrix([(FixedFloat16_16, FixedFloat16_16, FixedFloat2_30); 3]);
 impl FromBytes for Matrix {
     fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> {
         let mut m = [(FixedFloat16_16(0), FixedFloat16_16(0), FixedFloat2_30(0)); 3];
-        for x in 0 ..3 {
+        for x in 0..3 {
             m[x] = (
                 FixedFloat16_16::from_bytes(bytes)?,
                 FixedFloat16_16::from_bytes(bytes)?,
-                FixedFloat2_30::from_bytes(bytes)?
+                FixedFloat2_30::from_bytes(bytes)?,
             );
         }
         Ok(Matrix(m))
     }
-    fn min_size() -> usize { 36 }
+    fn min_size() -> usize {
+        36
+    }
 }
 impl ToBytes for Matrix {
     fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) -> io::Result<()> {
-        for x in 0 ..3 {
+        for x in 0..3 {
             (self.0)[x].0.to_bytes(bytes)?;
             (self.0)[x].1.to_bytes(bytes)?;
             (self.0)[x].2.to_bytes(bytes)?;
@@ -354,17 +367,24 @@ impl ToBytes for Matrix {
 
 impl Debug for Matrix {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "Matrix([{}][{}][{}] [{}][{}][{}] [{}][{}][{}])",
-               (self.0)[0].0, (self.0)[0].1, (self.0)[0].2,
-               (self.0)[1].0, (self.0)[1].1, (self.0)[1].2,
-               (self.0)[2].0, (self.0)[2].1, (self.0)[2].2,
+        write!(
+            f,
+            "Matrix([{}][{}][{}] [{}][{}][{}] [{}][{}][{}])",
+            (self.0)[0].0,
+            (self.0)[0].1,
+            (self.0)[0].2,
+            (self.0)[1].0,
+            (self.0)[1].1,
+            (self.0)[1].2,
+            (self.0)[2].0,
+            (self.0)[2].1,
+            (self.0)[2].2,
         )
     }
 }
 
 macro_rules! impl_flags {
     ($type:tt) => {
-
         /// 24 bits of flags.
         #[derive(Clone, Copy)]
         pub struct $type(pub u32);
@@ -376,7 +396,9 @@ macro_rules! impl_flags {
                 (&mut buf[1..]).copy_from_slice(&data);
                 Ok($type(u32::from_be_bytes(buf)))
             }
-            fn min_size() -> usize { 3 }
+            fn min_size() -> usize {
+                3
+            }
         }
 
         impl ToBytes for $type {
@@ -399,7 +421,7 @@ macro_rules! impl_flags {
                 }
             }
         }
-    }
+    };
 }
 
 impl_flags!(Flags);
@@ -412,19 +434,35 @@ impl Debug for Flags {
 impl_flags!(TrackFlags);
 
 impl TrackFlags {
-    pub fn get_enabled(&self) -> bool { self.get(0) }
-    pub fn set_enabled(&mut self, on: bool) { self.set(0, on) }
-    pub fn get_in_movie(&self) -> bool { self.get(1) }
-    pub fn set_in_movie(&mut self, on: bool) { self.set(1, on) }
-    pub fn get_in_preview(&self) -> bool { self.get(2) }
-    pub fn set_in_preview(&mut self, on: bool) { self.set(2, on) }
-    pub fn get_in_poster(&self) -> bool { self.get(3) }
-    pub fn set_in_poster(&mut self, on: bool) { self.set(3, on) }
+    pub fn get_enabled(&self) -> bool {
+        self.get(0)
+    }
+    pub fn set_enabled(&mut self, on: bool) {
+        self.set(0, on)
+    }
+    pub fn get_in_movie(&self) -> bool {
+        self.get(1)
+    }
+    pub fn set_in_movie(&mut self, on: bool) {
+        self.set(1, on)
+    }
+    pub fn get_in_preview(&self) -> bool {
+        self.get(2)
+    }
+    pub fn set_in_preview(&mut self, on: bool) {
+        self.set(2, on)
+    }
+    pub fn get_in_poster(&self) -> bool {
+        self.get(3)
+    }
+    pub fn set_in_poster(&mut self, on: bool) {
+        self.set(3, on)
+    }
 }
 
 impl Debug for TrackFlags {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let mut v = vec![ "[" ];
+        let mut v = vec!["["];
         if self.get_enabled() {
             v.push("enabled");
         }
@@ -462,7 +500,7 @@ impl FromBytes for AppleItem {
             size = 8;
         }
         debug!("XXX 1 size {} fourcc {}", size, fourcc);
-        let mut res = AppleItem{
+        let mut res = AppleItem {
             fourcc,
             data: String::new(),
             blob: bytes.read((size - 8) as u64)?.to_vec(),
@@ -479,14 +517,16 @@ impl FromBytes for AppleItem {
             let flag = u16::from_bytes(data)?;
             if flag == 1 && size >= 16 {
                 ReadBytes::skip(data, 4)?;
-                let text = data.read((size - 16)  as u64)?;
+                let text = data.read((size - 16) as u64)?;
                 res.data = String::from_utf8_lossy(text).to_string();
             }
         }
         Ok(res)
     }
 
-    fn min_size() -> usize { 16 }
+    fn min_size() -> usize {
+        16
+    }
 }
 
 impl ToBytes for AppleItem {
@@ -519,7 +559,6 @@ impl ToBytes for AppleItem {
         // And finally the data itself.
         bytes.write(self.data.as_bytes())
     }
-
 }
 
 impl Debug for AppleItem {
@@ -553,7 +592,6 @@ pub struct CompositionOffsetEntry {
 }
 
 impl FromBytes for CompositionOffsetEntry {
-
     // NOTE: This implementation is not _entirely_ correct. If in a
     // version 0 entry the offset >= 2^31 it breaks horribly.
     fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<Self> {
@@ -564,13 +602,12 @@ impl FromBytes for CompositionOffsetEntry {
         } else {
             i32::from_bytes(stream)?
         };
-        Ok(CompositionOffsetEntry {
-            count,
-            offset,
-        })
+        Ok(CompositionOffsetEntry { count, offset })
     }
 
-    fn min_size() -> usize { 8 }
+    fn min_size() -> usize {
+        8
+    }
 }
 
 impl ToBytes for CompositionOffsetEntry {
@@ -590,17 +627,16 @@ impl ToBytes for CompositionOffsetEntry {
 /// The sample_is_non_sync_sample field  provides the same information as the sync sample table [8.6.2].
 #[derive(Debug)]
 pub struct SampleFlags {
-    pub is_leading: u8,
-    pub sample_depends_on: u8,
-    pub sample_is_depended_on: u8,
-    pub sample_has_redundancy: u8,
-    pub sample_padding_value: u8,
-    pub sample_is_non_sync_sample: bool,
+    pub is_leading:                  u8,
+    pub sample_depends_on:           u8,
+    pub sample_is_depended_on:       u8,
+    pub sample_has_redundancy:       u8,
+    pub sample_padding_value:        u8,
+    pub sample_is_non_sync_sample:   bool,
     pub sample_degradation_priority: u16,
 }
 
 impl FromBytes for SampleFlags {
-
     fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<Self> {
         let flags = u16::from_bytes(stream)?;
         let sample_degradation_priority = u16::from_bytes(stream)?;
@@ -615,7 +651,9 @@ impl FromBytes for SampleFlags {
         })
     }
 
-    fn min_size() -> usize { 4 }
+    fn min_size() -> usize {
+        4
+    }
 }
 
 impl ToBytes for SampleFlags {
@@ -714,7 +752,9 @@ define_array!(
     ///
     /// In serialized form the array starts with a 16 bit field that
     /// indicates the number of elements, followed by the elements itself.
-    ArraySized16, u16, false
+    ArraySized16,
+    u16,
+    false
 );
 
 define_array!(
@@ -722,14 +762,18 @@ define_array!(
     ///
     /// In serialized form the array starts with a 32 bit field that
     /// indicates the number of elements, followed by the elements itself.
-    ArraySized32, u32, false
+    ArraySized32,
+    u32,
+    false
 );
 
 define_array!(
     /// Array with no length prefix.
     ///
     /// It simply stretches to the end of the containing box.
-    ArrayUnsized, u32, true
+    ArrayUnsized,
+    u32,
+    true
 );
 
 macro_rules! fixed_float {
@@ -745,7 +789,7 @@ macro_rules! fixed_float {
 
             #[allow(dead_code)]
             pub fn set(&mut self, value: f64) {
-                let v = (value * (( 1 << $frac_bits) as f64)).round();
+                let v = (value * ((1 << $frac_bits) as f64)).round();
                 self.0 = if v > (std::$type::MAX as f64) {
                     std::$type::MAX
                 } else if v < (std::$type::MIN as f64) {
@@ -767,7 +811,7 @@ macro_rules! fixed_float {
                 write!(f, "{}", self.get())
             }
         }
-    }
+    };
 }
 
 // Some fixed float types.
@@ -775,31 +819,30 @@ fixed_float!(FixedFloat2_30, u32, 30);
 fixed_float!(FixedFloat16_16, u32, 16);
 fixed_float!(FixedFloat8_8, u16, 8);
 
-def_struct!{ OpColor,
+def_struct! { OpColor,
     red:    u16,
     green:  u16,
     blue:   u16,
 }
 
-def_struct!{ EditListEntry,
+def_struct! { EditListEntry,
     duration:   u32,
     media_time: u32,
     media_rate: FixedFloat16_16,
 }
 
-def_struct!{ TimeToSampleEntry,
+def_struct! { TimeToSampleEntry,
     count:  u32,
     delta:  u32,
 }
 
-def_struct!{ SampleToChunkEntry,
+def_struct! { SampleToChunkEntry,
     first_chunk:                u32,
     samples_per_chunk:          u32,
     sample_description_index:   u32,
 }
 
-def_struct!{ SampleToGroupEntry,
+def_struct! { SampleToGroupEntry,
     sample_count:               u32,
     group_description_index:    u32,
 }
-

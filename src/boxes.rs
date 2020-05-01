@@ -1,9 +1,9 @@
 use std::fmt::Debug;
 use std::io;
 
-use crate::fromtobytes::{FromBytes, ToBytes, ReadBytes, WriteBytes};
-use crate::types::*;
+use crate::fromtobytes::{FromBytes, ReadBytes, ToBytes, WriteBytes};
 use crate::mp4box::*;
+use crate::types::*;
 
 def_boxes! {
     FileTypeBox, "ftyp", 8 => {

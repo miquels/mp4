@@ -125,7 +125,9 @@ impl BoxBytes for &mut [u8] {}
 
 /// Trait to deserialize a type.
 pub trait FromBytes {
-    fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> where Self: Sized;
+    fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self>
+    where
+        Self: Sized;
     fn min_size() -> usize;
 }
 
@@ -153,7 +155,7 @@ macro_rules! def_from_to_bytes {
                 bytes.write(&self.to_be_bytes()[..])
             }
         }
-    }
+    };
 }
 
 // Define FromBytes/ToBytes for u* types.
@@ -354,4 +356,3 @@ macro_rules! def_struct {
         }
     }
 }
-
