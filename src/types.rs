@@ -741,7 +741,34 @@ macro_rules! define_array {
         // Debug implementation that delegates to the inner Vec.
         impl<T> Debug for $name<T> where T: Debug {
             fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                if f.alternate() {
+                    if self.vec.len() > 4 {
+                        writeln!(f, "\n// Array length: {}", self.vec.len())?;
+                    }
+                    if self.vec.len() > 20 {
+                        writeln!(f, "// (only showing first and last entry)")?;
+                        let v = vec![&self.vec[0], &self.vec[self.vec.len() - 1]];
+                        return f.debug_list().entries(v.into_iter()).finish();
+                    }
+                }
                 Debug::fmt(&self.vec, f)
+            }
+        }
+
+        impl<T> std::ops::Deref for $name<T> {
+            type Target = [T];
+
+            fn deref(&self) -> &[T] {
+                std::ops::Deref::deref(&self.vec)
+            }
+        }
+
+        impl<'a, T> IntoIterator for &'a $name<T> {
+            type Item = &'a T;
+            type IntoIter = std::slice::Iter<'a, T>;
+
+            fn into_iter(self) -> std::slice::Iter<'a, T> {
+                self.iter()
             }
         }
     }

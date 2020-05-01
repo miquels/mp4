@@ -8,7 +8,7 @@ pub struct SampleSizeBox {
     flags:          Flags,
     sample_size:    u32,
     sample_count:   u32,
-    sample_entries: Vec<u32>,
+    sample_entries: ArrayUnsized<u32>,
 }
 
 impl FromBytes for SampleSizeBox {
@@ -17,7 +17,7 @@ impl FromBytes for SampleSizeBox {
         let flags = Flags::from_bytes(stream)?;
         let sample_size = u32::from_bytes(stream)?;
         let sample_count = u32::from_bytes(stream)?;
-        let mut sample_entries = Vec::new();
+        let mut sample_entries = ArrayUnsized::new();
         if sample_size == 0 {
             while sample_entries.len() < sample_count as usize {
                 sample_entries.push(u32::from_bytes(stream)?);
