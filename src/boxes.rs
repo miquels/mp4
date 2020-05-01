@@ -34,7 +34,7 @@ def_boxes! {
         mod_time:   Time,
         track_id:   u32,
         skip:       4,
-        duration:   u32,
+        duration:   VersionSizedUint as u64,
         skip:       8,
         layer:      u16,
         alt_group:  u16,

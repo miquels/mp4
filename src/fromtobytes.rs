@@ -233,7 +233,7 @@ macro_rules! def_struct {
     (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: $in:tt as $out:tt, $($tt:tt)*]
         -> [ $($set:tt)* ] [ $($fields:tt)* ]) => {
         def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [ let $field = $in::from_bytes($stream)? as $out; ] ] [ $($fields)* $field ]);
+            [ $($set)* [ let $field: $out = $in::from_bytes($stream)?.into(); ] ] [ $($fields)* $field ]);
     };
     // Set a field (array => size_field).
     (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: [$type:ty, $cnt:ident], $($tt:tt)*]
@@ -299,7 +299,7 @@ macro_rules! def_struct {
     // Write a field value (as)
     (@to_bytes_ $struct:expr, $stream:ident, [ $field:tt: $type:tt as $_type:tt, $($tt:tt)*] -> [ $($set:tt)* ]) => {
         def_struct!(@to_bytes_ $struct, $stream, [ $($tt)* ] ->
-            [ $($set)* [ ($struct.$field as $type).to_bytes($stream)?; ] ]);
+            [ $($set)* [ $type::from($struct.$field).to_bytes($stream)?; ] ]);
     };
     // Write a field value (array)
     //(@to_bytes_ $struct:expr, $stream:ident, [ $field:tt: [$type:ty], $($tt:tt)*] -> [ $($set:tt)* ]) => {

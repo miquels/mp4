@@ -54,6 +54,16 @@ macro_rules! def_from_to_bytes_versioned {
                 Ok(())
             }
         }
+        impl From<$newtype> for u64 {
+            fn from(t: $newtype) -> u64 {
+                t.0
+            }
+        }
+        impl From<u64> for $newtype {
+            fn from(t: u64) -> $newtype {
+                $newtype(t)
+            }
+        }
     }
 }
 
@@ -127,6 +137,10 @@ impl Debug for Uuid {
     }
 }
 
+/// Used internally in def_struct "VersionSizedUint as u64".
+#[derive(Clone, Copy)]
+pub(crate) struct VersionSizedUint(u64);
+def_from_to_bytes_versioned!(VersionSizedUint);
 
 /// Time is a 32/64 bit value, measured in seconds since 01-01-1904 00:00:00
 #[derive(Clone, Copy)]
