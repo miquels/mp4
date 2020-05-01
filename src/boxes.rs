@@ -52,12 +52,11 @@ def_boxes! {
     EditListBox, "elst", 8 => {
         version:                Version,
         flags:                  Flags,
-        entry_count:            u32,
-        entries:                [EditListEntry, entry_count],
+        entries:                [EditListEntry, sized],
     };
 
     MediaBox, "mdia", 8 => {
-        sub_boxes:      [MP4Box],
+        sub_boxes:      [MP4Box, unsized],
     };
 
     SampleTableBox, "stbl", 8 => {
@@ -75,8 +74,7 @@ def_boxes! {
     DataReferenceBox, "dref", 8 => {
         version:        Version,
         flags:          Flags,
-        entry_count:    u32,
-        entries:        [MP4Box, entry_count],
+        entries:        [MP4Box, sized],
     };
 
     DataEntryUrlBox, "url ", 8 => {
@@ -191,43 +189,37 @@ def_boxes! {
     TimeToSampleBox, "stts", 8 => {
         version:        Version,
         flags:          Flags,
-        entry_count:    u32,
-        entries:        [TimeToSampleEntry, entry_count],
+        entries:        [TimeToSampleEntry, sized],
     };
 
     SyncSampleBox, "stss", 8 => {
         version:        Version,
         flags:          Flags,
-        entry_count:    u32,
-        entries:        [u32, entry_count],
+        entries:        [u32, sized],
     };
 
     CompositionOffsetBox, "ctts", 8 => {
         version:        Version,
         flags:          Flags,
-        entry_count:    u32,
-        entries:        [CompositionOffsetEntry, entry_count],
+        entries:        [CompositionOffsetEntry, sized],
     };
 
     SampleToChunkBox, "stsc", 8 => {
         version:        Version,
         flags:          Flags,
-        entry_count:    u32,
-        entries:        [SampleToChunkEntry, entry_count],
+        entries:        [SampleToChunkEntry, sized],
     };
 
     ChunkOffsetBox, "stco", 8 => {
         version:        Version,
         flags:          Flags,
-        entry_count:    u32,
-        entries:        [u32, entry_count],
+        entries:        [u32, sized],
     };
 
     ChunkLargeOffsetBox, "co64", 8 => {
         version:        Version,
         flags:          Flags,
-        entry_count:    u32,
-        entries:        [u64, entry_count],
+        entries:        [u64, sized],
     };
 
     SubtitleMediaHeaderBox, "sthd", 8 => {

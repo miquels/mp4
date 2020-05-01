@@ -632,6 +632,106 @@ impl ToBytes for SampleFlags {
     }
 }
 
+macro_rules! define_array {
+    ($(#[$outer:meta])* $name:ident, $sizetype:ty, $nosize:expr) => {
+
+        $(#[$outer])*
+        pub struct $name<T> {
+            pub vec: Vec<T>,
+            nosize: bool,
+        }
+
+        impl<T> $name<T> {
+            /// See Vec::new()
+            pub fn new() -> $name<T> {
+                $name {
+                    vec: Vec::<T>::new(),
+                    nosize: $nosize,
+                }
+            }
+
+            /// See Vec::push()
+            pub fn push(&mut self, value: T) {
+                self.vec.push(value)
+            }
+
+            /// See Vec::len()
+            pub fn len(&self) -> usize {
+                self.vec.len()
+            }
+        }
+
+        impl<T> FromBytes for $name<T> where T: FromBytes {
+
+            fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<Self> {
+                let count = if $nosize {
+                    std::u32::MAX as usize
+                } else {
+                    <$sizetype>::from_bytes(stream)? as usize
+                };
+                let elemsize = std::mem::size_of::<T>() as u64;
+                let mut v = Vec::<T>::new();
+                while ($nosize || v.len() < count) && stream.left() >= elemsize {
+                    v.push(T::from_bytes(stream)?);
+                }
+                Ok($name {
+                    vec: v,
+                    nosize: $nosize,
+                })
+            }
+            fn min_size() -> usize {
+                if $nosize {
+                    0
+                } else {
+                    std::mem::size_of::<T>()
+                }
+            }
+        }
+
+        impl<T> ToBytes for $name<T> where T: ToBytes {
+            fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
+                if !self.nosize {
+                    (self.vec.len() as $sizetype).to_bytes(stream)?;
+                }
+                for elem in &self.vec {
+                    elem.to_bytes(stream)?;
+                }
+                Ok(())
+            }
+        }
+
+        // Debug implementation that delegates to the inner Vec.
+        impl<T> Debug for $name<T> where T: Debug {
+            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                Debug::fmt(&self.vec, f)
+            }
+        }
+    }
+}
+
+define_array!(
+    /// Array with 16 bits length-prefix.
+    ///
+    /// In serialized form the array starts with a 16 bit field that
+    /// indicates the number of elements, followed by the elements itself.
+    ArraySized16, u16, false
+);
+
+define_array!(
+    /// Array with 32 bits length-prefix.
+    ///
+    /// In serialized form the array starts with a 32 bit field that
+    /// indicates the number of elements, followed by the elements itself.
+    ArraySized32, u32, false
+);
+
+define_array!(
+    /// Array with no length prefix.
+    ///
+    /// It simply stretches to the end of the containing box.
+    ArrayUnsized, u32, true
+);
+
 macro_rules! fixed_float {
     ($name:ident, $type:tt, $frac_bits:expr) => {
         #[derive(Clone, Copy)]

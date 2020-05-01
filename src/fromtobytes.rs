@@ -203,10 +203,17 @@ macro_rules! def_struct {
     (@def_struct_ $name:ident, [ $field:ident: $_type:ident as $type:ident, $($tt:tt)*] -> [ $($res:tt)* ]) => {
         def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* $field: $type, ]);
     };
-    // Add normal field (array).
-    (@def_struct_ $name:ident, [ $field:ident: [ $type:ty $(, $cnt:ident)? ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
-        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* $field: Vec<$type>, ]);
-        //def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* $field: Vec<u32>, ]);
+    // Add normal field (ArraySized16)
+    (@def_struct_ $name:ident, [ $field:ident: [ $type:ty, sized16 ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
+        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* $field: ArraySized16<$type>, ]);
+    };
+    // Add normal field (ArraySized32)
+    (@def_struct_ $name:ident, [ $field:ident: [ $type:ty, sized ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
+        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* $field: ArraySized32<$type>, ]);
+    };
+    // Add normal field (ArrayUnsized)
+    (@def_struct_ $name:ident, [ $field:ident: [ $type:ty $(, unsized)? ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
+        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* $field: ArrayUnsized<$type>, ]);
     };
     // Add normal field.
     (@def_struct_ $name:ident, [ $field:ident: $type:ident, $($tt:tt)*] -> [ $($res:tt)* ]) => {
@@ -235,37 +242,23 @@ macro_rules! def_struct {
         def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
             [ $($set)* [ let $field: $out = $in::from_bytes($stream)?.into(); ] ] [ $($fields)* $field ]);
     };
-    // Set a field (array => size_field).
-    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: [$type:ty, $cnt:ident], $($tt:tt)*]
+    // Set a field (ArraySized16)
+    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: [ $type:ty, sized16 ], $($tt:tt)*]
         -> [ $($set:tt)* ] [ $($fields:tt)* ]) => {
         def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [
-                let mut $field = Vec::new();
-                let mut count = $cnt;
-                // XXX while $stream.left() >= <$type>::min_size() as u64 && count > 0 {
-                while $stream.left() > 0 && count > 0 {
-                    debug!("XXX left: {} count: {} going to read {}", $stream.left(), count, stringify!($type));
-                    let v = <$type>::from_bytes($stream)?;
-                    $field.push(v);
-                    count -= 1;
-                }
-                debug!("XXX left2: {}", $stream.left());
-            ] ] [ $($fields)* $field ]);
+            [ $($set)* [ let $field = ArraySized32::<$type>::from_bytes($stream)?; ] ] [ $($fields)* $field ]);
     };
-    // Set a field (array).
-    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: [$type:ty], $($tt:tt)*]
+    // Set a field (ArraySized32)
+    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: [ $type:ty, sized ], $($tt:tt)*]
         -> [ $($set:tt)* ] [ $($fields:tt)* ]) => {
         def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [
-                let mut $field = Vec::new();
-                // XXX while $stream.left() >= <$type>::min_size() as u64 {
-                while $stream.left() > 0 {
-                    debug!("XXX left: {} going to read {}", $stream.left(), stringify!($type));
-                    let v = <$type>::from_bytes($stream)?;
-                    $field.push(v);
-                }
-                debug!("XXX left2: {}", $stream.left());
-            ] ] [ $($fields)* $field ]);
+            [ $($set)* [ let $field = ArraySized32::<$type>::from_bytes($stream)?; ] ] [ $($fields)* $field ]);
+    };
+    // Set a field (ArrayUnsized)
+    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: [ $type:ty $(, unsized)? ], $($tt:tt)*]
+        -> [ $($set:tt)* ] [ $($fields:tt)* ]) => {
+        def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
+            [ $($set)* [ let $field = ArrayUnsized::<$type>::from_bytes($stream)?; ] ] [ $($fields)* $field ]);
     };
     // Set a field.
     (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: $type:tt, $($tt:tt)*]
@@ -300,16 +293,6 @@ macro_rules! def_struct {
     (@to_bytes_ $struct:expr, $stream:ident, [ $field:tt: $type:tt as $_type:tt, $($tt:tt)*] -> [ $($set:tt)* ]) => {
         def_struct!(@to_bytes_ $struct, $stream, [ $($tt)* ] ->
             [ $($set)* [ $type::from($struct.$field).to_bytes($stream)?; ] ]);
-    };
-    // Write a field value (array)
-    //(@to_bytes_ $struct:expr, $stream:ident, [ $field:tt: [$type:ty], $($tt:tt)*] -> [ $($set:tt)* ]) => {
-    //    def_struct!(@to_bytes_ $struct, $stream, [ $($tt)* ] ->
-    //        [ $($set)* [ for v in &$struct.$field { v.to_bytes($stream)?; } ] ]);
-    //};
-    // Write a field value (array => size_field)
-    (@to_bytes_ $struct:expr, $stream:ident, [ $field:tt: [$type:ty $(, $cnt:ident)? ], $($tt:tt)*] -> [ $($set:tt)* ]) => {
-        def_struct!(@to_bytes_ $struct, $stream, [ $($tt)* ] ->
-            [ $($set)* [ for v in &$struct.$field { v.to_bytes($stream)?; } ] ]);
     };
     // Write a field value.
     (@to_bytes_ $struct:expr, $stream:ident, [ $field:tt: $type:tt, $($tt:tt)*] -> [ $($set:tt)* ]) => {
