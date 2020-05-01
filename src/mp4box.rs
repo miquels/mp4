@@ -388,7 +388,6 @@ macro_rules! def_boxes {
         //
 
         /// All the boxes we know.
-        #[derive(Debug)]
         pub enum MP4Box {
             $(
                 $name($name),
@@ -450,6 +449,18 @@ macro_rules! def_boxes {
                         &MP4Box::$name(ref b) => b.alignment(),
                     )+
                     &MP4Box::GenericBox(ref b) => b.alignment(),
+                }
+            }
+        }
+
+        // Debug implementation that delegates to the variant.
+        impl Debug for MP4Box {
+            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                match self {
+                    $(
+                        &MP4Box::$name(ref b) => Debug::fmt(b, f),
+                    )+
+                    &MP4Box::GenericBox(ref b) => Debug::fmt(b, f),
                 }
             }
         }
