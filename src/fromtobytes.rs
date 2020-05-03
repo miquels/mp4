@@ -317,36 +317,29 @@ macro_rules! def_struct {
 
     // @to_bytes: Generate the to_bytes details for a struct.
     (@to_bytes $struct:expr, $stream:ident, $( $field:tt: $type:tt $(as $as:tt)? ),* $(,)?) => {
-        def_struct!(@to_bytes_ $struct, $stream, [ $( $field: $type $(as $as)?, )* ] -> []);
-    };
-    // Insert a skip instruction.
-    (@to_bytes_ $struct:expr, $stream:ident, [ skip: $amount:tt, $($tt:tt)*] -> [ $($set:tt)* ] ) => {
-        def_struct!(@to_bytes_ $struct, $stream, [ $($tt)* ] ->
-            [ $($set)* [ $stream.skip($amount)?; ] ] );
-    };
-    // Write a field value (as)
-    (@to_bytes_ $struct:expr, $stream:ident, [ $field:tt: $type:tt as $_type:tt, $($tt:tt)*] -> [ $($set:tt)* ]) => {
-        def_struct!(@to_bytes_ $struct, $stream, [ $($tt)* ] ->
-            [ $($set)* [ $type::from($struct.$field).to_bytes($stream)?; ] ]);
-    };
-    // Write a field value.
-    (@to_bytes_ $struct:expr, $stream:ident, [ $field:tt: $type:tt, $($tt:tt)*] -> [ $($set:tt)* ]) => {
-        def_struct!(@to_bytes_ $struct, $stream, [ $($tt)* ] ->
-            [ $($set)* [ $struct.$field.to_bytes($stream)?; ] ]);
-    };
-    // Final.
-    (@to_bytes_ $_struct:expr, $_stream:tt, [] -> [ $([$($set:tt)*])* ] ) => {
         {
             $(
-                $($set)*
+                def_struct!(@to_bytes_ $struct, $stream, $field: $type $(as $as)?);
             )*
-            Ok::<_, io::Error>(())
+            Ok(())
         }
+    };
+    // Insert a skip instruction.
+    (@to_bytes_ $struct:expr, $stream:ident, skip: $amount:tt) => {
+        $stream.skip($amount)?;
+    };
+    // Write a field value (as)
+    (@to_bytes_ $struct:expr, $stream:ident, $field:tt: $type:tt as $_type:tt) => {
+        $type::from($struct.$field).to_bytes($stream)?;
+    };
+    // Write a field value.
+    (@to_bytes_ $struct:expr, $stream:ident, $field:tt: $type:tt) => {
+        $struct.$field.to_bytes($stream)?;
     };
 
     // Helper.
-    (@check_skip $this:expr, $dbg:expr, skip) => { };
-    (@check_skip $this:expr, $dbg:expr, $field:ident) => { $dbg.field(stringify!($field), &$this.$field); };
+    (@filter_skip skip, $($tt:tt)*) => {};
+    (@filter_skip $field:ident, $($tt:tt)*) => { $($tt)* };
 
     // Main entry point to define just one struct.
     ($name:ident, $($field:tt: $type:tt $(as $as:tt)?),* $(,)?) => {
@@ -361,7 +354,7 @@ macro_rules! def_struct {
             fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
                 let mut dbg = f.debug_struct(stringify!($name));
                 $(
-                    def_struct!(@check_skip self, dbg,  $field);
+                    def_struct!(@filter_skip $field, dbg.field(stringify!($field), &self.$field););
                 )*
                 dbg.finish()
             }

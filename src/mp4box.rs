@@ -566,7 +566,7 @@ macro_rules! def_box {
                 let mut dbg = f.debug_struct(stringify!($name));
                 dbg.field("fourcc", &self.fourcc());
                 $(
-                    def_struct!(@check_skip self, dbg,  $field);
+                    def_struct!(@filter_skip $field, dbg.field(stringify!($field), &self.$field););
                 )*
                 dbg.finish()
             }
