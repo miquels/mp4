@@ -388,7 +388,7 @@ impl Debug for U8Array {
 
 impl Debug for GenericBox {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let mut dbg = f.debug_struct("Box");
+        let mut dbg = f.debug_struct("GenericBox");
         dbg.field("fourcc", &self.fourcc);
         dbg.field("data", &U8Array(self.size));
         if self.skip {
@@ -511,7 +511,7 @@ macro_rules! def_boxes {
                     $(
                         &MP4Box::$name(ref b) => Debug::fmt(b, f),
                     )+
-                    &MP4Box::GenericBox(ref b) => Debug::fmt(b, f),
+                    MP4Box::GenericBox(b) => Debug::fmt(b, f),
                 }
             }
         }
