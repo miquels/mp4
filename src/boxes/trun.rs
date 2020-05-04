@@ -6,6 +6,7 @@
 use std::io;
 use crate::fromtobytes::{FromBytes, ToBytes, ReadBytes, WriteBytes};
 use crate::types::*;
+use crate::mp4box::FullBox;
 
 //  aligned(8) class TrackRunBox
 //  extends FullBox(‘trun’, version, tr_flags) {
@@ -28,12 +29,10 @@ use crate::types::*;
 /// 8.8.8 Track Fragment Run Box (ISO/IEC 14496-12:2015(E))
 #[derive(Debug)]
 pub struct TrackRunBox {
-    version:                    Version,
-    flags:                      Flags,
     sample_count:               u32,
     data_offset:                Option<i32>,
     first_sample_flags:         Option<SampleFlags>,
-    entries:                    Vec<TrackRunEntry>,
+    entries:                    ArrayUnsized<TrackRunEntry>,
 }
 
 // as long as we don't have bool.then().
@@ -47,20 +46,19 @@ fn b_then<T>(flag: bool, closure: impl FnOnce() -> T) -> Option<T> {
 
 impl FromBytes for TrackRunBox {
     fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<TrackRunBox> {
-        let version = Version::from_bytes(stream)?;
-        let flags = Flags::from_bytes(stream)?;
+        let flags = stream.flags();
 
         let sample_count = u32::from_bytes(stream)?;
 
-        let data_offset = b_then((flags.0 & 0x01) > 0, || i32::from_bytes(stream)).transpose()?;
-        let first_sample_flags = b_then((flags.0 & 0x04) > 0, || SampleFlags::from_bytes(stream)).transpose()?;
+        let data_offset = b_then((flags & 0x01) > 0, || i32::from_bytes(stream)).transpose()?;
+        let first_sample_flags = b_then((flags & 0x04) > 0, || SampleFlags::from_bytes(stream)).transpose()?;
 
-        let do_sample_dur = (flags.0 & 0x0100) > 0;
-        let do_sample_size = (flags.0 & 0x0200) > 0;
-        let do_sample_flags = (flags.0 & 0x0400) > 0;
-        let do_sample_comp = (flags.0 & 0x0800) > 0;
+        let do_sample_dur = (flags & 0x0100) > 0;
+        let do_sample_size = (flags & 0x0200) > 0;
+        let do_sample_flags = (flags & 0x0400) > 0;
+        let do_sample_comp = (flags & 0x0800) > 0;
 
-        let mut entries = Vec::new();
+        let mut entries = ArrayUnsized::new();
         while entries.len() < sample_count as usize {
             let sample_duration = b_then(do_sample_dur, || u32::from_bytes(stream)).transpose()?;
             let sample_size = b_then(do_sample_size, || u32::from_bytes(stream)).transpose()?;
@@ -83,8 +81,6 @@ impl FromBytes for TrackRunBox {
         }
 
         Ok(TrackRunBox {
-            version,
-            flags,
             sample_count,
             data_offset,
             first_sample_flags,
@@ -97,13 +93,6 @@ impl FromBytes for TrackRunBox {
 
 impl ToBytes for TrackRunBox {
     fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
-        self.version.to_bytes(stream)?;
-        let flags =
-            self.data_offset.is_some() as u32 * 0x01 |
-            self.first_sample_flags.is_some() as u32 * 0x04 |
-            self.entries.first().map(|e| e.flags()).unwrap_or(0);
-        Flags(flags).to_bytes(stream)?;
-
         (self.entries.len() as u32).to_bytes(stream)?;
 
         self.data_offset.as_ref().map_or(Ok(()), |v| v.to_bytes(stream))?;
@@ -113,6 +102,24 @@ impl ToBytes for TrackRunBox {
             e.to_bytes(stream)?;
         }
         Ok(())
+    }
+}
+
+impl FullBox for TrackRunBox {
+    fn version(&self) -> Option<u8> {
+        for e in &self.entries {
+            if let Some(cto) = e.sample_composition_time_offset {
+                if cto < 0 {
+                    return Some(1);
+                }
+            }
+        }
+        None
+    }
+    fn flags(&self) -> u32 {
+        self.data_offset.is_some() as u32 * 0x01 |
+        self.first_sample_flags.is_some() as u32 * 0x04 |
+        self.entries.first().map(|e| e.flags()).unwrap_or(0)
     }
 }
 
@@ -136,16 +143,19 @@ impl TrackRunEntry {
 
 impl ToBytes for TrackRunEntry {
     fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
-        self.sample_duration.as_ref().map_or(Ok(()), |v| v.to_bytes(stream))?;
-        self.sample_size.as_ref().map_or(Ok(()), |v| v.to_bytes(stream))?;
-        self.sample_flags.as_ref().map_or(Ok(()), |v| v.to_bytes(stream))?;
-        if let Some(cto) = self.sample_composition_time_offset {
-            if cto < 0 {
-                stream.set_version(1);
-            }
-            cto.to_bytes(stream)?;
+        let flags = stream.flags();
+        if (flags & 0x0100) > 0 {
+            self.sample_duration.unwrap_or(0).to_bytes(stream)?;
+        }
+        if (flags & 0x0200) > 0 {
+            self.sample_size.unwrap_or(0).to_bytes(stream)?;
+        }
+        if (flags & 0x0400) > 0 {
+            self.sample_flags.as_ref().unwrap_or(&SampleFlags::default()).to_bytes(stream)?;
+        }
+        if (flags & 0x0800) > 0 {
+            self.sample_composition_time_offset.unwrap_or(0).to_bytes(stream)?;
         }
         Ok(())
     }
 }
-

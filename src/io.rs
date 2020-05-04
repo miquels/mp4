@@ -9,8 +9,6 @@ pub struct Mp4File<F> {
     pos:     u64,
     size:    u64,
     buf:     Vec<u8>,
-    version: u8,
-    fourcc:  FourCC,
 }
 
 impl<F> Mp4File<F> {
@@ -27,8 +25,6 @@ impl<F> Mp4File<F> {
             pos,
             size,
             buf: Vec::new(),
-            version: 0,
-            fourcc: FourCC(0),
         }
     }
 }
@@ -104,18 +100,6 @@ where
     fn size(&self) -> u64 {
         self.size
     }
-    fn version(&self) -> u8 {
-        self.version
-    }
-    fn set_version(&mut self, version: u8) {
-        self.version = version;
-    }
-    fn fourcc(&self) -> FourCC {
-        self.fourcc.clone()
-    }
-    fn set_fourcc(&mut self, fourcc: FourCC) {
-        self.fourcc = fourcc;
-    }
 }
 
 impl<'a, B: ?Sized + ReadBytes + 'a> ReadBytes for Box<B> {
@@ -143,13 +127,10 @@ impl<'a, B: ?Sized + BoxBytes + 'a> BoxBytes for Box<B> {
     fn version(&self) -> u8 {
         B::version(&*self)
     }
-    fn set_version(&mut self, version: u8) {
-        B::set_version(&mut *self, version)
+    fn flags(&self) -> u32 {
+        B::flags(&*self)
     }
     fn fourcc(&self) -> FourCC {
         B::fourcc(&*self)
-    }
-    fn set_fourcc(&mut self, fourcc: FourCC) {
-        B::set_fourcc(&mut *self, fourcc)
     }
 }

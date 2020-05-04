@@ -6,83 +6,16 @@
 use std::io;
 use crate::fromtobytes::{FromBytes, ToBytes, ReadBytes, WriteBytes};
 use crate::types::*;
+use crate::mp4box::BoxInfo;
 
-/// 8.16.3 Segment Index Box (ISO/IEC 14496-12:2015(E))
-#[derive(Debug)]
-pub struct SegmentIndexBox {
-    version:                    Version,
-    flags:                      Flags,
-    reference_id:               u32,
-    timescale:                  u32,
-    earliest_presentation_time: u64,
-    first_offset:               u64,
-    references:                 Vec<SegmentReference>,
-}
-
-impl FromBytes for SegmentIndexBox {
-    fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<SegmentIndexBox> {
-        let version = Version::from_bytes(stream)?;
-        let flags = Flags::from_bytes(stream)?;
-
-        let reference_id = u32::from_bytes(stream)?;
-        let timescale = u32::from_bytes(stream)?;
-
-        let earliest_presentation_time;
-        let first_offset;
-        if stream.version() == 0 {
-            earliest_presentation_time = u32::from_bytes(stream)? as u64;
-            first_offset = u32::from_bytes(stream)? as u64;
-        } else {
-            earliest_presentation_time = u64::from_bytes(stream)?;
-            first_offset = u64::from_bytes(stream)?;
-        };
-        stream.skip(2)?;
-
-        let reference_count = u16::from_bytes(stream)? as usize;
-        let mut references = Vec::new();
-        while references.len() < reference_count {
-            references.push(SegmentReference::from_bytes(stream)?);
-        }
-
-        Ok(SegmentIndexBox {
-            version,
-            flags,
-            reference_id,
-            timescale,
-            earliest_presentation_time,
-            first_offset,
-            references,
-        })
-    }
-
-    fn min_size() -> usize { 16 }
-}
-
-impl ToBytes for SegmentIndexBox {
-    fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
-        self.version.to_bytes(stream)?;
-        self.flags.to_bytes(stream)?;
-
-        self.reference_id.to_bytes(stream)?;
-        self.timescale.to_bytes(stream)?;
-
-        if self.earliest_presentation_time < 0x100000000 && self.first_offset < 0x100000000 {
-            (self.earliest_presentation_time as u32).to_bytes(stream)?;
-            (self.first_offset as u32).to_bytes(stream)?;
-        } else {
-            self.earliest_presentation_time.to_bytes(stream)?;
-            self.first_offset.to_bytes(stream)?;
-            stream.set_version(1);
-        }
-        stream.skip(2)?;
-
-        (self.references.len() as u16).to_bytes(stream)?;
-        for r in &self.references {
-            r.to_bytes(stream)?;
-        }
-
-        Ok(())
-    }
+// 8.16.3 Segment Index Box (ISO/IEC 14496-12:2015(E))
+def_box! { SegmentIndexBox,
+        reference_id:               u32,
+        timescale:                  u32,
+        earliest_presentation_time: VersionSizedUint as u64,
+        first_offset:               VersionSizedUint as u64,
+        skip:                       2,
+        references:                 [SegmentReference, sized16],
 }
 
 /// 8.16.3 Segment Index Box, Segment Reference struct. (ISO/IEC 14496-12:2015(E))

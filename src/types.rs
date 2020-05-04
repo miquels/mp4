@@ -14,6 +14,7 @@ use chrono::{
 };
 
 use crate::fromtobytes::{FromBytes, ReadBytes, ToBytes, WriteBytes};
+use crate::mp4box::FullBox;
 
 // Convenience macro to implement FromBytes/ToBytes for newtypes.
 macro_rules! def_from_to_bytes_newtype {
@@ -57,6 +58,15 @@ macro_rules! def_from_to_bytes_versioned {
                 Ok(())
             }
         }
+        impl FullBox for $newtype {
+            fn version(&self) -> Option<u8> {
+                if self.0 < 0x1_0000_0000 {
+                    None
+                } else {
+                    Some(1)
+                }
+            }
+        }
         impl From<$newtype> for u64 {
             fn from(t: $newtype) -> u64 {
                 t.0
@@ -68,36 +78,6 @@ macro_rules! def_from_to_bytes_versioned {
             }
         }
     };
-}
-
-/// Version is a magic variable. Every time you get or set
-/// it, it changes the version on the underlying source
-/// so that everything _after_ it is interpreted as that version.
-#[derive(Clone, Copy)]
-pub struct Version(u8);
-
-impl FromBytes for Version {
-    fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> {
-        let version = u8::from_bytes(bytes)?;
-        bytes.set_version(version);
-        Ok(Version(version))
-    }
-    fn min_size() -> usize {
-        u8::min_size()
-    }
-}
-impl ToBytes for Version {
-    fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) -> io::Result<()> {
-        self.0.to_bytes(bytes)?;
-        bytes.set_version(self.0);
-        Ok(())
-    }
-}
-
-impl Debug for Version {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?}", self.0)
-    }
 }
 
 /// The optional "usertype" is a uuid.
@@ -385,28 +365,24 @@ impl Debug for Matrix {
 
 macro_rules! impl_flags {
     ($type:tt) => {
-        /// 24 bits of flags.
+        /// Not a real type, value comes from stream.get_flags()
         #[derive(Clone, Copy)]
         pub struct $type(pub u32);
 
         impl FromBytes for $type {
             fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> {
-                let data = bytes.read(3)?;
-                let mut buf = [0u8; 4];
-                (&mut buf[1..]).copy_from_slice(&data);
-                Ok($type(u32::from_be_bytes(buf)))
+                Ok($type(bytes.flags()))
             }
             fn min_size() -> usize {
-                3
+                0
             }
         }
 
         impl ToBytes for $type {
-            fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) -> io::Result<()> {
-                bytes.write(&self.0.to_be_bytes()[1..])
+            fn to_bytes<W: WriteBytes>(&self, _bytes: &mut W) -> io::Result<()> {
+                Ok(())
             }
         }
-
 
         impl $type {
             pub fn get(&self, bit: u32) -> bool {
@@ -614,10 +590,17 @@ impl ToBytes for CompositionOffsetEntry {
     fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
         self.count.to_bytes(stream)?;
         self.offset.to_bytes(stream)?;
-        if self.offset < 0 {
-            stream.set_version(1);
-        }
         Ok(())
+    }
+}
+
+impl FullBox for CompositionOffsetEntry {
+    fn version(&self) -> Option<u8> {
+        if self.offset < 0 {
+            Some(1)
+        } else {
+            None
+        }
     }
 }
 
@@ -625,7 +608,7 @@ impl ToBytes for CompositionOffsetEntry {
 ///
 /// For the first four fields, see 8.6.4.3 (Semantics).
 /// The sample_is_non_sync_sample field  provides the same information as the sync sample table [8.6.2].
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct SampleFlags {
     pub is_leading:                  u8,
     pub sample_depends_on:           u8,
@@ -735,6 +718,25 @@ macro_rules! define_array {
                     elem.to_bytes(stream)?;
                 }
                 Ok(())
+            }
+        }
+
+        impl<T> FullBox for $name<T> where T: FullBox {
+            fn version(&self) -> Option<u8> {
+                // Find the highest version of any entry.
+                let mut r = None;
+                for e in &self.vec {
+                    if let Some(ver) = e.version() {
+                        if let Some(r_ver) = r {
+                            if ver > r_ver {
+                                r = Some(ver);
+                            }
+                        } else {
+                            r = Some(ver);
+                        }
+                    }
+                }
+                r
             }
         }
 

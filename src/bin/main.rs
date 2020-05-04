@@ -7,6 +7,8 @@ use mp4::io::Mp4File;
 use mp4::mp4box::read_boxes;
 
 fn main() -> Result<()> {
+    //env_logger::init();
+
     let file = File::open(std::env::args().skip(1).next().unwrap())?;
     let file = BufReader::new(file);
 

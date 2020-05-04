@@ -9,90 +9,24 @@ use crate::types::*;
 pub trait BoxInfo {
     /// The "fourcc" name of this box.
     fn fourcc(&self) -> FourCC;
-    /// Alignment of this box (as per spec)
-    fn alignment(&self) -> usize;
     /// Sub-boxes if this is a container.
     fn boxes(&self) -> Option<&[MP4Box]> {
         None
     }
-}
-
-/// Headers + Content = IsoBox.
-pub struct IsoBox<C> {
-    fourcc:  FourCC,
-    content: C,
-}
-
-impl<C> IsoBox<C>
-where
-    C: FromBytes + ToBytes + BoxInfo,
-{
-    /// Wrap a struct with a box header.
-    pub fn wrap(content: C) -> IsoBox<C> {
-        IsoBox {
-            fourcc: content.fourcc().clone(),
-            content,
-        }
+    /// Highest version that we reckognize.
+    /// If it is the default (None) this is a basebox.
+    fn max_version() -> Option<u8> {
+        None
     }
 }
 
-// Define FromBytes trait for IsoBox
-impl<C> FromBytes for IsoBox<C>
-where
-    C: FromBytes + BoxInfo,
-{
-    fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<IsoBox<C>> {
-        // Read the header.
-        let mut reader = BoxReader::new(stream)?;
-
-        // Read the body.
-        let content = C::from_bytes(&mut reader)?;
-
-        Ok(IsoBox {
-            fourcc: reader.fourcc,
-            content,
-        })
-    }
-
-    fn min_size() -> usize {
-        8 + C::min_size()
-    }
-}
-
-// Define ToBytes trait for IsoBox
-impl<C> ToBytes for IsoBox<C>
-where
-    C: ToBytes + BoxInfo,
-{
-    fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
-        let mut writer = BoxWriter::new(stream, self.content.fourcc())?;
-        writer.set_fourcc(writer.fourcc.clone());
-        self.content.to_bytes(&mut writer)?;
-        writer.finalize()
-    }
-}
-
-// Define BoxInfo trait for the enum.
-impl<C> BoxInfo for IsoBox<C>
-where
-    C: BoxInfo,
-{
-    #[inline]
-    fn fourcc(&self) -> FourCC {
-        self.fourcc.clone()
-    }
-    #[inline]
-    fn alignment(&self) -> usize {
-        self.content.alignment()
-    }
-}
-
-impl<C> Debug for IsoBox<C>
-where
-    C: Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        Debug::fmt(&self.content, f)
+/// Calculated version and flags.
+pub trait FullBox {
+    /// What version of the containing box does this type require, based on its value
+    fn version(&self) -> Option<u8>;
+    /// What are the flags for the full box.
+    fn flags(&self) -> u32 {
+        0
     }
 }
 
@@ -102,40 +36,73 @@ where
 //
 //
 
-/// Reads the box header.
-pub struct BoxReader<'a> {
-    maxsize:      u64,
-    prev_version: u8,
-    // We box it, since a BoxReader might contain a BoxReader.
-    inner:        Box<dyn ReadBytes + 'a>,
-    pub fourcc:   FourCC,
+#[derive(Debug, Clone)]
+pub struct BoxHeader {
+    pub(crate) size:     u64,
+    pub(crate) fourcc:   FourCC,
+    pub(crate) version:  Option<u8>,
+    pub(crate) flags:    u32,
+    pub(crate) max_version: Option<u8>,
 }
 
-impl<'a> BoxReader<'a> {
-    /// Read the box header, then return a size-limited reader.
-    pub fn new(mut stream: &'a mut impl ReadBytes) -> io::Result<BoxReader<'a>> {
+impl BoxHeader {
+    fn read(mut stream: &mut impl ReadBytes) -> io::Result<BoxHeader> {
         let size1 = u32::from_bytes(&mut stream)?;
         let fourcc = FourCC::from_bytes(&mut stream)?;
-        let size = match size1 {
+        let mut size = match size1 {
             0 => stream.size() - stream.pos(),
             1 => u64::from_bytes(&mut stream)?.saturating_sub(16),
             x => x.saturating_sub(8) as u64,
         };
 
-        let maxsize = std::cmp::min(stream.size(), stream.pos() + size);
-        debug!(
-            "XXX here {} size {}, size1 {} maxsize {} left {}",
-            fourcc,
+        let max_version = MP4Box::max_version_from_fourcc(fourcc.clone());
+        let mut version = None;
+        let mut flags = 0;
+        if max_version.is_some() {
+            version = Some(u8::from_bytes(&mut stream)?);
+            let data = stream.read(3)?;
+            let mut buf = [0u8; 4];
+            (&mut buf[1..]).copy_from_slice(&data);
+            flags = u32::from_be_bytes(buf);
+            size -= 4;
+        }
+
+        let b = Ok(BoxHeader{
             size,
-            size1,
-            maxsize,
-            stream.left()
-        );
+            fourcc,
+            version,
+            flags,
+            max_version,
+        });
+        debug!("BoxHeader::read: {:?}", b);
+        b
+
+    }
+}
+
+/// Limited reader that reads no further than the box size.
+pub struct BoxReader<'a> {
+    pub(crate) header:       BoxHeader,
+    pub(crate) re_use:       bool,
+    maxsize:      u64,
+    // We box it, since a BoxReader might contain a BoxReader.
+    inner:        Box<dyn ReadBytes + 'a>,
+}
+
+impl<'a> BoxReader<'a> {
+    /// Read the box header, then return a size-limited reader.
+    pub fn new<R: ReadBytes>(mut stream: &'a mut R) -> io::Result<BoxReader<'a>> {
+        let header = match stream.boxheader() {
+            Some(header) => header,
+            None => BoxHeader::read(&mut stream)?,
+        };
+        let maxsize = std::cmp::min(stream.size(), stream.pos() + header.size);
+        debug!("XXX header {:?} maxsize {} left {}", header, maxsize, stream.left());
         Ok(BoxReader {
-            prev_version: stream.version(),
+            header,
+            re_use: false,
             maxsize,
             inner: Box::new(stream),
-            fourcc,
         })
     }
 }
@@ -145,13 +112,10 @@ impl<'a> Drop for BoxReader<'a> {
         if self.pos() < self.maxsize {
             debug!(
                 "XXX BoxReader {} drop: skipping {}",
-                self.fourcc,
+                self.header.fourcc,
                 self.maxsize - self.pos()
             );
             let _ = self.skip(self.maxsize - self.pos());
-        }
-        if self.inner.version() != self.prev_version {
-            self.inner.set_version(self.prev_version);
         }
     }
 }
@@ -162,7 +126,7 @@ impl<'a> ReadBytes for BoxReader<'a> {
         if amount == 0 {
             debug!(
                 "XXX self reader for {} amount 0 left {}",
-                self.fourcc,
+                self.header.fourcc,
                 self.left()
             );
         }
@@ -206,16 +170,21 @@ impl<'a> BoxBytes for BoxReader<'a> {
         self.maxsize
     }
     fn version(&self) -> u8 {
-        self.inner.version()
+        self.header.version.unwrap_or(0)
     }
-    fn set_version(&mut self, version: u8) {
-        self.inner.set_version(version)
+    fn flags(&self) -> u32 {
+        self.header.flags
     }
     fn fourcc(&self) -> FourCC {
-        self.fourcc.clone()
+        self.header.fourcc.clone()
     }
-    fn set_fourcc(&mut self, fourcc: FourCC) {
-        self.fourcc = fourcc;
+    fn boxheader(&mut self) -> Option<BoxHeader> {
+        if self.re_use {
+            self.re_use = false;
+            Some(self.header.clone())
+        } else {
+            None
+        }
     }
 }
 
@@ -255,6 +224,7 @@ where
         self.inner.seek(self.offset)?;
         let sz = pos - self.offset;
         sz.to_bytes(&mut self.inner)?;
+        self.inner.seek(pos)?;
         Ok(())
     }
 }
@@ -293,16 +263,13 @@ where
         self.inner.seek(pos)
     }
     fn version(&self) -> u8 {
-        self.inner.version()
+        unimplemented!()
     }
-    fn set_version(&mut self, version: u8) {
-        self.inner.set_version(version)
+    fn flags(&self) -> u32 {
+        unimplemented!()
     }
     fn fourcc(&self) -> FourCC {
-        self.inner.fourcc()
-    }
-    fn set_fourcc(&mut self, fourcc: FourCC) {
-        self.inner.set_fourcc(fourcc)
+        unimplemented!()
     }
 }
 
@@ -372,10 +339,6 @@ impl BoxInfo for GenericBox {
     fn fourcc(&self) -> FourCC {
         self.fourcc.clone()
     }
-    #[inline]
-    fn alignment(&self) -> usize {
-        0
-    }
 }
 
 struct U8Array(u64);
@@ -432,7 +395,7 @@ macro_rules! def_boxes {
     (@DEF $name:ident, $fourcc:expr,) => {
     };
 
-    ($($name:ident, $fourcc:expr, $align:expr $(=> $block:tt)? ; )+) => {
+    ($($name:ident, $fourcc:expr,  [$($maxver:expr)? $(,$deps:ident)*]  $(=> $block:tt)? ; )+) => {
 
         //
         // First define the enum.
@@ -446,19 +409,44 @@ macro_rules! def_boxes {
             GenericBox(GenericBox),
         }
 
+        impl MP4Box {
+            pub(crate) fn max_version_from_fourcc(fourcc: FourCC) -> Option<u8> {
+                let b = fourcc.to_be_bytes();
+                match std::str::from_utf8(&b[..]).unwrap_or("") {
+                    $(
+                        $fourcc => $name::max_version(),
+                    )+
+                    _ => None,
+                }
+            }
+        }
+
         // Define FromBytes trait for the enum.
         impl FromBytes for MP4Box {
             fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<MP4Box> {
 
                 // Read the header.
                 let mut reader = BoxReader::new(stream)?;
-                debug!("XXX got reader for {:?} left {}", reader.fourcc, reader.left());
+                debug!("XXX got reader for {:?} left {}", reader.header, reader.left());
+
+                // If the version is too high, read it as a GenericBox.
+                match (reader.header.version, reader.header.max_version) {
+                    (Some(version), Some(max_version)) => {
+                        if version > max_version {
+                            return Ok(MP4Box::GenericBox(GenericBox::from_bytes(&mut reader)?));
+                        }
+                    },
+                    _ => {},
+                }
 
                 // Read the body.
-                let b = reader.fourcc.to_be_bytes();
+                let b = reader.header.fourcc.to_be_bytes();
                 let e = match std::str::from_utf8(&b[..]).unwrap_or("") {
                     $(
-                        $fourcc => MP4Box::$name($name::from_bytes(&mut reader)?),
+                        $fourcc => {
+                            reader.re_use = true;
+                            MP4Box::$name($name::from_bytes(&mut reader)?)
+                        },
                     )+
                     _ => MP4Box::GenericBox(GenericBox::from_bytes(&mut reader)?),
                 };
@@ -493,15 +481,6 @@ macro_rules! def_boxes {
                     &MP4Box::GenericBox(ref b) => b.fourcc(),
                 }
             }
-            #[inline]
-            fn alignment(&self) -> usize {
-                match self {
-                    $(
-                        &MP4Box::$name(ref b) => b.alignment(),
-                    )+
-                    &MP4Box::GenericBox(ref b) => b.alignment(),
-                }
-            }
         }
 
         // Debug implementation that delegates to the variant.
@@ -511,7 +490,7 @@ macro_rules! def_boxes {
                     $(
                         &MP4Box::$name(ref b) => Debug::fmt(b, f),
                     )+
-                    MP4Box::GenericBox(b) => Debug::fmt(b, f),
+                    &MP4Box::GenericBox(ref b) => Debug::fmt(b, f),
                 }
             }
         }
@@ -530,10 +509,12 @@ macro_rules! def_boxes {
                 fn fourcc(&self) -> FourCC {
                     FourCC::new($fourcc)
                 }
-                #[inline]
-                fn alignment(&self) -> usize {
-                    $align
-                }
+                $(
+                    #[inline]
+                    fn max_version() -> Option<u8> {
+                        Some($maxver)
+                    }
+                )*
             }
 
             // Implement BoxChildren trait for this struct.
@@ -561,7 +542,7 @@ macro_rules! def_box {
         );
 
         // Debug implementation that adds fourcc field.
-        impl Debug for $name {
+        impl std::fmt::Debug for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
                 let mut dbg = f.debug_struct(stringify!($name));
                 dbg.field("fourcc", &self.fourcc());
@@ -579,8 +560,11 @@ macro_rules! def_box {
                 debug!("XXX frombyting {}", stringify!($name));
 
                 // Deserialize.
+                let mut reader = $crate::mp4box::BoxReader::new(stream)?;
+                let reader = &mut reader;
+
                 let r: io::Result<$name> = {
-                    def_struct!(@from_bytes $name, [], stream, $(
+                    def_struct!(@from_bytes $name, [], reader, $(
                         $field: $type $(as $as)?,
                     )*)
                 };
@@ -602,7 +586,7 @@ macro_rules! def_box {
             fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
 
                 // Write the header.
-                let mut stream = BoxWriter::new(stream, self.fourcc())?;
+                let mut stream = $crate::mp4box::BoxWriter::new(stream, self.fourcc())?;
                 let stream = &mut stream;
 
                 // Serialize.

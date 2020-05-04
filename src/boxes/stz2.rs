@@ -1,11 +1,9 @@
 use std::io;
 use crate::fromtobytes::{FromBytes, ToBytes, ReadBytes, WriteBytes};
-use crate::types::*;
 
+/// 8.7.3.3 Compact Sample Size Box (ISO/IEC 14496-12:2015(E))
 #[derive(Debug)]
 pub struct CompactSampleSizeBox {
-    version:        Version,
-    flags:          Flags,
     // skip:        3.
     field_size:     u8,
     sample_count:   u32,
@@ -14,8 +12,6 @@ pub struct CompactSampleSizeBox {
 
 impl FromBytes for CompactSampleSizeBox {
     fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<CompactSampleSizeBox> {
-        let version = Version::from_bytes(stream)?;
-        let flags = Flags::from_bytes(stream)?;
         stream.skip(3)?;
         let field_size = u8::from_bytes(stream)?;
         let sample_count = u32::from_bytes(stream)?;
@@ -38,8 +34,6 @@ impl FromBytes for CompactSampleSizeBox {
             }
         }
         Ok(CompactSampleSizeBox {
-            version,
-            flags,
             field_size,
             sample_count,
             sample_entries,
@@ -51,8 +45,6 @@ impl FromBytes for CompactSampleSizeBox {
 
 impl ToBytes for CompactSampleSizeBox {
     fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
-        self.version.to_bytes(stream)?;
-        self.flags.to_bytes(stream)?;
         (self.field_size as u32).to_bytes(stream)?;
         (self.sample_entries.len() as u32).to_bytes(stream)?;
         let mut i = 0;

@@ -11,6 +11,7 @@ use std::io::{self, ErrorKind::UnexpectedEof};
 use auto_impl::auto_impl;
 
 use crate::types::FourCC;
+use crate::mp4box::BoxHeader;
 
 /// Byte reader in a stream.
 #[auto_impl(&mut)]
@@ -52,17 +53,16 @@ pub trait BoxBytes {
     fn version(&self) -> u8 {
         0
     }
-    /// Set version metadata.
-    fn set_version(&mut self, _version: u8) {
-        unimplemented!()
+    /// Get flags metadata.
+    fn flags(&self) -> u32 {
+        0
     }
     /// Get last FourCC we read.
     fn fourcc(&self) -> FourCC {
         unimplemented!()
     }
-    /// Set last FourCC we read.
-    fn set_fourcc(&mut self, _fourcc: FourCC) {
-        unimplemented!()
+    fn boxheader(&mut self) -> Option<BoxHeader> {
+        None
     }
 }
 
@@ -275,7 +275,7 @@ macro_rules! def_struct {
     (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: [ $type:ty, sized16 ], $($tt:tt)*]
         -> [ $($set:tt)* ] [ $($fields:tt)* ]) => {
         def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [ let $field = ArraySized32::<$type>::from_bytes($stream)?; ] ] [ $($fields)* $field ]);
+            [ $($set)* [ let $field = ArraySized16::<$type>::from_bytes($stream)?; ] ] [ $($fields)* $field ]);
     };
     // Set a field (ArraySized32)
     (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: [ $type:ty, sized ], $($tt:tt)*]
