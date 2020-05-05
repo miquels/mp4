@@ -1,6 +1,7 @@
 use std::io;
 use crate::fromtobytes::{FromBytes, ToBytes, ReadBytes, WriteBytes};
 use crate::types::*;
+use crate::mp4box::BoxReader;
 
 #[derive(Debug)]
 pub struct SampleSizeBox {
@@ -11,6 +12,9 @@ pub struct SampleSizeBox {
 
 impl FromBytes for SampleSizeBox {
     fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<SampleSizeBox> {
+        let mut reader = BoxReader::new(stream)?;
+        let stream = &mut reader;
+
         let sample_size = u32::from_bytes(stream)?;
         let sample_count = u32::from_bytes(stream)?;
         let mut sample_entries = ArrayUnsized::new();

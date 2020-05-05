@@ -46,7 +46,7 @@ pub struct BoxHeader {
 }
 
 impl BoxHeader {
-    fn read(mut stream: &mut impl ReadBytes) -> io::Result<BoxHeader> {
+    pub(crate) fn read(mut stream: &mut impl ReadBytes) -> io::Result<BoxHeader> {
         let size1 = u32::from_bytes(&mut stream)?;
         let fourcc = FourCC::from_bytes(&mut stream)?;
         let mut size = match size1 {
@@ -83,7 +83,6 @@ impl BoxHeader {
 /// Limited reader that reads no further than the box size.
 pub struct BoxReader<'a> {
     pub(crate) header:       BoxHeader,
-    pub(crate) re_use:       bool,
     maxsize:      u64,
     // We box it, since a BoxReader might contain a BoxReader.
     inner:        Box<dyn ReadBytes + 'a>,
@@ -100,7 +99,6 @@ impl<'a> BoxReader<'a> {
         debug!("XXX header {:?} maxsize {} left {}", header, maxsize, stream.left());
         Ok(BoxReader {
             header,
-            re_use: false,
             maxsize,
             inner: Box::new(stream),
         })
@@ -145,6 +143,7 @@ impl<'a> ReadBytes for BoxReader<'a> {
         }
         self.inner.skip(amount)
     }
+    #[inline]
     fn left(&self) -> u64 {
         let pos = self.inner.pos();
         if pos > self.maxsize {
@@ -179,12 +178,7 @@ impl<'a> BoxBytes for BoxReader<'a> {
         self.header.fourcc.clone()
     }
     fn boxheader(&mut self) -> Option<BoxHeader> {
-        if self.re_use {
-            self.re_use = false;
-            Some(self.header.clone())
-        } else {
-            None
-        }
+        None
     }
 }
 
@@ -299,6 +293,10 @@ pub struct GenericBox {
 
 impl FromBytes for GenericBox {
     fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<GenericBox> {
+
+        let mut reader = BoxReader::new(stream)?;
+        let stream = &mut reader;
+
         let size = stream.left();
         let data;
         let skip;
@@ -423,32 +421,34 @@ macro_rules! def_boxes {
 
         // Define FromBytes trait for the enum.
         impl FromBytes for MP4Box {
-            fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<MP4Box> {
+            fn from_bytes<R: ReadBytes>(mut stream: &mut R) -> io::Result<MP4Box> {
 
-                // Read the header.
-                let mut reader = BoxReader::new(stream)?;
-                debug!("XXX got reader for {:?} left {}", reader.header, reader.left());
+                // Peek at the header.
+                let saved_pos = stream.pos();
+                let header = BoxHeader::read(stream)?;
+                stream.seek(saved_pos)?;
+
+                //debug!("XXX got reader for {:?} left {}", reader.header, reader.left());
 
                 // If the version is too high, read it as a GenericBox.
-                match (reader.header.version, reader.header.max_version) {
+                match (header.version, header.max_version) {
                     (Some(version), Some(max_version)) => {
                         if version > max_version {
-                            return Ok(MP4Box::GenericBox(GenericBox::from_bytes(&mut reader)?));
+                            return Ok(MP4Box::GenericBox(GenericBox::from_bytes(&mut stream)?));
                         }
                     },
                     _ => {},
                 }
 
                 // Read the body.
-                let b = reader.header.fourcc.to_be_bytes();
+                let b = header.fourcc.to_be_bytes();
                 let e = match std::str::from_utf8(&b[..]).unwrap_or("") {
                     $(
                         $fourcc => {
-                            reader.re_use = true;
-                            MP4Box::$name($name::from_bytes(&mut reader)?)
+                            MP4Box::$name($name::from_bytes(stream)?)
                         },
                     )+
-                    _ => MP4Box::GenericBox(GenericBox::from_bytes(&mut reader)?),
+                    _ => MP4Box::GenericBox(GenericBox::from_bytes(stream)?),
                 };
                 Ok(e)
             }
@@ -557,11 +557,22 @@ macro_rules! def_box {
             #[allow(unused_variables)]
             fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<$name> {
 
-                debug!("XXX frombyting {}", stringify!($name));
+                debug!("XXX frombyting {} min_size is {} stream.left is {}",
+                       stringify!($name), <$name>::min_size(), stream.left());
 
                 // Deserialize.
                 let mut reader = $crate::mp4box::BoxReader::new(stream)?;
                 let reader = &mut reader;
+
+                match (reader.header.version, reader.header.max_version) {
+                    (Some(version), Some(max_version)) => {
+                        if version > max_version {
+                            return Err(io::Error::new(io::ErrorKind::InvalidData,
+                                format!("{}: no suppor for version {}", stringify!($name), version)));
+                        }
+                    },
+                    _ => {},
+                }
 
                 let r: io::Result<$name> = {
                     def_struct!(@from_bytes $name, [], reader, $(

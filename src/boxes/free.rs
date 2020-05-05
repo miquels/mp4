@@ -1,5 +1,6 @@
 use std::io;
 use crate::fromtobytes::{FromBytes, ToBytes, ReadBytes, WriteBytes};
+use crate::mp4box::BoxReader;
 
 macro_rules! free_box {
     ($name:ident) => {
@@ -9,6 +10,8 @@ macro_rules! free_box {
 
         impl FromBytes for $name {
             fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<$name> {
+                let mut reader = BoxReader::new(stream)?;
+                let stream = &mut reader;
                 let size = stream.left();
                 stream.skip(size)?;
                 Ok($name(size))

@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{self, BufReader, BufWriter, Write};
+use std::io::{self, BufWriter, Write};
 
 use anyhow::Result;
 
@@ -7,10 +7,9 @@ use mp4::io::Mp4File;
 use mp4::mp4box::read_boxes;
 
 fn main() -> Result<()> {
-    //env_logger::init();
+    env_logger::init();
 
     let file = File::open(std::env::args().skip(1).next().unwrap())?;
-    let file = BufReader::new(file);
 
     let mut rdr = Mp4File::new(file);
     let base = read_boxes(&mut rdr)?;

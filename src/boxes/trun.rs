@@ -4,9 +4,9 @@
 //
 
 use std::io;
-use crate::fromtobytes::{FromBytes, ToBytes, ReadBytes, WriteBytes};
+use crate::fromtobytes::{FromBytes, ToBytes, ReadBytes, WriteBytes, BoxBytes};
 use crate::types::*;
-use crate::mp4box::FullBox;
+use crate::mp4box::{BoxReader, FullBox};
 
 //  aligned(8) class TrackRunBox
 //  extends FullBox(‘trun’, version, tr_flags) {
@@ -46,6 +46,9 @@ fn b_then<T>(flag: bool, closure: impl FnOnce() -> T) -> Option<T> {
 
 impl FromBytes for TrackRunBox {
     fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<TrackRunBox> {
+        let mut reader = BoxReader::new(stream)?;
+        let stream = &mut reader;
+
         let flags = stream.flags();
 
         let sample_count = u32::from_bytes(stream)?;

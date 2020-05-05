@@ -1,5 +1,6 @@
 use std::io;
 use crate::fromtobytes::{FromBytes, ToBytes, ReadBytes, WriteBytes};
+use crate::mp4box::BoxReader;
 
 /// 8.7.3.3 Compact Sample Size Box (ISO/IEC 14496-12:2015(E))
 #[derive(Debug)]
@@ -12,6 +13,9 @@ pub struct CompactSampleSizeBox {
 
 impl FromBytes for CompactSampleSizeBox {
     fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<CompactSampleSizeBox> {
+        let mut reader = BoxReader::new(stream)?;
+        let stream = &mut reader;
+
         stream.skip(3)?;
         let field_size = u8::from_bytes(stream)?;
         let sample_count = u32::from_bytes(stream)?;

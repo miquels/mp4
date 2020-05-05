@@ -1,7 +1,7 @@
 use std::io;
-use crate::fromtobytes::{FromBytes, ToBytes, ReadBytes, WriteBytes};
+use crate::fromtobytes::{FromBytes, ToBytes, ReadBytes, WriteBytes,BoxBytes};
 use crate::types::*;
-use crate::mp4box::FullBox;
+use crate::mp4box::{BoxReader, FullBox};
 
 #[derive(Debug)]
 pub struct SampleToGroupBox {
@@ -12,6 +12,8 @@ pub struct SampleToGroupBox {
 
 impl FromBytes for SampleToGroupBox {
     fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<SampleToGroupBox> {
+        let mut reader = BoxReader::new(stream)?;
+        let stream = &mut reader;
         let grouping_type = u32::from_bytes(stream)?;
         let grouping_type_parameter = if stream.version() == 1 {
             Some(u32::from_bytes(stream)?)

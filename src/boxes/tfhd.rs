@@ -4,9 +4,9 @@
 //
 
 use std::io;
-use crate::fromtobytes::{FromBytes, ToBytes, ReadBytes, WriteBytes};
+use crate::fromtobytes::{FromBytes, ToBytes, ReadBytes, WriteBytes, BoxBytes};
 use crate::types::*;
-use crate::mp4box::FullBox;
+use crate::mp4box::{BoxReader, FullBox};
 
 //  aligned(8) class TrackFragmentHeaderBox extends FullBox(‘tfhd’, 0, tf_flags){
 //      unsigned int(32) track_ID;
@@ -42,6 +42,9 @@ fn b_then<T>(flag: bool, closure: impl FnOnce() -> T) -> Option<T> {
 
 impl FromBytes for TrackFragmentHeaderBox {
     fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<TrackFragmentHeaderBox> {
+        let mut reader = BoxReader::new(stream)?;
+        let stream = &mut reader;
+
         let flags = stream.flags();
 
         let track_id = u32::from_bytes(stream)?;

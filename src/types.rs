@@ -690,9 +690,9 @@ macro_rules! define_array {
                 } else {
                     <$sizetype>::from_bytes(stream)? as usize
                 };
-                let elemsize = std::mem::size_of::<T>() as u64;
                 let mut v = Vec::<T>::new();
-                while ($nosize || v.len() < count) && stream.left() >= elemsize {
+                let min_size = T::min_size() as u64;
+                while ($nosize || v.len() < count) && stream.left() >= min_size && stream.left() > 0 {
                     v.push(T::from_bytes(stream)?);
                 }
                 Ok($name {
@@ -702,9 +702,9 @@ macro_rules! define_array {
             }
             fn min_size() -> usize {
                 if $nosize {
-                    0
+                    T::min_size()
                 } else {
-                    std::mem::size_of::<T>()
+                    <$sizetype>::min_size()
                 }
             }
         }

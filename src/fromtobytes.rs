@@ -90,6 +90,7 @@ impl ReadBytes for &[u8] {
         Ok(())
     }
 
+    #[inline]
     fn left(&self) -> u64 {
         (*self).len() as u64
     }
@@ -169,9 +170,9 @@ def_from_to_bytes!(u128);
 /// Generic implementation for Vec<T>
 impl<T> FromBytes for Vec<T> where T: FromBytes {
     fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<Self> {
-        let mut v = Vec::<T>::new();
-        let elemsize = std::mem::size_of::<T>() as u64;
-        while stream.left() >= elemsize {
+        let mut v = Vec::new();
+        let min_size = T::min_size() as u64;
+        while stream.left() >= min_size && stream.left() > 0 {
             v.push(T::from_bytes(stream)?);
         }
         Ok(v)
@@ -210,7 +211,11 @@ macro_rules! def_struct {
     (@min_size i32) => { 4 };
     (@min_size u64) => { 8 };
     (@min_size u128) => { 16 };
-    (@min_size [ $_type:ty $(, $cnt:ident)? ]) => { 0 };
+    (@min_size [ $type:ty, sized ]) => { 4 };
+    (@min_size [ $type:ty, sized16 ]) => { 2 };
+    (@min_size [ $type:ty, sized32 ]) => { 4 };
+    (@min_size [ $type:ty, unsized ]) => { 0 };
+    (@min_size [ $_type:ty ]) => { 0 };
     (@min_size $type:ident) => {
         $type::min_size()
     };
@@ -226,27 +231,27 @@ macro_rules! def_struct {
     };
     // Add normal field (as).
     (@def_struct_ $name:ident, [ $field:ident: $_type:ident as $type:ident, $($tt:tt)*] -> [ $($res:tt)* ]) => {
-        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* $field: $type, ]);
+        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* pub $field: $type, ]);
     };
     // Add normal field (ArraySized16)
     (@def_struct_ $name:ident, [ $field:ident: [ $type:ty, sized16 ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
-        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* $field: ArraySized16<$type>, ]);
+        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* pub $field: ArraySized16<$type>, ]);
     };
     // Add normal field (ArraySized32)
     (@def_struct_ $name:ident, [ $field:ident: [ $type:ty, sized ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
-        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* $field: ArraySized32<$type>, ]);
+        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* pub $field: ArraySized32<$type>, ]);
     };
     // Add normal field (ArrayUnsized)
     (@def_struct_ $name:ident, [ $field:ident: [ $type:ty, unsized ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
-        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* $field: Vec<$type>, ]);
+        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* pub $field: Vec<$type>, ]);
     };
     // Add normal field (Vec)
     (@def_struct_ $name:ident, [ $field:ident: [ $type:ty ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
-        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* $field: Vec<$type>, ]);
+        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* pub $field: Vec<$type>, ]);
     };
     // Add normal field.
     (@def_struct_ $name:ident, [ $field:ident: $type:ident, $($tt:tt)*] -> [ $($res:tt)* ]) => {
-        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* $field: $type, ]);
+        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* pub $field: $type, ]);
     };
     // Final.
     (@def_struct_ $name: ident, [] -> [ $($res:tt)* ]) => {
