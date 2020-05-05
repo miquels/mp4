@@ -169,6 +169,85 @@ where
     }
 }
 
+pub struct Mp4Data {
+    data:   Vec<u8>,
+    pos:    usize,
+}
+
+impl Mp4Data {
+    pub fn new() -> Mp4Data {
+        Mp4Data {
+            data: Vec::new(),
+            pos: 0,
+        }
+    }
+}
+
+impl ReadBytes for Mp4Data {
+    fn read(&mut self, amount: u64) -> io::Result<&[u8]> {
+        let amount = if amount == 0 { self.left() } else { amount };
+        if amount == 0 {
+            return Ok(b"");
+        }
+        if amount > self.left() {
+            return Err(io::ErrorKind::UnexpectedEof.into());
+        }
+        let pos = self.pos;
+        let end = self.pos + amount as usize;
+        self.pos += amount as usize;
+        Ok(&self.data[pos..end])
+    }
+
+    fn skip(&mut self, amount: u64) -> io::Result<()> {
+        self.seek(self.pos as u64 + amount)
+    }
+
+    #[inline]
+    fn left(&self) -> u64 {
+        if self.pos > self.data.len() {
+            0
+        } else {
+            (self.data.len() - self.pos) as u64
+        }
+    }
+}
+
+impl WriteBytes for Mp4Data {
+    fn write(&mut self, newdata: &[u8]) -> io::Result<()> {
+        let pos = self.pos as usize;
+        if pos < self.data.len() {
+            if pos + newdata.len() > self.data.len() {
+                self.data.resize(pos + newdata.len(), 0);
+            }
+            self.data[pos..pos + newdata.len()].copy_from_slice(newdata);
+        } else {
+            self.data.extend_from_slice(newdata);
+        }
+        self.pos += newdata.len();
+        Ok(())
+    }
+    fn skip(&mut self, amount: u64) -> io::Result<()> {
+        self.seek(self.pos as u64 + amount)
+    }
+}
+
+impl BoxBytes for Mp4Data {
+    fn pos(&self) -> u64 {
+        self.pos as u64
+    }
+    fn seek(&mut self, pos: u64) -> io::Result<()> {
+        let pos = pos as usize;
+        if pos > self.data.len() {
+            self.data.resize(pos, 0);
+        }
+        self.pos = pos;
+        Ok(())
+    }
+    fn size(&self) -> u64 {
+        self.data.len() as u64
+    }
+}
+
 impl<'a, B: ?Sized + ReadBytes + 'a> ReadBytes for Box<B> {
     fn read(&mut self, amount: u64) -> io::Result<&[u8]> {
         B::read(&mut *self, amount)
