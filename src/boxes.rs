@@ -1,8 +1,8 @@
 use std::fmt::Debug;
 use std::io;
 
-use crate::serialize::{FromBytes, ReadBytes, ToBytes, WriteBytes};
 use crate::mp4box::*;
+use crate::serialize::{FromBytes, ReadBytes, ToBytes, WriteBytes};
 use crate::types::*;
 
 def_boxes! {

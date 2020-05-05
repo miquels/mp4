@@ -2,9 +2,9 @@ use std::fmt::Debug;
 use std::io;
 
 use crate::boxes::MP4Box;
+use crate::io::ReadAt;
 use crate::serialize::{BoxBytes, FromBytes, ReadBytes, ToBytes, WriteBytes};
 use crate::types::*;
-use crate::io::ReadAt;
 
 /// Gets implemented for every box.
 pub trait BoxInfo {
@@ -41,10 +41,10 @@ pub trait FullBox {
 
 #[derive(Debug, Clone)]
 pub struct BoxHeader {
-    pub(crate) size:     u64,
-    pub(crate) fourcc:   FourCC,
-    pub(crate) version:  Option<u8>,
-    pub(crate) flags:    u32,
+    pub(crate) size:        u64,
+    pub(crate) fourcc:      FourCC,
+    pub(crate) version:     Option<u8>,
+    pub(crate) flags:       u32,
     pub(crate) max_version: Option<u8>,
 }
 
@@ -70,7 +70,7 @@ impl BoxHeader {
             size -= 4;
         }
 
-        let b = Ok(BoxHeader{
+        let b = Ok(BoxHeader {
             size,
             fourcc,
             version,
@@ -79,16 +79,15 @@ impl BoxHeader {
         });
         debug!("BoxHeader::read: {:?}", b);
         b
-
     }
 }
 
 /// Limited reader that reads no further than the box size.
 pub struct BoxReader<'a> {
-    pub(crate) header:       BoxHeader,
-    maxsize:      u64,
+    pub(crate) header: BoxHeader,
+    maxsize:           u64,
     // We box it, since a BoxReader might contain a BoxReader.
-    inner:        Box<dyn ReadBytes + 'a>,
+    inner:             Box<dyn ReadBytes + 'a>,
 }
 
 impl<'a> BoxReader<'a> {
@@ -96,7 +95,12 @@ impl<'a> BoxReader<'a> {
     pub fn new<R: ReadBytes>(mut stream: &'a mut R) -> io::Result<BoxReader<'a>> {
         let header = BoxHeader::read(&mut stream)?;
         let maxsize = std::cmp::min(stream.size(), stream.pos() + header.size);
-        debug!("XXX header {:?} maxsize {} left {}", header, maxsize, stream.left());
+        debug!(
+            "XXX header {:?} maxsize {} left {}",
+            header,
+            maxsize,
+            stream.left()
+        );
         Ok(BoxReader {
             header,
             maxsize,
@@ -298,7 +302,6 @@ pub struct GenericBox {
 
 impl FromBytes for GenericBox {
     fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<GenericBox> {
-
         let mut reader = BoxReader::new(stream)?;
         let stream = &mut reader;
 

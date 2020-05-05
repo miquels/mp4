@@ -12,12 +12,12 @@ pub trait ReadAt: Read + FileExt {}
 impl<T> ReadAt for T where T: Read + FileExt {}
 
 pub struct Mp4File<F> {
-    file:    Box<F>,
-    pos:     u64,
-    size:    u64,
-    buf:     Vec<u8>,
-    rdpos:   usize,
-    wrpos:   usize,
+    file:  Box<F>,
+    pos:   u64,
+    size:  u64,
+    buf:   Vec<u8>,
+    rdpos: usize,
+    wrpos: usize,
 }
 
 impl<F> Mp4File<F> {
@@ -45,11 +45,12 @@ impl<F> Mp4File<F> {
     }
 }
 
-impl<F> Mp4File<F> where F: Read {
-
+impl<F> Mp4File<F>
+where
+    F: Read,
+{
     // Make sure at least "amount" is buffered.
     fn fill_buf(&mut self, amount: usize) -> io::Result<()> {
-
         if self.wrpos - self.rdpos >= amount {
             return Ok(());
         }
@@ -149,7 +150,6 @@ where
         self.pos
     }
     fn seek(&mut self, pos: u64) -> io::Result<()> {
-
         // see if it fits in the read buffer.
         let bpos = self.pos - (self.rdpos as u64);
         let epos = self.pos + ((self.wrpos - self.rdpos) as u64);
@@ -157,7 +157,7 @@ where
             debug!("Mp4File::seek {} in buffer", pos);
             self.rdpos = (pos - bpos) as usize;
             self.pos = pos;
-            return Ok(())
+            return Ok(());
         }
         debug!("Mp4File::seek {} NOT in buffer", pos);
 
@@ -174,15 +174,15 @@ where
 }
 
 pub struct Mp4Data {
-    data:   Vec<u8>,
-    pos:    usize,
+    data: Vec<u8>,
+    pos:  usize,
 }
 
 impl Mp4Data {
     pub fn new() -> Mp4Data {
         Mp4Data {
             data: Vec::new(),
-            pos: 0,
+            pos:  0,
         }
     }
 }

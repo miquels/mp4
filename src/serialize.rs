@@ -169,7 +169,10 @@ def_from_to_bytes!(u64);
 def_from_to_bytes!(u128);
 
 /// Generic implementation for Vec<T>
-impl<T> FromBytes for Vec<T> where T: FromBytes {
+impl<T> FromBytes for Vec<T>
+where
+    T: FromBytes,
+{
     fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<Self> {
         let mut v = Vec::new();
         let min_size = T::min_size() as u64;
@@ -178,11 +181,16 @@ impl<T> FromBytes for Vec<T> where T: FromBytes {
         }
         Ok(v)
     }
-    fn min_size() -> usize { 0 }
+    fn min_size() -> usize {
+        0
+    }
 }
 
 /// Generic implementation for Vec<T>
-impl<T> ToBytes for Vec<T> where T: ToBytes {
+impl<T> ToBytes for Vec<T>
+where
+    T: ToBytes,
+{
     fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
         for elem in self {
             elem.to_bytes(stream)?;
