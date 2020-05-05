@@ -1,6 +1,6 @@
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
-use crate::fromtobytes::{BoxBytes, ReadBytes, WriteBytes};
+use crate::serialize::{BoxBytes, ReadBytes, WriteBytes};
 use crate::types::FourCC;
 
 const MIN_BUFSIZE: usize = 4096;

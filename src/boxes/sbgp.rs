@@ -1,5 +1,5 @@
 use std::io;
-use crate::fromtobytes::{FromBytes, ToBytes, ReadBytes, WriteBytes,BoxBytes};
+use crate::serialize::{FromBytes, ToBytes, ReadBytes, WriteBytes,BoxBytes};
 use crate::types::*;
 use crate::mp4box::{BoxReader, FullBox};
 

@@ -13,7 +13,7 @@ use chrono::{
     offset::{Local, TimeZone},
 };
 
-use crate::fromtobytes::{FromBytes, ReadBytes, ToBytes, WriteBytes};
+use crate::serialize::{FromBytes, ReadBytes, ToBytes, WriteBytes};
 use crate::mp4box::FullBox;
 
 // Convenience macro to implement FromBytes/ToBytes for newtypes.

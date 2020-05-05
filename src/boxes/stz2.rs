@@ -1,5 +1,5 @@
 use std::io;
-use crate::fromtobytes::{FromBytes, ToBytes, ReadBytes, WriteBytes};
+use crate::serialize::{FromBytes, ToBytes, ReadBytes, WriteBytes};
 use crate::mp4box::BoxReader;
 
 /// 8.7.3.3 Compact Sample Size Box (ISO/IEC 14496-12:2015(E))

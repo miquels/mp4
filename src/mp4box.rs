@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::io;
 
 use crate::boxes::MP4Box;
-use crate::fromtobytes::{BoxBytes, FromBytes, ReadBytes, ToBytes, WriteBytes};
+use crate::serialize::{BoxBytes, FromBytes, ReadBytes, ToBytes, WriteBytes};
 use crate::types::*;
 
 /// Gets implemented for every box.

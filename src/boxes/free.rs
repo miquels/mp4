@@ -1,5 +1,5 @@
 use std::io;
-use crate::fromtobytes::{FromBytes, ToBytes, ReadBytes, WriteBytes};
+use crate::serialize::{FromBytes, ToBytes, ReadBytes, WriteBytes};
 use crate::mp4box::BoxReader;
 
 macro_rules! free_box {
