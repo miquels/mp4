@@ -184,19 +184,16 @@ impl<'a> BoxBytes for BoxReader<'a> {
 }
 
 /// Writes the box header.
-pub struct BoxWriter<W: WriteBytes> {
+pub struct BoxWriter<'a> {
     offset:    u64,
-    inner:     W,
+    inner:     Box<dyn WriteBytes + 'a>,
     finalized: bool,
 }
 
-impl<W> BoxWriter<W>
-where
-    W: WriteBytes,
-{
+impl<'a> BoxWriter<'a> {
     /// Write a provisional box header, then return a new stream. When
     /// the stream is dropped, the box header is updated.
-    pub fn new<B>(mut stream: W, boxinfo: &B) -> io::Result<BoxWriter<W>>
+    pub fn new<B>(mut stream: impl WriteBytes + 'a, boxinfo: &B) -> io::Result<BoxWriter<'a>>
     where
         B: BoxInfo + FullBox,
     {
@@ -209,7 +206,7 @@ where
         }
         Ok(BoxWriter {
             offset,
-            inner: stream,
+            inner: Box::new(stream),
             finalized: false,
         })
     }
@@ -222,27 +219,21 @@ where
         self.finalized = true;
         let pos = self.inner.pos();
         self.inner.seek(self.offset)?;
-        let sz = pos - self.offset;
+        let sz = (pos - self.offset) as u32;
         sz.to_bytes(&mut self.inner)?;
         self.inner.seek(pos)?;
         Ok(())
     }
 }
 
-impl<W> Drop for BoxWriter<W>
-where
-    W: WriteBytes,
-{
+impl<'a> Drop for BoxWriter<'a> {
     fn drop(&mut self) {
         self.finalize().unwrap();
     }
 }
 
 // Delegate WriteBytes to the inner writer.
-impl<W> WriteBytes for BoxWriter<W>
-where
-    W: WriteBytes,
-{
+impl<'a> WriteBytes for BoxWriter<'a> {
     fn write(&mut self, data: &[u8]) -> io::Result<()> {
         self.inner.write(data)
     }
@@ -252,24 +243,24 @@ where
 }
 
 // Delegate BoxBytes to the inner writer.
-impl<W> BoxBytes for BoxWriter<W>
-where
-    W: WriteBytes,
-{
+impl<'a> BoxBytes for BoxWriter<'a> {
     fn pos(&self) -> u64 {
         self.inner.pos()
     }
     fn seek(&mut self, pos: u64) -> io::Result<()> {
         self.inner.seek(pos)
     }
+    fn size(&self) -> u64 {
+        self.inner.size()
+    }
     fn version(&self) -> u8 {
-        unimplemented!()
+        self.inner.version()
     }
     fn flags(&self) -> u32 {
-        unimplemented!()
+        self.inner.flags()
     }
     fn fourcc(&self) -> FourCC {
-        unimplemented!()
+        self.inner.fourcc()
     }
     fn mdat_ref(&self) -> Option<&dyn ReadAt> {
         self.inner.mdat_ref()
@@ -284,6 +275,14 @@ pub fn read_boxes<R: ReadBytes>(mut file: R) -> io::Result<Vec<MP4Box>> {
         boxes.push(b);
     }
     Ok(boxes)
+}
+
+/// Write a collection of boxes to a stream.
+pub fn write_boxes<W: WriteBytes>(mut file: W, boxes: &[MP4Box]) -> io::Result<()> {
+    for b in boxes {
+        b.to_bytes(&mut file)?;
+    }
+    Ok(())
 }
 
 //

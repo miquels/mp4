@@ -264,6 +264,15 @@ impl<'a, B: ?Sized + ReadBytes + 'a> ReadBytes for Box<B> {
     }
 }
 
+impl<'a, B: ?Sized + WriteBytes + 'a> WriteBytes for Box<B> {
+    fn write(&mut self, data: &[u8]) -> io::Result<()> {
+        B::write(&mut *self, data)
+    }
+    fn skip(&mut self, amount: u64) -> io::Result<()> {
+        B::skip(&mut *self, amount)
+    }
+}
+
 impl<'a, B: ?Sized + BoxBytes + 'a> BoxBytes for Box<B> {
     fn pos(&self) -> u64 {
         B::pos(&*self)
