@@ -231,39 +231,40 @@ macro_rules! def_struct {
     (@min_size $amount:expr) => { $amount };
 
     // @def_struct: Define a struct line by line using accumulation and recursion.
-    (@def_struct $name:ident, $( $field:tt: $type:tt $(as $as:tt)? ),* $(,)?) => {
-        def_struct!(@def_struct_ $name, [ $( $field: $type $(as $as)?, )* ] -> []);
+    (@def_struct $(#[$outer:meta])* $name:ident, $( $field:tt: $type:tt $(as $as:tt)? ),* $(,)?) => {
+        def_struct!(@def_struct_ [$(#[$outer])* $name], [ $( $field: $type $(as $as)?, )* ] -> []);
     };
     // During definition of the struct, we skip all the "skip" defitions.
-    (@def_struct_ $name:ident, [ skip: $amount:tt, $($tt:tt)*] -> [ $($res:tt)* ]) => {
-        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* ]);
+    (@def_struct_ $info:tt, [ skip: $amount:tt, $($tt:tt)*] -> [ $($res:tt)* ]) => {
+        def_struct!(@def_struct_ $info, [$($tt)*] -> [ $($res)* ]);
     };
     // Add normal field (as).
-    (@def_struct_ $name:ident, [ $field:ident: $_type:ident as $type:ident, $($tt:tt)*] -> [ $($res:tt)* ]) => {
-        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* pub $field: $type, ]);
+    (@def_struct_ $info:tt, [ $field:ident: $_type:ident as $type:ident, $($tt:tt)*] -> [ $($res:tt)* ]) => {
+        def_struct!(@def_struct_ $info, [$($tt)*] -> [ $($res)* pub $field: $type, ]);
     };
     // Add normal field (ArraySized16)
-    (@def_struct_ $name:ident, [ $field:ident: [ $type:ty, sized16 ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
-        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* pub $field: ArraySized16<$type>, ]);
+    (@def_struct_ $info:tt, [ $field:ident: [ $type:ty, sized16 ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
+        def_struct!(@def_struct_ $info, [$($tt)*] -> [ $($res)* pub $field: ArraySized16<$type>, ]);
     };
     // Add normal field (ArraySized32)
-    (@def_struct_ $name:ident, [ $field:ident: [ $type:ty, sized ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
-        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* pub $field: ArraySized32<$type>, ]);
+    (@def_struct_ $info:tt, [ $field:ident: [ $type:ty, sized ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
+        def_struct!(@def_struct_ $info, [$($tt)*] -> [ $($res)* pub $field: ArraySized32<$type>, ]);
     };
     // Add normal field (ArrayUnsized)
-    (@def_struct_ $name:ident, [ $field:ident: [ $type:ty, unsized ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
-        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* pub $field: Vec<$type>, ]);
+    (@def_struct_ $info:tt, [ $field:ident: [ $type:ty, unsized ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
+        def_struct!(@def_struct_ $info, [$($tt)*] -> [ $($res)* pub $field: Vec<$type>, ]);
     };
     // Add normal field (Vec)
-    (@def_struct_ $name:ident, [ $field:ident: [ $type:ty ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
-        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* pub $field: Vec<$type>, ]);
+    (@def_struct_ $info:tt, [ $field:ident: [ $type:ty ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
+        def_struct!(@def_struct_ $info, [$($tt)*] -> [ $($res)* pub $field: Vec<$type>, ]);
     };
     // Add normal field.
-    (@def_struct_ $name:ident, [ $field:ident: $type:ident, $($tt:tt)*] -> [ $($res:tt)* ]) => {
-        def_struct!(@def_struct_ $name, [$($tt)*] -> [ $($res)* pub $field: $type, ]);
+    (@def_struct_ $info:tt, [ $field:ident: $type:ident, $($tt:tt)*] -> [ $($res:tt)* ]) => {
+        def_struct!(@def_struct_ $info, [$($tt)*] -> [ $($res)* pub $field: $type, ]);
     };
     // Final.
-    (@def_struct_ $name: ident, [] -> [ $($res:tt)* ]) => {
+    (@def_struct_ [$(#[$outer:meta])* $name:ident], [] -> [ $($res:tt)* ]) => {
+        $(#[$outer])*
         pub struct $name { $(
             $res
         )* }
@@ -356,8 +357,8 @@ macro_rules! def_struct {
     (@filter_skip $field:ident, $($tt:tt)*) => { $($tt)* };
 
     // Main entry point to define just one struct.
-    ($name:ident, $($field:tt: $type:tt $(as $as:tt)?),* $(,)?) => {
-        def_struct!(@def_struct $name,
+    ($(#[$outer:meta])* $name:ident, $($field:tt: $type:tt $(as $as:tt)?),* $(,)?) => {
+        def_struct!(@def_struct $(#[$outer])* $name,
             $(
                 $field: $type $(as $as)?,
             )*

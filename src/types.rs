@@ -127,7 +127,7 @@ impl Debug for Uuid {
 }
 
 #[derive(Clone, Copy)]
-pub struct VersionSizedUint(u64);
+pub struct VersionSizedUint(pub u64);
 def_from_to_bytes_versioned!(VersionSizedUint);
 
 impl Debug for VersionSizedUint {
@@ -811,8 +811,9 @@ define_array!(
 );
 
 macro_rules! fixed_float {
-    ($name:ident, $type:tt, $frac_bits:expr) => {
+    ($(#[$outer:meta])* $name:ident, $type:tt, $frac_bits:expr) => {
         #[derive(Clone, Copy)]
+        $(#[$outer])*
         pub struct $name($type);
         def_from_to_bytes_newtype!($name, $type);
 
@@ -849,14 +850,25 @@ macro_rules! fixed_float {
 }
 
 // Some fixed float types.
-fixed_float!(FixedFloat2_30, u32, 30);
-fixed_float!(FixedFloat16_16, u32, 16);
-fixed_float!(FixedFloat8_8, u16, 8);
+fixed_float!(
+    /// 32 bits 2.30 fixed float
+    FixedFloat2_30, u32, 30
+);
+fixed_float!(
+    /// 32 bits 16.16 fixed float.
+    FixedFloat16_16, u32, 16
+);
+fixed_float!(
+    /// 16 bits 8.8 fixed float.
+    FixedFloat8_8, u16, 8
+);
 
-def_struct! { OpColor,
-    red:    u16,
-    green:  u16,
-    blue:   u16,
+def_struct! {
+    /// OpColor
+    OpColor,
+        red:    u16,
+        green:  u16,
+        blue:   u16,
 }
 
 def_struct! { EditListEntry,
