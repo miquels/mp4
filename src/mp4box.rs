@@ -24,7 +24,9 @@ pub trait BoxInfo {
 /// Calculated version and flags.
 pub trait FullBox {
     /// What version of the containing box does this type require, based on its value
-    fn version(&self) -> Option<u8>;
+    fn version(&self) -> Option<u8> {
+        None
+    }
     /// What are the flags for the full box.
     fn flags(&self) -> u32 {
         0
@@ -179,7 +181,6 @@ impl<'a> BoxBytes for BoxReader<'a> {
 
 /// Writes the box header.
 pub struct BoxWriter<W: WriteBytes> {
-    fourcc:    FourCC,
     offset:    u64,
     inner:     W,
     finalized: bool,
@@ -191,12 +192,18 @@ where
 {
     /// Write a provisional box header, then return a new stream. When
     /// the stream is dropped, the box header is updated.
-    pub fn new(mut stream: W, fourcc: FourCC) -> io::Result<BoxWriter<W>> {
+    pub fn new<B>(mut stream: W, boxinfo: &B) -> io::Result<BoxWriter<W>>
+    where
+        B: BoxInfo + FullBox,
+    {
         let offset = stream.pos();
         0u32.to_bytes(&mut stream)?;
-        fourcc.to_bytes(&mut stream)?;
+        boxinfo.fourcc().to_bytes(&mut stream)?;
+        if let Some(version) = boxinfo.version() {
+            let flags: u32 = (version as u32) << 24 | boxinfo.flags();
+            flags.to_bytes(&mut stream)?;
+        }
         Ok(BoxWriter {
-            fourcc,
             offset,
             inner: stream,
             finalized: false,
@@ -337,6 +344,8 @@ impl BoxInfo for GenericBox {
     }
 }
 
+impl FullBox for GenericBox {}
+
 struct U8Array(u64);
 
 impl Debug for U8Array {
@@ -376,6 +385,44 @@ macro_rules! def_boxes {
     };
     */
 
+    (@FULLBOX $name:ident, []) => {
+        // Not a fullbox - default impl.
+        impl FullBox for $name {}
+    };
+    (@FULLBOX $name:ident, [0]) => {
+        // Fullbox always version 0.
+        impl FullBox for $name {
+            fn version(&self) -> Option<u8> { Some(0) }
+        }
+    };
+    (@FULLBOX $name:ident, [$maxver:tt]) => {
+        // Nothing, delegated to boxes/*.rs
+    };
+    (@FULLBOX $name:ident, [$maxver:tt $(,$deps:ident)+ ]) => {
+        // Check all the dependencies for the minimum ver.
+        // TODO what about conflicting versions for deps?
+        impl FullBox for $name {
+            fn version(&self) -> Option<u8> {
+                let mut v = None;
+                $(
+                    if let Some(depver) = self.$deps.version() {
+                        if let Some(thisver) = v {
+                            if depver > thisver {
+                                v = Some(depver);
+                            }
+                        } else {
+                            v = Some(depver);
+                        }
+                    }
+                )+
+                v
+            }
+        }
+    };
+    (@FULLBOX $name:ident, [$($tt:tt)*]) => {
+        compile_error!($($tt)*);
+    };
+
     // def_box delegates most of the work to the def_box macro.
     (@DEF $name:ident, $fourcc:expr, { $($tt:tt)* }) => {
         def_box! {
@@ -391,7 +438,7 @@ macro_rules! def_boxes {
     (@DEF $name:ident, $fourcc:expr,) => {
     };
 
-    ($($name:ident, $fourcc:expr,  [$($maxver:expr)? $(,$deps:ident)*]  $(=> $block:tt)? ; )+) => {
+    ($($name:ident, $fourcc:expr,  [$($maxver:tt)? $(,$deps:ident)*]  $(=> $block:tt)? ; )+) => {
 
         //
         // First define the enum.
@@ -481,6 +528,26 @@ macro_rules! def_boxes {
             }
         }
 
+        // Define BoxInfo trait for the enum.
+        impl FullBox for MP4Box {
+            fn version(&self) -> Option<u8> {
+                match self {
+                    $(
+                        &MP4Box::$name(ref b) => b.version(),
+                    )+
+                    &MP4Box::GenericBox(ref b) => b.version(),
+                }
+            }
+            fn flags(&self) -> u32 {
+                match self {
+                    $(
+                        &MP4Box::$name(ref b) => b.flags(),
+                    )+
+                    &MP4Box::GenericBox(ref b) => b.flags(),
+                }
+            }
+        }
+
         // Debug implementation that delegates to the variant.
         impl Debug for MP4Box {
             fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -501,6 +568,9 @@ macro_rules! def_boxes {
             // Call def_box! if needed.
             def_boxes!(@DEF $name, $fourcc, $($block)*);
 
+            // Implement FullBox automatically if possible.
+            def_boxes!(@FULLBOX $name, [$($maxver)? $(,$deps)*]);
+
             // Implement BoxInfo trait for this struct.
             impl BoxInfo for $name {
                 #[inline]
@@ -512,7 +582,7 @@ macro_rules! def_boxes {
                     fn max_version() -> Option<u8> {
                         Some($maxver)
                     }
-                )*
+                )?
             }
 
             // Implement BoxChildren trait for this struct.
@@ -595,7 +665,7 @@ macro_rules! def_box {
             fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
 
                 // Write the header.
-                let mut stream = $crate::mp4box::BoxWriter::new(stream, self.fourcc())?;
+                let mut stream = $crate::mp4box::BoxWriter::new(stream, self)?;
                 let stream = &mut stream;
 
                 // Serialize.

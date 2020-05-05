@@ -32,7 +32,7 @@ def_boxes! {
         mod_time:   Time,
         track_id:   u32,
         skip:       4,
-        duration:   VersionSizedUint as u64,
+        duration:   VersionSizedUint,
         skip:       8,
         layer:      u16,
         alt_group:  u16,
@@ -121,7 +121,7 @@ def_boxes! {
         cr_time:    Time,
         mod_time:   Time,
         time_scale: u32,
-        duration:   VersionSizedUint as u64,
+        duration:   VersionSizedUint,
         language:   IsoLanguageCode,
         quality:    u16,
     };
@@ -130,7 +130,7 @@ def_boxes! {
         cr_time:    Time,
         mod_time:   Time,
         timescale:  u32,
-        duration:   VersionSizedUint as u64,
+        duration:   VersionSizedUint,
         pref_rate:  FixedFloat16_16,
         pref_vol:   FixedFloat8_8,
         skip:       10,
@@ -228,7 +228,7 @@ def_boxes! {
     };
 
     MovieExtendsHeaderBox, "mehd", [0, fragment_duration] => {
-        fragment_duration:  VersionSizedUint as u64,
+        fragment_duration:  VersionSizedUint,
     };
 
     MovieFragmentHeaderBox, "mfhd", [0] => {
@@ -240,7 +240,7 @@ def_boxes! {
     };
 
     TrackFragmentBaseMediaDecodeTimeBox, "tfdt", [1, base_media_decode_time] => {
-        base_media_decode_time: VersionSizedUint as u64,
+        base_media_decode_time: VersionSizedUint,
     };
 
     // Below are boxes that are defined manually in boxes/ *.rs
@@ -253,10 +253,10 @@ def_boxes! {
 
     SampleSizeBox, "stsz", [0] => stsz;
     CompactSampleSizeBox, "stz2", [0] => stz2;
-    SampleToGroupBox, "sbgp", [0] => sbgp;
+    SampleToGroupBox, "sbgp", [1] => sbgp;
 
     SegmentIndexBox, "sidx", [1, earliest_presentation_time, first_offset] => sidx;
 
-    TrackFragmentHeaderBox, "tfhd", [0] => tfhd;
-    TrackRunBox, "trun", [0] => trun;
+    TrackFragmentHeaderBox, "tfhd", [1] => tfhd;
+    TrackRunBox, "trun", [1] => trun;
 }

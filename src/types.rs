@@ -126,10 +126,15 @@ impl Debug for Uuid {
     }
 }
 
-/// Used internally in def_struct "VersionSizedUint as u64".
 #[derive(Clone, Copy)]
-pub(crate) struct VersionSizedUint(u64);
+pub struct VersionSizedUint(u64);
 def_from_to_bytes_versioned!(VersionSizedUint);
+
+impl Debug for VersionSizedUint {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        Debug::fmt(&self.0, f)
+    }
+}
 
 /// Time is a 32/64 bit value, measured in seconds since 01-01-1904 00:00:00
 #[derive(Clone, Copy)]
@@ -855,9 +860,15 @@ def_struct! { OpColor,
 }
 
 def_struct! { EditListEntry,
-    duration:   u32,
+    duration:   VersionSizedUint,
     media_time: u32,
     media_rate: FixedFloat16_16,
+}
+
+impl FullBox for EditListEntry {
+    fn version(&self) -> Option<u8> {
+        self.duration.version()
+    }
 }
 
 def_struct! { TimeToSampleEntry,

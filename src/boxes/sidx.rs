@@ -12,8 +12,8 @@ use crate::mp4box::{BoxInfo, BoxReader};
 def_box! { SegmentIndexBox,
         reference_id:               u32,
         timescale:                  u32,
-        earliest_presentation_time: VersionSizedUint as u64,
-        first_offset:               VersionSizedUint as u64,
+        earliest_presentation_time: VersionSizedUint,
+        first_offset:               VersionSizedUint,
         skip:                       2,
         references:                 [SegmentReference, sized16],
 }
