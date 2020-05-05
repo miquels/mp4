@@ -10,8 +10,8 @@ use std::io::{self, ErrorKind::UnexpectedEof};
 
 use auto_impl::auto_impl;
 
+use crate::io::ReadAt;
 use crate::types::FourCC;
-use crate::mp4box::BoxHeader;
 
 /// Byte reader in a stream.
 #[auto_impl(&mut)]
@@ -61,7 +61,8 @@ pub trait BoxBytes {
     fn fourcc(&self) -> FourCC {
         unimplemented!()
     }
-    fn boxheader(&mut self) -> Option<BoxHeader> {
+    /// Get a reference to the mdat source data.
+    fn mdat_ref(&self) -> Option<&dyn ReadAt> {
         None
     }
 }

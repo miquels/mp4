@@ -1,4 +1,5 @@
 use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::os::unix::fs::FileExt;
 
 use crate::serialize::{BoxBytes, ReadBytes, WriteBytes};
 use crate::types::FourCC;
@@ -6,6 +7,9 @@ use crate::types::FourCC;
 const MIN_BUFSIZE: usize = 4096;
 const SEEK_BUFSIZE: usize = 4096;
 const BUFSIZE: usize = 65536;
+
+pub trait ReadAt: Read + FileExt {}
+impl<T> ReadAt for T where T: Read + FileExt {}
 
 pub struct Mp4File<F> {
     file:    Box<F>,

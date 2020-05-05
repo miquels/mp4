@@ -248,7 +248,8 @@ def_boxes! {
     Free, "free", [] => free;
     Skip, "skip", [];
     Wide, "wide", [];
-    Mdat, "mdat", [];
+
+    Mdat, "mdat", [] => mdat;
 
     SampleSizeBox, "stsz", [0] => stsz;
     CompactSampleSizeBox, "stz2", [0] => stz2;

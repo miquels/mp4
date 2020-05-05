@@ -4,6 +4,7 @@ use std::io;
 use crate::boxes::MP4Box;
 use crate::serialize::{BoxBytes, FromBytes, ReadBytes, ToBytes, WriteBytes};
 use crate::types::*;
+use crate::io::ReadAt;
 
 /// Gets implemented for every box.
 pub trait BoxInfo {
@@ -91,10 +92,7 @@ pub struct BoxReader<'a> {
 impl<'a> BoxReader<'a> {
     /// Read the box header, then return a size-limited reader.
     pub fn new<R: ReadBytes>(mut stream: &'a mut R) -> io::Result<BoxReader<'a>> {
-        let header = match stream.boxheader() {
-            Some(header) => header,
-            None => BoxHeader::read(&mut stream)?,
-        };
+        let header = BoxHeader::read(&mut stream)?;
         let maxsize = std::cmp::min(stream.size(), stream.pos() + header.size);
         debug!("XXX header {:?} maxsize {} left {}", header, maxsize, stream.left());
         Ok(BoxReader {
@@ -176,9 +174,6 @@ impl<'a> BoxBytes for BoxReader<'a> {
     }
     fn fourcc(&self) -> FourCC {
         self.header.fourcc.clone()
-    }
-    fn boxheader(&mut self) -> Option<BoxHeader> {
-        None
     }
 }
 
@@ -264,6 +259,9 @@ where
     }
     fn fourcc(&self) -> FourCC {
         unimplemented!()
+    }
+    fn mdat_ref(&self) -> Option<&dyn ReadAt> {
+        self.inner.mdat_ref()
     }
 }
 
