@@ -162,6 +162,7 @@ macro_rules! def_from_to_bytes {
 
 // Define FromBytes/ToBytes for u* types.
 def_from_to_bytes!(u8);
+def_from_to_bytes!(i16);
 def_from_to_bytes!(u16);
 def_from_to_bytes!(i32);
 def_from_to_bytes!(u32);

@@ -238,6 +238,7 @@ def_boxes! {
     CompactSampleSizeBox, "stz2", [0] => stz2;
 
     SampleToGroupBox, "sbgp", [1] => sbgp;
+    SampleGroupDescriptionBox, "sgpd", [2] => sgpd;
 
     SegmentIndexBox, "sidx", [1, earliest_presentation_time, first_offset] => sidx;
 
