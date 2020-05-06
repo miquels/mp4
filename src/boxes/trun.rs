@@ -6,7 +6,7 @@
 use std::io;
 use crate::serialize::{FromBytes, ToBytes, ReadBytes, WriteBytes, BoxBytes};
 use crate::types::*;
-use crate::mp4box::{BoxReader, FullBox};
+use crate::mp4box::{BoxReader, BoxWriter, FullBox};
 
 //  aligned(8) class TrackRunBox
 //  extends FullBox(‘trun’, version, tr_flags) {
@@ -96,6 +96,9 @@ impl FromBytes for TrackRunBox {
 
 impl ToBytes for TrackRunBox {
     fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
+        let mut writer = BoxWriter::new(stream, self)?;
+        let stream = &mut writer;
+
         (self.entries.len() as u32).to_bytes(stream)?;
 
         self.data_offset.as_ref().map_or(Ok(()), |v| v.to_bytes(stream))?;
@@ -104,7 +107,8 @@ impl ToBytes for TrackRunBox {
         for e in &self.entries {
             e.to_bytes(stream)?;
         }
-        Ok(())
+
+        stream.finalize()
     }
 }
 
@@ -117,7 +121,7 @@ impl FullBox for TrackRunBox {
                 }
             }
         }
-        None
+        Some(0)
     }
     fn flags(&self) -> u32 {
         self.data_offset.is_some() as u32 * 0x01 |

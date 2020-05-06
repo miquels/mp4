@@ -1,6 +1,6 @@
 use std::io;
 use crate::serialize::{FromBytes, ToBytes, ReadBytes, WriteBytes};
-use crate::mp4box::BoxReader;
+use crate::mp4box::{BoxReader, BoxWriter};
 
 macro_rules! free_box {
     ($name:ident) => {
@@ -22,7 +22,9 @@ macro_rules! free_box {
 
         impl ToBytes for $name {
             fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
-                stream.skip(self.0)
+                let mut writer = BoxWriter::new(stream, self)?;
+                writer.skip(self.0)?;
+                writer.finalize()
             }
         }
     };

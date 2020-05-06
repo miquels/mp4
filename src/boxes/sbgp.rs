@@ -1,7 +1,7 @@
 use std::io;
 use crate::serialize::{FromBytes, ToBytes, ReadBytes, WriteBytes,BoxBytes};
 use crate::types::*;
-use crate::mp4box::{BoxReader, FullBox};
+use crate::mp4box::{BoxReader, BoxWriter, FullBox};
 
 #[derive(Debug)]
 pub struct SampleToGroupBox {
@@ -33,18 +33,26 @@ impl FromBytes for SampleToGroupBox {
 
 impl ToBytes for SampleToGroupBox {
     fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
+        let mut writer = BoxWriter::new(stream, self)?;
+        let stream = &mut writer;
+
         self.grouping_type.to_bytes(stream)?;
         if let Some(param) = self.grouping_type_parameter {
             param.to_bytes(stream)?;
         }
         self.entries.to_bytes(stream)?;
-        Ok(())
+
+        stream.finalize()
     }
 }
 
 impl FullBox for SampleToGroupBox {
     fn version(&self) -> Option<u8> {
-        self.grouping_type_parameter.as_ref().map(|_| 1)
+        if self.grouping_type_parameter.is_some() {
+            Some(1)
+        } else {
+            Some(0)
+        }
     }
 }
 

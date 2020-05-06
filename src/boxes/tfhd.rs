@@ -6,7 +6,7 @@
 use std::io;
 use crate::serialize::{FromBytes, ToBytes, ReadBytes, WriteBytes, BoxBytes};
 use crate::types::*;
-use crate::mp4box::{BoxReader, FullBox};
+use crate::mp4box::{BoxReader, BoxWriter, FullBox};
 
 //  aligned(8) class TrackFragmentHeaderBox extends FullBox(‘tfhd’, 0, tf_flags){
 //      unsigned int(32) track_ID;
@@ -75,19 +75,22 @@ impl FromBytes for TrackFragmentHeaderBox {
 
 impl ToBytes for TrackFragmentHeaderBox {
     fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
+        let mut writer = BoxWriter::new(stream, self)?;
+        let stream = &mut writer;
+
         self.base_data_offset.as_ref().map_or(Ok(()), |x| x.to_bytes(stream))?;
         self.sample_description_index.as_ref().map_or(Ok(()), |x| x.to_bytes(stream))?;
         self.default_sample_duration.as_ref().map_or(Ok(()), |x| x.to_bytes(stream))?;
         self.default_sample_size.as_ref().map_or(Ok(()), |x| x.to_bytes(stream))?;
         self.default_sample_flags.as_ref().map_or(Ok(()), |x| x.to_bytes(stream))?;
 
-        Ok(())
+        stream.finalize()
     }
 }
 
 impl FullBox for TrackFragmentHeaderBox {
     fn version(&self) -> Option<u8> {
-        None
+        Some(0)
     }
     fn flags(&self) -> u32 {
         self.base_data_offset.is_some() as u32 * 0x01 |
@@ -99,5 +102,4 @@ impl FullBox for TrackFragmentHeaderBox {
         self.default_base_is_moof as u32 * 0x020000
     }
 }
-
 

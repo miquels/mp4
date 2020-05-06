@@ -200,8 +200,9 @@ impl<'a> BoxWriter<'a> {
         let offset = stream.pos();
         0u32.to_bytes(&mut stream)?;
         boxinfo.fourcc().to_bytes(&mut stream)?;
-        if let Some(version) = boxinfo.version() {
-            let flags: u32 = (version as u32) << 24 | boxinfo.flags();
+        if B::max_version().is_some() {
+            let version = boxinfo.version().unwrap_or(0) as u32;
+            let flags = version << 24 | boxinfo.flags();
             flags.to_bytes(&mut stream)?;
         }
         Ok(BoxWriter {
@@ -405,24 +406,17 @@ macro_rules! def_boxes {
         // TODO what about conflicting versions for deps?
         impl FullBox for $name {
             fn version(&self) -> Option<u8> {
-                let mut v = None;
+                let mut v = 0;
                 $(
                     if let Some(depver) = self.$deps.version() {
-                        if let Some(thisver) = v {
-                            if depver > thisver {
-                                v = Some(depver);
-                            }
-                        } else {
-                            v = Some(depver);
+                        if depver > v {
+                            v = depver;
                         }
                     }
                 )+
-                v
+                Some(v)
             }
         }
-    };
-    (@FULLBOX $name:ident, [$($tt:tt)*]) => {
-        compile_error!($($tt)*);
     };
 
     // def_box delegates most of the work to the def_box macro.

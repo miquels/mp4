@@ -134,6 +134,7 @@ where
     }
     fn skip(&mut self, amount: u64) -> io::Result<()> {
         if amount < 4096 {
+            self.pos += amount;
             let buf = [0u8; 4096];
             self.file.write_all(&buf[..amount as usize])
         } else {

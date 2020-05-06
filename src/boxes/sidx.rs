@@ -6,7 +6,7 @@
 use std::io;
 use crate::serialize::{FromBytes, ToBytes, ReadBytes, WriteBytes};
 use crate::types::*;
-use crate::mp4box::{BoxInfo, BoxReader};
+use crate::mp4box::BoxInfo;
 
 // 8.16.3 Segment Index Box (ISO/IEC 14496-12:2015(E))
 def_box! { SegmentIndexBox,
@@ -31,9 +31,6 @@ pub struct SegmentReference {
 
 impl FromBytes for SegmentReference {
     fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<SegmentReference> {
-        let mut reader = BoxReader::new(stream)?;
-        let stream = &mut reader;
-
         let b1 = u32::from_bytes(stream)?;
         let b2 = u32::from_bytes(stream)?;
         let b3 = u32::from_bytes(stream)?;
@@ -60,6 +57,7 @@ impl ToBytes for SegmentReference {
         b1.to_bytes(stream)?;
         b2.to_bytes(stream)?;
         b3.to_bytes(stream)?;
+
         Ok(())
     }
 }

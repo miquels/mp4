@@ -1,7 +1,7 @@
 use std::io;
 use crate::serialize::{FromBytes, ToBytes, ReadBytes, WriteBytes};
 use crate::types::*;
-use crate::mp4box::BoxReader;
+use crate::mp4box::{BoxReader, BoxWriter};
 
 #[derive(Debug)]
 pub struct SampleSizeBox {
@@ -37,12 +37,16 @@ impl FromBytes for SampleSizeBox {
 
 impl ToBytes for SampleSizeBox {
     fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
+        let mut writer = BoxWriter::new(stream, self)?;
+        let stream = &mut writer;
+
         self.sample_size.to_bytes(stream)?;
         (self.sample_entries.len() as u32).to_bytes(stream)?;
         for e in &self.sample_entries {
             e.to_bytes(stream)?;
         }
-        Ok(())
+
+        stream.finalize()
     }
 }
 

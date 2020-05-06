@@ -1,6 +1,6 @@
 use std::io;
 use crate::serialize::{FromBytes, ToBytes, ReadBytes, WriteBytes};
-use crate::mp4box::BoxReader;
+use crate::mp4box::{BoxReader, BoxWriter};
 
 /// 8.7.3.3 Compact Sample Size Box (ISO/IEC 14496-12:2015(E))
 #[derive(Debug)]
@@ -49,6 +49,9 @@ impl FromBytes for CompactSampleSizeBox {
 
 impl ToBytes for CompactSampleSizeBox {
     fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
+        let mut writer = BoxWriter::new(stream, self)?;
+        let stream = &mut writer;
+
         (self.field_size as u32).to_bytes(stream)?;
         (self.sample_entries.len() as u32).to_bytes(stream)?;
         let mut i = 0;
@@ -76,7 +79,8 @@ impl ToBytes for CompactSampleSizeBox {
                 _ => break,
             }
         }
-        Ok(())
+
+        stream.finalize()
     }
 }
 

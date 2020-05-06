@@ -211,18 +211,6 @@ def_boxes! {
         compatible_brands:  [FourCC],
     };
 
-    /*
-    // 8.16.3 Segment Index Box (ISO/IEC 14496-12:2015(E))
-    SegmentIndexBox, "sidx", [1, earliest_presentation_time, first_offset] => {
-        reference_id:               u32,
-        timescale:                  u32,
-        earliest_presentation_time: VersionSizedUint as u64,
-        first_offset:               VersionSizedUint as u64,
-        skip:                       2,
-        references:                 [SegmentReference, sized16],
-    };
-    */
-
     MovieFragmentBox, "moof", [] => {
         sub_boxes:      [MP4Box],
     };
