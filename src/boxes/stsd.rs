@@ -50,21 +50,21 @@ def_box! {
 impl Default for AvcSampleEntry {
     fn default() -> Self {
         AvcSampleEntry {
-            data_reference_index: 0,
-            _video_encoding_version:    0,
-            _video_encoding_revision:   0,
-            _video_encoding_vendor:     FourCC::default(),
-            _video_temporal_quality:    0,
-            _video_spatial_quality:     0,
-            wirdth:                 1280,
-            height:                 720,
-            _video_horizontal_dpi:   FixedFloat16_16::from(72f64),
-            _video_vertical_dpi:     FixedFloat16_16::from(72f64),
-            _video_data_size:       0,
-            _video_frame_count:     1,
-            video_pixel_depth:      24,
-            video_color_table_id:   0xffff,
-            sub_boxes:              Vec::new(),
+            data_reference_index:     0,
+            _video_encoding_version:  0,
+            _video_encoding_revision: 0,
+            _video_encoding_vendor:   FourCC::default(),
+            _video_temporal_quality:  0,
+            _video_spatial_quality:   0,
+            wirdth:                   1280,
+            height:                   720,
+            _video_horizontal_dpi:    FixedFloat16_16::from(72f64),
+            _video_vertical_dpi:      FixedFloat16_16::from(72f64),
+            _video_data_size:         0,
+            _video_frame_count:       1,
+            _video_pixel_depth:       24,
+            _video_color_table_id:    0xffff,
+            sub_boxes:                Vec::new(),
         }
     }
 }
