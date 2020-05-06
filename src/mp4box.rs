@@ -354,19 +354,12 @@ impl BoxInfo for GenericBox {
 
 impl FullBox for GenericBox {}
 
-struct U8Array(u64);
-
-impl Debug for U8Array {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "[u8; {}]", &self.0)
-    }
-}
-
 impl Debug for GenericBox {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let mut dbg = f.debug_struct("GenericBox");
         dbg.field("fourcc", &self.fourcc);
-        dbg.field("data", &U8Array(self.size));
+        let data = format!("[u8; {}]", self.size);
+        dbg.field("data", &data);
         if self.skip {
             dbg.field("skip", &true);
         }

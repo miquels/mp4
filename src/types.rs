@@ -129,6 +129,35 @@ impl Debug for Uuid {
     }
 }
 
+/// Just some data.
+#[derive(Default)]
+pub struct Data(pub Vec<u8>);
+
+impl FromBytes for Data {
+    fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> {
+        let data = bytes.read(0)?;
+        let mut v = Vec::new();
+        v.extend_from_slice(data);
+        Ok(Data(v))
+    }
+
+    fn min_size() -> usize {
+        0
+    }
+}
+
+impl ToBytes for Data {
+    fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) -> io::Result<()> {
+        bytes.write(&self.0[..])
+    }
+}
+
+impl Debug for Data {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "[u8; {}]", &self.0.len())
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct VersionSizedUint(pub u64);
 def_from_to_bytes_versioned!(VersionSizedUint);
@@ -183,7 +212,7 @@ impl Debug for Time {
 
 /// FourCC is the 4-byte name of any atom. Usually this is four bytes
 /// of ASCII characters, but it could be anything.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct FourCC(pub u32);
 def_from_to_bytes_newtype!(FourCC, u32);
 
@@ -924,6 +953,20 @@ macro_rules! fixed_float {
         impl std::fmt::Display for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
                 write!(f, "{}", self.get())
+            }
+        }
+
+        impl From<f64> for $name {
+            fn from(t: f64) -> $name {
+                let mut x = $name(0);
+                x.set(t);
+                x
+            }
+        }
+
+        impl From<$name> for f64 {
+            fn from(t: $name) -> f64 {
+                t.get()
             }
         }
     };

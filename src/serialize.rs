@@ -366,7 +366,7 @@ macro_rules! def_struct {
         );
 
         // Debug implementation that skips "skip"
-        impl Debug for $name {
+        impl std::fmt::Debug for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
                 let mut dbg = f.debug_struct(stringify!($name));
                 $(

@@ -124,29 +124,23 @@ impl SampleGroupDescriptionItem {
 }
 
 /// Generic (i.e. unreckognized) sample group entry.
+#[derive(Debug)]
 pub struct GenericSampleGroupEntry {
-    pub data: Vec<u8>,
-}
-
-impl Debug for GenericSampleGroupEntry {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "[u8; {}]", &self.data.len())
-    }
+    pub data: Data,
 }
 
 impl GenericSampleGroupEntry {
     fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<GenericSampleGroupEntry> {
-        let data = stream.read(0)?;
+        let data = Data::from_bytes(stream)?;
         Ok(GenericSampleGroupEntry{
-            data: data.to_vec(),
+            data,
         })
     }
 }
 
 impl ToBytes for GenericSampleGroupEntry {
     fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
-        stream.write(&self.data)?;
-        Ok(())
+        self.data.to_bytes(stream)
     }
 }
 
