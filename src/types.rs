@@ -464,8 +464,7 @@ macro_rules! impl_flags_debug {
             }
         }
     };
-    ($type:ty,) => {
-    };
+    ($type:ty,) => {};
 }
 
 impl_flags!(
@@ -975,15 +974,21 @@ macro_rules! fixed_float {
 // Some fixed float types.
 fixed_float!(
     /// 32 bits 2.30 fixed float
-    FixedFloat2_30, u32, 30
+    FixedFloat2_30,
+    u32,
+    30
 );
 fixed_float!(
     /// 32 bits 16.16 fixed float.
-    FixedFloat16_16, u32, 16
+    FixedFloat16_16,
+    u32,
+    16
 );
 fixed_float!(
     /// 16 bits 8.8 fixed float.
-    FixedFloat8_8, u16, 8
+    FixedFloat8_8,
+    u16,
+    8
 );
 
 def_struct! {

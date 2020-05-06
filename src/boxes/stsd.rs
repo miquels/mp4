@@ -85,11 +85,49 @@ def_struct! {
         data:                   Data,
 }
 
-impl std::fmt::Display for AvcDecoderConfigurationRecord {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl AvcDecoderConfigurationRecord {
+    /// Return human name of codec, like "Baseline" or "High".
+    pub fn codec_description(&self) -> Option<&'static str> {
+        let v = match self.profile_idc {
+            0x2c => "CAVLC 4:4:4",
+            0x42 => "Baseline",
+            0x4d => "Main",
+            0x58 => "Extended",
+            0x64 => "High",
+            0x6e => "High 10",
+            0x7a => "High 4:2:2",
+            0xf4 => "High 4:4:4",
+
+            0x53 => "Scalable Baseline",
+            0x56 => "Scalable High",
+
+            0x76 => "Multiview High",
+            0x80 => "Stereo High",
+            0x8a => "Multiview Depth High",
+            _ => return None,
+        };
+        Some(v)
+    }
+
+    /// Return codec name as avc1.64001f (High)
+    pub fn codec_name(&self) -> String {
         /// FIXME not sure if this is correct, what is the middle value?
         /// Is it `constraint_set_flags`? or something else.
-        write!(f, "avc1.{:02X}{:02X}{:02X}", self.profile_idc, self.constraint_set_flags, self.level_idc)
+        let mut s = format!("avc1.{:02X}{:02X}{:02X}",
+                            self.profile_idc, self.constraint_set_flags, self.level_idc);
+        if let Some(p) = self.codec_description() {
+            s.push_str(" (");
+            s.push_str(p);
+            s.push_str(")");
+        }
+        s
+    }
+}
+
+/// delegated to AvcDecoderConfigurationRecord::codec_name().
+impl std::fmt::Display for AvcDecoderConfigurationRecord {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.codec_name())
     }
 }
 
