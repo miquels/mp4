@@ -186,6 +186,7 @@ impl<'a> BoxBytes for BoxReader<'a> {
 /// Writes the box header.
 pub struct BoxWriter<'a> {
     offset:    u64,
+    vflags:    u32,
     inner:     Box<dyn WriteBytes + 'a>,
     finalized: bool,
 }
@@ -200,13 +201,15 @@ impl<'a> BoxWriter<'a> {
         let offset = stream.pos();
         0u32.to_bytes(&mut stream)?;
         boxinfo.fourcc().to_bytes(&mut stream)?;
+        let mut vflags = 0;
         if B::max_version().is_some() {
             let version = boxinfo.version().unwrap_or(0) as u32;
-            let flags = version << 24 | boxinfo.flags();
-            flags.to_bytes(&mut stream)?;
+            vflags = version << 24 | boxinfo.flags();
+            vflags.to_bytes(&mut stream)?;
         }
         Ok(BoxWriter {
             offset,
+            vflags,
             inner: Box::new(stream),
             finalized: false,
         })
@@ -255,10 +258,10 @@ impl<'a> BoxBytes for BoxWriter<'a> {
         self.inner.size()
     }
     fn version(&self) -> u8 {
-        self.inner.version()
+        ((self.vflags & 0xff000000) >> 24) as u8
     }
     fn flags(&self) -> u32 {
-        self.inner.flags()
+        self.vflags & 0x00ffffff
     }
     fn fourcc(&self) -> FourCC {
         self.inner.fourcc()
@@ -336,7 +339,9 @@ impl FromBytes for GenericBox {
 
 impl ToBytes for GenericBox {
     fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
-        stream.write(&self.data)
+        let mut writer = BoxWriter::new(stream, self)?;
+        writer.write(&self.data)?;
+        writer.finalize()
     }
 }
 
@@ -415,6 +420,14 @@ macro_rules! def_boxes {
                     }
                 )+
                 Some(v)
+            }
+            /// XXX FIXME do not use flags as deps. Should be a separate trait?
+            fn flags(&self) -> u32 {
+                let mut flags = 0;
+                $(
+                    flags |= self.$deps.flags();
+                )+
+                flags
             }
         }
     };
@@ -597,9 +610,9 @@ macro_rules! def_boxes {
 // Define one box.
 macro_rules! def_box {
 
-    ($name:ident, $_fourcc:expr, $( $field:tt: $type:tt $(as $as:tt)? ),* $(,)?) => {
+    ($(#[$outer:meta])* $name:ident, $_fourcc:expr, $( $field:tt: $type:tt $(as $as:tt)? ),* $(,)?) => {
         // Define the struct itself.
-        def_struct!(@def_struct $name,
+        def_struct!(@def_struct $(#[$outer])* $name,
             $(
                 $field: $type $(as $as)?,
             )*

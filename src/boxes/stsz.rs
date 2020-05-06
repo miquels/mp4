@@ -41,9 +41,13 @@ impl ToBytes for SampleSizeBox {
         let stream = &mut writer;
 
         self.sample_size.to_bytes(stream)?;
-        (self.sample_entries.len() as u32).to_bytes(stream)?;
-        for e in &self.sample_entries {
-            e.to_bytes(stream)?;
+        if self.sample_size != 0 {
+            self.sample_count.to_bytes(stream)?;
+        } else {
+            (self.sample_entries.len() as u32).to_bytes(stream)?;
+            for e in &self.sample_entries {
+                e.to_bytes(stream)?;
+            }
         }
 
         stream.finalize()

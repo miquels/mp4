@@ -26,13 +26,13 @@ def_boxes! {
     };
 
     // Don't forget to set volume to default 0x100 when creating this box.
-    TrackHeaderBox, "tkhd", [1, cr_time, mod_time, duration] => {
+    TrackHeaderBox, "tkhd", [1, flags, cr_time, mod_time, duration] => {
         flags:      TrackFlags,
         cr_time:    Time,
         mod_time:   Time,
         track_id:   u32,
         skip:       4,
-        duration:   VersionSizedUint,
+        duration:   Duration_,
         skip:       8,
         layer:      u16,
         alt_group:  u16,
@@ -68,15 +68,18 @@ def_boxes! {
     };
 
     // XXX TODO something with version inheritance.
-    DataReferenceBox, "dref", [0] => {
+    DataReferenceBox, "dref", [0, flags] => {
+        flags:          DataEntryFlags,
         entries:        [MP4Box, sized],
     };
 
-    DataEntryUrlBox, "url ", [0] => {
+    DataEntryUrlBox, "url ", [0, flags] => {
+        flags:          DataEntryFlags,
         location:       ZString,
     };
 
-    DataEntryUrnBox, "urn ", [0] => {
+    DataEntryUrnBox, "urn ", [0, flags] => {
+        flags:          DataEntryFlags,
         name:           ZString,
         location:       ZString,
     };
@@ -85,7 +88,8 @@ def_boxes! {
         sub_boxes:      [MP4Box],
     };
 
-    VideoMediaInformationBox, "vmhd", [0] => {
+    VideoMediaInformationBox, "vmhd", [0, flags] => {
+        flags:          VideoMediaHeaderFlags,
         graphics_mode:  u16,
         opcolor:        OpColor,
     };
@@ -95,7 +99,7 @@ def_boxes! {
         skip:           2,
     };
 
-    NullMediaHeaderBox, "nmhd", [] => {
+    NullMediaHeaderBox, "nmhd", [0] => {
     };
 
     UserDataBox, "udta", [] => {
@@ -107,21 +111,11 @@ def_boxes! {
         attribute_list: [FourCC],
     };
 
-    // XXX FIXME 8.5.2.3 Semantics
-    // version is set to zero unless the box contains an AudioSampleEntryV1, whereupon version must be 1
-    SampleDescriptionBox, "stsd", [0] => {
-        entries:    u32,
-        n1_size:    u32,
-        n1_format:  FourCC,
-        skip:       6,
-        dataref_idx:    u16,
-    };
-
     MediaHeaderBox, "mdhd", [1, cr_time, mod_time, duration] => {
         cr_time:    Time,
         mod_time:   Time,
         time_scale: u32,
-        duration:   VersionSizedUint,
+        duration:   Duration_,
         language:   IsoLanguageCode,
         quality:    u16,
     };
@@ -130,7 +124,7 @@ def_boxes! {
         cr_time:    Time,
         mod_time:   Time,
         timescale:  u32,
-        duration:   VersionSizedUint,
+        duration:   Duration_,
         pref_rate:  FixedFloat16_16,
         pref_vol:   FixedFloat8_8,
         skip:       10,
@@ -239,8 +233,10 @@ def_boxes! {
 
     Mdat, "mdat", [] => mdat;
 
+    SampleDescriptionBox, "stsd", [1] => stsd;
     SampleSizeBox, "stsz", [0] => stsz;
     CompactSampleSizeBox, "stz2", [0] => stz2;
+
     SampleToGroupBox, "sbgp", [1] => sbgp;
 
     SegmentIndexBox, "sidx", [1, earliest_presentation_time, first_offset] => sidx;

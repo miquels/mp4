@@ -8,8 +8,9 @@ use crate::serialize::{FromBytes, ToBytes, ReadBytes, WriteBytes};
 use crate::types::*;
 use crate::mp4box::BoxInfo;
 
-// 8.16.3 Segment Index Box (ISO/IEC 14496-12:2015(E))
-def_box! { SegmentIndexBox,
+def_box! {
+    /// 8.16.3 Segment Index Box (ISO/IEC 14496-12:2015(E))
+    SegmentIndexBox, "sidx",
         reference_id:               u32,
         timescale:                  u32,
         earliest_presentation_time: VersionSizedUint,

@@ -38,6 +38,9 @@ macro_rules! def_from_to_bytes_newtype {
 
 macro_rules! def_from_to_bytes_versioned {
     ($newtype:ident) => {
+        def_from_to_bytes_versioned!($newtype, 0xffffffff);
+    };
+    ($newtype:ident, $max:expr) => {
         impl FromBytes for $newtype {
             fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> {
                 Ok(match bytes.version() {
@@ -53,14 +56,14 @@ macro_rules! def_from_to_bytes_versioned {
             fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) -> io::Result<()> {
                 match bytes.version() {
                     1 => self.0.to_bytes(bytes)?,
-                    _ => (std::cmp::min(self.0, std::u32::MAX as u64) as u32).to_bytes(bytes)?,
+                    _ => (std::cmp::min(self.0, $max as u64) as u32).to_bytes(bytes)?,
                 }
                 Ok(())
             }
         }
         impl FullBox for $newtype {
             fn version(&self) -> Option<u8> {
-                if self.0 < 0x1_0000_0000 {
+                if self.0 <= $max {
                     None
                 } else {
                     Some(1)
@@ -131,6 +134,17 @@ pub struct VersionSizedUint(pub u64);
 def_from_to_bytes_versioned!(VersionSizedUint);
 
 impl Debug for VersionSizedUint {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        Debug::fmt(&self.0, f)
+    }
+}
+
+/// Duration_ is a 32/64 bit value where "all ones" means "unknown".
+#[derive(Clone, Copy)]
+pub struct Duration_(pub u64);
+def_from_to_bytes_versioned!(Duration_, 0x7fffffff);
+
+impl Debug for Duration_ {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         Debug::fmt(&self.0, f)
     }
@@ -369,8 +383,8 @@ impl Debug for Matrix {
 }
 
 macro_rules! impl_flags {
-    ($type:tt) => {
-        /// Not a real type, value comes from stream.get_flags()
+    ($(#[$outer:meta])* $type:ident $(,$debug:ident)?) => {
+        $(#[$outer])*
         #[derive(Clone, Copy)]
         pub struct $type(pub u32);
 
@@ -389,6 +403,14 @@ macro_rules! impl_flags {
             }
         }
 
+        impl FullBox for $type {
+            fn flags(&self) -> u32 {
+                self.0
+            }
+        }
+
+        impl_flags_debug!($type, $($debug)?);
+
         impl $type {
             pub fn get(&self, bit: u32) -> bool {
                 let mask = 1 << bit;
@@ -405,14 +427,41 @@ macro_rules! impl_flags {
     };
 }
 
-impl_flags!(Flags);
-impl Debug for Flags {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "Flags(0x{:x})", self.0)
+macro_rules! impl_flags_debug {
+    ($type:ty, debug) => {
+        impl Debug for $type {
+            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(f, "Flags({:#x})", self.0)
+            }
+        }
+    };
+    ($type:ty,) => {
+    };
+}
+
+impl_flags!(
+    /// Generic 24 bits flags.
+    #[derive(Default)]
+    Flags,
+    debug
+);
+
+impl_flags!(
+    /// Always 0x01.
+    VideoMediaHeaderFlags,
+    debug
+);
+
+impl Default for VideoMediaHeaderFlags {
+    fn default() -> Self {
+        Self(0x01)
     }
 }
 
-impl_flags!(TrackFlags);
+impl_flags!(
+    /// Track: enabled/in_movie/preview
+    TrackFlags
+);
 
 impl TrackFlags {
     pub fn get_enabled(&self) -> bool {
@@ -458,6 +507,37 @@ impl Debug for TrackFlags {
         }
         v.push("]");
         write!(f, "TrackFlags({})", v.join(" "))
+    }
+}
+
+impl_flags!(
+    /// 0x01 if the data is in the same file (default).
+    DataEntryFlags
+);
+
+impl DataEntryFlags {
+    pub fn get_in_same_file(&self) -> bool {
+        self.get(0)
+    }
+    pub fn set_in_same_file(&mut self, on: bool) {
+        self.set(0, on)
+    }
+}
+
+impl Debug for DataEntryFlags {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let mut v = vec!["["];
+        if self.get_in_same_file() {
+            v.push("in_same_file");
+        }
+        v.push("]");
+        write!(f, "DataEntryFlags({})", v.join(" "))
+    }
+}
+
+impl Default for DataEntryFlags {
+    fn default() -> Self {
+        Self(0x01)
     }
 }
 
@@ -872,14 +952,14 @@ def_struct! {
 }
 
 def_struct! { EditListEntry,
-    duration:   VersionSizedUint,
+    segment_duration:   VersionSizedUint,
     media_time: u32,
     media_rate: FixedFloat16_16,
 }
 
 impl FullBox for EditListEntry {
     fn version(&self) -> Option<u8> {
-        self.duration.version()
+        self.segment_duration.version()
     }
 }
 
