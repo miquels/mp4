@@ -234,8 +234,12 @@ def_boxes! {
     Mdat, "mdat", [] => mdat;
 
     SampleDescriptionBox, "stsd", [1] => stsd;
-    AvcSampleEntry, "avc1", [];
-    AvcConfigurationBox, "avcC", [];
+        AvcSampleEntry, "avc1", [];
+        AvcConfigurationBox, "avcC", [];
+        AacSampleEntry, "mp4a", [];
+        ESDescriptorBox, "esds", [0];
+        Ac3SampleEntry, "ac-3", [];
+        AC3SpecificBox, "dac3", [];
 
     SampleSizeBox, "stsz", [0] => stsz;
     CompactSampleSizeBox, "stz2", [0] => stz2;

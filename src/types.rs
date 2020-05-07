@@ -4,7 +4,7 @@
 /// ZString, IsoLanguageCode, etc).
 ///
 use std::convert::TryInto;
-use std::fmt::{Debug, Display};
+use std::fmt::{Debug, Display, Write};
 use std::io;
 use std::time::{Duration, SystemTime};
 
@@ -133,6 +133,22 @@ impl Debug for Uuid {
 #[derive(Default)]
 pub struct Data(pub Vec<u8>);
 
+impl Data {
+    /// Read an exact number of bytes.
+    pub fn read<R: ReadBytes>(stream: &mut R, count: usize) -> io::Result<Self> {
+        let mut v = Vec::new();
+        if count > 0 {
+            let data = stream.read(count as u64)?;
+            v.extend_from_slice(data);
+        }
+        Ok(Data(v))
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
 impl FromBytes for Data {
     fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> {
         let data = bytes.read(0)?;
@@ -154,7 +170,21 @@ impl ToBytes for Data {
 
 impl Debug for Data {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "[u8; {}]", &self.0.len())
+        if self.0.len() <= 16 {
+            let mut s = String::from("[");
+            let mut first = true;
+            for d in &self.0 {
+                if !first {
+                    s.push(' ');
+                }
+                first = false;
+                let _ = write!(s, "{:02x}", d);
+            }
+            s.push(']');
+            write!(f, "{}", s)
+        } else {
+            write!(f, "[u8; {}]", &self.0.len())
+        }
     }
 }
 
