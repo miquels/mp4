@@ -5,7 +5,7 @@ use crate::mp4box::{BoxReader, BoxWriter, FullBox};
 
 #[derive(Debug)]
 pub struct SampleToGroupBox {
-    grouping_type:  u32,
+    grouping_type:  FourCC,
     grouping_type_parameter:    Option<u32>,
     entries:        ArraySized32<SampleToGroupEntry>,
 }
@@ -14,7 +14,7 @@ impl FromBytes for SampleToGroupBox {
     fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<SampleToGroupBox> {
         let mut reader = BoxReader::new(stream)?;
         let stream = &mut reader;
-        let grouping_type = u32::from_bytes(stream)?;
+        let grouping_type = FourCC::from_bytes(stream)?;
         let grouping_type_parameter = if stream.version() == 1 {
             Some(u32::from_bytes(stream)?)
         } else {
