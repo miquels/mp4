@@ -529,7 +529,7 @@ impl DecoderConfigDescriptor {
     fn to_bytes_partial<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
         self.object_type.to_bytes(stream)?;
         let b = (self.stream_type << 2) | ((self.upstream as u8) << 1) | 0x01;
-        let c = self.buffer_size | (b as u32);
+        let c = self.buffer_size | ((b as u32) << 24);
         c.to_bytes(stream)?;
         self.max_bitrate.to_bytes(stream)?;
         self.avg_bitrate.to_bytes(stream)?;
