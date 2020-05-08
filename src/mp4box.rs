@@ -375,7 +375,29 @@ impl Debug for GenericBox {
 
 /// Declare a complete list of all boxes.
 macro_rules! def_boxes {
+
+    // main entry point.
+    ($($name:ident, $fourcc:expr,  [$($maxver:tt)? $(,$deps:ident)*]  $(=> $block:tt)? ; )+) => {
+
+        def_boxes!(@DEF_MP4BOX $($name, $fourcc),*);
+
+        $(
+            // Call def_box! if needed.
+            def_boxes!(@DEF_BOX $name, $fourcc, $($block)*);
+
+            // Implement FullBox automatically if possible.
+            def_boxes!(@FULLBOX $name, [$($maxver)? $(,$deps)*]);
+
+            // Implement BoxInfo.
+            def_boxes!(@BOXINFO $name, $fourcc, [$($maxver)? $(,$deps)*]);
+
+            // Implement BoxChildren trait for this struct.
+            // def_boxes!(@CHILDREN $struct, $children);
+        )+
+    };
+
     /*
+    // not implemented yet.
     (@CHILDREN $name:ident, -) => {};
     (@CHILDREN $name:ident, $field:ident) => {
         impl BoxChildren for $name {
@@ -386,6 +408,7 @@ macro_rules! def_boxes {
     };
     */
 
+    // Implement the FullBox trait for this struct.
     (@FULLBOX $name:ident, []) => {
         // Not a fullbox - default impl.
         impl FullBox for $name {}
@@ -425,23 +448,39 @@ macro_rules! def_boxes {
         }
     };
 
-    // def_box delegates most of the work to the def_box macro.
-    (@DEF $name:ident, $fourcc:expr, { $($tt:tt)* }) => {
+    // Implement the BoxInfo trait for this struct.
+    (@BOXINFO $name:ident, $fourcc:expr, [$($maxver:tt)? $(,$deps:ident)*]) => {
+        impl BoxInfo for $name {
+            #[inline]
+            fn fourcc(&self) -> FourCC {
+                FourCC::new($fourcc)
+            }
+            $(
+                #[inline]
+                fn max_version() -> Option<u8> {
+                    Some($maxver)
+                }
+            )?
+        }
+    };
+
+    // Define the box itself, either through def_box! or by including a module.
+    (@DEF_BOX $name:ident, $fourcc:expr, { $($tt:tt)* }) => {
         def_box! {
             $name, $fourcc, $($tt)*
         }
     };
     // def_box that points to module.
-    (@DEF $name:ident, $fourcc:expr, $mod:ident) => {
+    (@DEF_BOX $name:ident, $fourcc:expr, $mod:ident) => {
         mod $mod;
         pub use $mod::*;
     };
     // empty def_box.
-    (@DEF $name:ident, $fourcc:expr,) => {
+    (@DEF_BOX $name:ident, $fourcc:expr,) => {
     };
 
-    ($($name:ident, $fourcc:expr,  [$($maxver:tt)? $(,$deps:ident)*]  $(=> $block:tt)? ; )+) => {
-
+    // Define the MP4Box enum.
+    (@DEF_MP4BOX $($name:ident, $fourcc:expr),*) => {
         //
         // First define the enum.
         //
@@ -561,37 +600,7 @@ macro_rules! def_boxes {
                 }
             }
         }
-
-        //
-        // Now define the struct itself.
-        //
-
-        $(
-            // Call def_box! if needed.
-            def_boxes!(@DEF $name, $fourcc, $($block)*);
-
-            // Implement FullBox automatically if possible.
-            def_boxes!(@FULLBOX $name, [$($maxver)? $(,$deps)*]);
-
-            // Implement BoxInfo trait for this struct.
-            impl BoxInfo for $name {
-                #[inline]
-                fn fourcc(&self) -> FourCC {
-                    FourCC::new($fourcc)
-                }
-                $(
-                    #[inline]
-                    fn max_version() -> Option<u8> {
-                        Some($maxver)
-                    }
-                )?
-            }
-
-            // Implement BoxChildren trait for this struct.
-            // def_boxes!(@CHILDREN $struct, $children);
-
-        )+
-    }
+    };
 }
 
 //
