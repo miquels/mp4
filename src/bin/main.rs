@@ -54,16 +54,18 @@ pub struct RewriteOpts {
 }
 
 fn main() -> Result<()> {
-    env_logger::init();
 
     let opts = MainOpts::from_args();
+    /*
     if opts.trace {
         log::set_max_level(log::LevelFilter::Trace);
     } else if opts.debug {
         log::set_max_level(log::LevelFilter::Debug);
     } else {
         log::set_max_level(log::LevelFilter::Info);
-    }
+    }*/
+
+    env_logger::init();
 
     match opts.cmd {
         Command::Dump(opts) => return dump(opts),

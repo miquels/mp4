@@ -156,10 +156,6 @@ def_boxes! {
         name:       ZString,
     };
 
-    AppleItemList, "ilst", [] => {
-        list:       [AppleItem],
-    };
-
     TimeToSampleBox, "stts", [0] => {
         entries:        [TimeToSampleEntry, sized],
     };
@@ -232,6 +228,7 @@ def_boxes! {
     Wide, "wide", [];
 
     Mdat, "mdat", [] => mdat;
+    Data, "data", [];
 
     SampleDescriptionBox, "stsd", [1] => stsd;
         AvcSampleEntry, "avc1", [];
@@ -251,4 +248,6 @@ def_boxes! {
 
     TrackFragmentHeaderBox, "tfhd", [1] => tfhd;
     TrackRunBox, "trun", [1] => trun;
+
+    AppleItemListBox, "ilst", [] => ilst;
 }
