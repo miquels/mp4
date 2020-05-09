@@ -6,7 +6,7 @@ use crate::types::FourCC;
 
 const MIN_BUFSIZE: usize = 4096;
 const SEEK_BUFSIZE: usize = 4096;
-const BUFSIZE: usize = 8*65536;
+const BUFSIZE: usize = 65536;
 
 pub trait ReadAt: Read + FileExt {}
 impl<T> ReadAt for T where T: Read + FileExt {}

@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::io;
 
-use crate::boxes::MP4Box;
+use crate::boxes::{MP4Box, AppleItem};
 use crate::io::ReadAt;
 use crate::serialize::{BoxBytes, FromBytes, ReadBytes, ToBytes, WriteBytes};
 use crate::types::*;
@@ -58,7 +58,7 @@ impl BoxHeader {
             x => x.saturating_sub(8) as u64,
         };
 
-        let max_version = MP4Box::max_version_from_fourcc(fourcc.clone());
+        let max_version = MP4Box::max_version_from_fourcc(fourcc.clone()).or_else(|| AppleItem::max_version_from_fourcc(fourcc.clone()));
         let mut version = None;
         let mut flags = 0;
         if max_version.is_some() {
@@ -377,9 +377,9 @@ impl Debug for GenericBox {
 macro_rules! def_boxes {
 
     // main entry point.
-    ($($name:ident, $fourcc:expr,  [$($maxver:tt)? $(,$deps:ident)*]  $(=> $block:tt)? ; )+) => {
+    ($enum:ident, $($name:ident, $fourcc:expr,  [$($maxver:tt)? $(,$deps:ident)*]  $(=> $block:tt)? ; )+) => {
 
-        def_boxes!(@DEF_MP4BOX $($name, $fourcc),*);
+        def_boxes!(@DEF_MP4BOX $enum, $($name, $fourcc),*);
 
         $(
             // Call def_box! if needed.
@@ -453,7 +453,7 @@ macro_rules! def_boxes {
         impl BoxInfo for $name {
             #[inline]
             fn fourcc(&self) -> FourCC {
-                FourCC::new($fourcc)
+                FourCC(u32::from_be_bytes(*$fourcc))
             }
             $(
                 #[inline]
@@ -480,23 +480,23 @@ macro_rules! def_boxes {
     };
 
     // Define the MP4Box enum.
-    (@DEF_MP4BOX $($name:ident, $fourcc:expr),*) => {
+    (@DEF_MP4BOX $enum:ident, $($name:ident, $fourcc:expr),*) => {
         //
         // First define the enum.
         //
 
         /// All the boxes we know.
-        pub enum MP4Box {
+        pub enum $enum {
             $(
                 $name($name),
             )+
             GenericBox(GenericBox),
         }
 
-        impl MP4Box {
+        impl $enum {
+            #[allow(dead_code)]
             pub(crate) fn max_version_from_fourcc(fourcc: FourCC) -> Option<u8> {
-                let b = fourcc.to_be_bytes();
-                match std::str::from_utf8(&b[..]).unwrap_or("") {
+                match &fourcc.to_be_bytes() {
                     $(
                         $fourcc => $name::max_version(),
                     )+
@@ -506,8 +506,8 @@ macro_rules! def_boxes {
         }
 
         // Define FromBytes trait for the enum.
-        impl FromBytes for MP4Box {
-            fn from_bytes<R: ReadBytes>(mut stream: &mut R) -> io::Result<MP4Box> {
+        impl FromBytes for $enum {
+            fn from_bytes<R: ReadBytes>(mut stream: &mut R) -> io::Result<$enum> {
 
                 // Peek at the header.
                 let saved_pos = stream.pos();
@@ -520,7 +520,7 @@ macro_rules! def_boxes {
                 match (header.version, header.max_version) {
                     (Some(version), Some(max_version)) => {
                         if version > max_version {
-                            return Ok(MP4Box::GenericBox(GenericBox::from_bytes(&mut stream)?));
+                            return Ok($enum::GenericBox(GenericBox::from_bytes(&mut stream)?));
                         }
                     },
                     _ => {},
@@ -528,13 +528,13 @@ macro_rules! def_boxes {
 
                 // Read the body.
                 let b = header.fourcc.to_be_bytes();
-                let e = match std::str::from_utf8(&b[..]).unwrap_or("") {
+                let e = match &b {
                     $(
                         $fourcc => {
-                            MP4Box::$name($name::from_bytes(stream)?)
+                            $enum::$name($name::from_bytes(stream)?)
                         },
                     )+
-                    _ => MP4Box::GenericBox(GenericBox::from_bytes(stream)?),
+                    _ => $enum::GenericBox(GenericBox::from_bytes(stream)?),
                 };
                 Ok(e)
             }
@@ -545,58 +545,58 @@ macro_rules! def_boxes {
         }
 
         // Define ToBytes trait for the enum.
-        impl ToBytes for MP4Box {
+        impl ToBytes for $enum {
             fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
                 match self {
                     $(
-                        &MP4Box::$name(ref b) => b.to_bytes(stream),
+                        &$enum::$name(ref b) => b.to_bytes(stream),
                     )+
-                    &MP4Box::GenericBox(ref b) => b.to_bytes(stream),
+                    &$enum::GenericBox(ref b) => b.to_bytes(stream),
                 }
             }
         }
 
         // Define BoxInfo trait for the enum.
-        impl BoxInfo for MP4Box {
+        impl BoxInfo for $enum {
             #[inline]
             fn fourcc(&self) -> FourCC {
                 match self {
                     $(
-                        &MP4Box::$name(ref b) => b.fourcc(),
+                        &$enum::$name(ref b) => b.fourcc(),
                     )+
-                    &MP4Box::GenericBox(ref b) => b.fourcc(),
+                    &$enum::GenericBox(ref b) => b.fourcc(),
                 }
             }
         }
 
         // Define BoxInfo trait for the enum.
-        impl FullBox for MP4Box {
+        impl FullBox for $enum {
             fn version(&self) -> Option<u8> {
                 match self {
                     $(
-                        &MP4Box::$name(ref b) => b.version(),
+                        &$enum::$name(ref b) => b.version(),
                     )+
-                    &MP4Box::GenericBox(ref b) => b.version(),
+                    &$enum::GenericBox(ref b) => b.version(),
                 }
             }
             fn flags(&self) -> u32 {
                 match self {
                     $(
-                        &MP4Box::$name(ref b) => b.flags(),
+                        &$enum::$name(ref b) => b.flags(),
                     )+
-                    &MP4Box::GenericBox(ref b) => b.flags(),
+                    &$enum::GenericBox(ref b) => b.flags(),
                 }
             }
         }
 
         // Debug implementation that delegates to the variant.
-        impl Debug for MP4Box {
+        impl Debug for $enum {
             fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
                 match self {
                     $(
-                        &MP4Box::$name(ref b) => Debug::fmt(b, f),
+                        &$enum::$name(ref b) => Debug::fmt(b, f),
                     )+
-                    &MP4Box::GenericBox(ref b) => Debug::fmt(b, f),
+                    &$enum::GenericBox(ref b) => Debug::fmt(b, f),
                 }
             }
         }

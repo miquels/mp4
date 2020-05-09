@@ -6,27 +6,29 @@ use crate::serialize::{FromBytes, ReadBytes, ToBytes, WriteBytes};
 use crate::types::*;
 
 def_boxes! {
-    FileTypeBox, "ftyp", [] => {
+    MP4Box,
+
+    FileTypeBox, b"ftyp", [] => {
         major_brand:        FourCC,
         minor_version:      u32,
         compatible_brands:  [FourCC],
     };
 
-    InitialObjectDescriptionBox, "iods", [0] => {
+    InitialObjectDescriptionBox, b"iods", [0] => {
         audio_profile:  u8,
         video_profile:  u8,
     };
 
-    MovieBox, "moov", [] => {
+    MovieBox, b"moov", [] => {
         sub_boxes:      [MP4Box],
     };
 
-    TrackBox, "trak", [] => {
+    TrackBox, b"trak", [] => {
         sub_boxes:      [MP4Box],
     };
 
     // Don't forget to set volume to default 0x100 when creating this box.
-    TrackHeaderBox, "tkhd", [1, flags, cr_time, mod_time, duration] => {
+    TrackHeaderBox, b"tkhd", [1, flags, cr_time, mod_time, duration] => {
         flags:      TrackFlags,
         cr_time:    Time,
         mod_time:   Time,
@@ -43,75 +45,75 @@ def_boxes! {
         height:     FixedFloat16_16,
     };
 
-    EditBox, "edts", [] => {
+    EditBox, b"edts", [] => {
         sub_boxes:  [EditListBox],
     };
 
-    EditListBox, "elst", [1, entries] => {
+    EditListBox, b"elst", [1, entries] => {
         entries:    [EditListEntry, sized],
     };
 
-    MediaBox, "mdia", [] => {
+    MediaBox, b"mdia", [] => {
         sub_boxes:      [MP4Box, unsized],
     };
 
-    SampleTableBox, "stbl", [] => {
+    SampleTableBox, b"stbl", [] => {
         sub_boxes:      [MP4Box],
     };
 
-    BaseMediaInformationHeaderBox, "gmhd", [] => {
+    BaseMediaInformationHeaderBox, b"gmhd", [] => {
         sub_boxes:      [MP4Box],
     };
 
-    DataInformationBox, "dinf", [] => {
+    DataInformationBox, b"dinf", [] => {
         sub_boxes:      [MP4Box],
     };
 
     // XXX TODO something with version inheritance.
-    DataReferenceBox, "dref", [0, flags] => {
+    DataReferenceBox, b"dref", [0, flags] => {
         flags:          DataEntryFlags,
         entries:        [MP4Box, sized],
     };
 
-    DataEntryUrlBox, "url ", [0, flags] => {
+    DataEntryUrlBox, b"url ", [0, flags] => {
         flags:          DataEntryFlags,
         location:       ZString,
     };
 
-    DataEntryUrnBox, "urn ", [0, flags] => {
+    DataEntryUrnBox, b"urn ", [0, flags] => {
         flags:          DataEntryFlags,
         name:           ZString,
         location:       ZString,
     };
 
-    MediaInformationBox, "minf", [] => {
+    MediaInformationBox, b"minf", [] => {
         sub_boxes:      [MP4Box],
     };
 
-    VideoMediaInformationBox, "vmhd", [0, flags] => {
+    VideoMediaInformationBox, b"vmhd", [0, flags] => {
         flags:          VideoMediaHeaderFlags,
         graphics_mode:  u16,
         opcolor:        OpColor,
     };
 
-    SoundMediaHeaderBox, "smhd", [0] => {
+    SoundMediaHeaderBox, b"smhd", [0] => {
         balance:        u16,
         skip:           2,
     };
 
-    NullMediaHeaderBox, "nmhd", [0] => {
+    NullMediaHeaderBox, b"nmhd", [0] => {
     };
 
-    UserDataBox, "udta", [] => {
+    UserDataBox, b"udta", [] => {
         sub_boxes:      [MP4Box],
     };
 
-    TrackSelectionBox, "tsel", [0] => {
+    TrackSelectionBox, b"tsel", [0] => {
         switch_group:   u32,
         attribute_list: [FourCC],
     };
 
-    MediaHeaderBox, "mdhd", [1, cr_time, mod_time, duration] => {
+    MediaHeaderBox, b"mdhd", [1, cr_time, mod_time, duration] => {
         cr_time:    Time,
         mod_time:   Time,
         time_scale: u32,
@@ -120,7 +122,7 @@ def_boxes! {
         quality:    u16,
     };
 
-    MovieHeaderBox, "mvhd", [1, cr_time, mod_time, duration] => {
+    MovieHeaderBox, b"mvhd", [1, cr_time, mod_time, duration] => {
         cr_time:    Time,
         mod_time:   Time,
         timescale:  u32,
@@ -141,53 +143,53 @@ def_boxes! {
         next_track_id: u32,
     };
 
-    HandlerBox, "hdlr", [0] => {
+    HandlerBox, b"hdlr", [0] => {
         skip:       4,
         handler_type:   FourCC,
         skip:       12,
         name:       ZString,
     };
 
-    MetaBox, "meta", [0] => {
+    MetaBox, b"meta", [0] => {
         sub_boxes:  [MP4Box],
     };
 
-    NameBox, "name", [] => {
+    NameBox, b"name", [] => {
         name:       ZString,
     };
 
-    TimeToSampleBox, "stts", [0] => {
+    TimeToSampleBox, b"stts", [0] => {
         entries:        [TimeToSampleEntry, sized],
     };
 
-    SyncSampleBox, "stss", [0] => {
+    SyncSampleBox, b"stss", [0] => {
         entries:        [u32, sized],
     };
 
-    CompositionOffsetBox, "ctts", [1, entries] => {
+    CompositionOffsetBox, b"ctts", [1, entries] => {
         entries:        [CompositionOffsetEntry, sized],
     };
 
-    SampleToChunkBox, "stsc", [0] => {
+    SampleToChunkBox, b"stsc", [0] => {
         entries:        [SampleToChunkEntry, sized],
     };
 
-    ChunkOffsetBox, "stco", [0] => {
+    ChunkOffsetBox, b"stco", [0] => {
         entries:        [u32, sized],
     };
 
-    ChunkLargeOffsetBox, "co64", [0] => {
+    ChunkLargeOffsetBox, b"co64", [0] => {
         entries:        [u64, sized],
     };
 
-    SubtitleMediaHeaderBox, "sthd", [0] => {
+    SubtitleMediaHeaderBox, b"sthd", [0] => {
     };
 
-    MovieExtendsBox, "mvex", [] => {
+    MovieExtendsBox, b"mvex", [] => {
         sub_boxes:      [MP4Box],
     };
 
-    TrackExtendsBox, "trex", [0] => {
+    TrackExtendsBox, b"trex", [0] => {
         track_id:       u32,
         default_sample_description_index:   u32,
         default_sample_duration:    u32,
@@ -195,59 +197,95 @@ def_boxes! {
         default_sample_flags:       SampleFlags,
     };
 
-    SegmentTypeBox, "styp", [] => {
+    SegmentTypeBox, b"styp", [] => {
         major_brand:        FourCC,
         minor_version:      u32,
         compatible_brands:  [FourCC],
     };
 
-    MovieFragmentBox, "moof", [] => {
+    MovieFragmentBox, b"moof", [] => {
         sub_boxes:      [MP4Box],
     };
 
-    MovieExtendsHeaderBox, "mehd", [0, fragment_duration] => {
+    MovieExtendsHeaderBox, b"mehd", [0, fragment_duration] => {
         fragment_duration:  VersionSizedUint,
     };
 
-    MovieFragmentHeaderBox, "mfhd", [0] => {
+    MovieFragmentHeaderBox, b"mfhd", [0] => {
         sequence_number:    u32,
     };
 
-    TrackFragmentBox, "traf", [] => {
+    TrackFragmentBox, b"traf", [] => {
         sub_boxes:      [MP4Box],
     };
 
-    TrackFragmentBaseMediaDecodeTimeBox, "tfdt", [1, base_media_decode_time] => {
+    TrackFragmentBaseMediaDecodeTimeBox, b"tfdt", [1, base_media_decode_time] => {
         base_media_decode_time: VersionSizedUint,
     };
 
     // Below are boxes that are defined manually in boxes/ *.rs
 
-    Free, "free", [] => free;
-    Skip, "skip", [];
-    Wide, "wide", [];
+    Free, b"free", [] => free;
+    Skip, b"skip", [];
+    Wide, b"wide", [];
 
-    Mdat, "mdat", [] => mdat;
-    Data, "data", [];
+    MdatBox, b"mdat", [] => mdat;
 
-    SampleDescriptionBox, "stsd", [1] => stsd;
-        AvcSampleEntry, "avc1", [];
-        AvcConfigurationBox, "avcC", [];
-        AacSampleEntry, "mp4a", [];
-        ESDescriptorBox, "esds", [0];
-        Ac3SampleEntry, "ac-3", [];
-        AC3SpecificBox, "dac3", [];
+    SampleDescriptionBox, b"stsd", [1] => stsd;
+        AvcSampleEntry, b"avc1", [];
+        AvcConfigurationBox, b"avcC", [];
+        AacSampleEntry, b"mp4a", [];
+        ESDescriptorBox, b"esds", [0];
+        Ac3SampleEntry, b"ac-3", [];
+        AC3SpecificBox, b"dac3", [];
 
-    SampleSizeBox, "stsz", [0] => stsz;
-    CompactSampleSizeBox, "stz2", [0] => stz2;
+    SampleSizeBox, b"stsz", [0] => stsz;
+    CompactSampleSizeBox, b"stz2", [0] => stz2;
 
-    SampleToGroupBox, "sbgp", [1] => sbgp;
-    SampleGroupDescriptionBox, "sgpd", [2] => sgpd;
+    SampleToGroupBox, b"sbgp", [1] => sbgp;
+    SampleGroupDescriptionBox, b"sgpd", [2] => sgpd;
 
-    SegmentIndexBox, "sidx", [1, earliest_presentation_time, first_offset] => sidx;
+    SegmentIndexBox, b"sidx", [1, earliest_presentation_time, first_offset] => sidx;
 
-    TrackFragmentHeaderBox, "tfhd", [1] => tfhd;
-    TrackRunBox, "trun", [1] => trun;
+    TrackFragmentHeaderBox, b"tfhd", [1] => tfhd;
+    TrackRunBox, b"trun", [1] => trun;
 
-    AppleItemListBox, "ilst", [] => ilst;
+    AppleItemListBox, b"ilst", [] => ilst;
 }
+
+def_boxes! {
+    AppleItem,
+
+    IAlbumBox, b"\xa9alb", [] => { boxes: [AppleItem], };
+    IArtistBox, b"\xa9art", [] => { boxes: [AppleItem], };
+    ICommentBox, b"\xa9cmt", [] => { boxes: [AppleItem], };
+    IComposerBox, b"\xa9com", [] => { boxes: [AppleItem], };
+    IEncoderBox, b"\xa9too", [] => { boxes: [AppleItem], };
+    IGenBox, b"\xa9gen", [] => { boxes: [AppleItem], };
+    IGroupingBox, b"\xa9grp", [] => { boxes: [AppleItem], };
+    ILyricsBox, b"\xa9lyr", [] => { boxes: [AppleItem], };
+    IMovementIndexBox, b"\xa9mvi", [] => { boxes: [AppleItem], };
+    IMovementNameBox, b"\xa9mvm", [] => { boxes: [AppleItem], };
+    IMovementTotalBox, b"\xa9mvc", [] => { boxes: [AppleItem], };
+    ITitleBox, b"\xa9nam", [] => { boxes: [AppleItem], };
+    ITrackBox, b"\xa9trk", [] => { boxes: [AppleItem], };
+    IWrittenByBox, b"\xa9wrt", [] => { boxes: [AppleItem], };
+    IYearBox, b"\xa9day", [] => { boxes: [AppleItem], };
+
+    ICompilationBox, b"cpil", [] => { boxes: [AppleItem] ,};
+    ICoverArtBox, b"covr", [] => { boxes: [AppleItem], };
+    IDescription, b"desc", [] => { boxes: [AppleItem], };
+    IGenreBox, b"gnre", [] => { boxes: [AppleItem], };
+    IHDVideoFlag, b"hdvd", [] => { boxes: [AppleItem], };
+    IICDSetNoBox, b"disk", [] => { boxes: [AppleItem], };
+    IItunesBox, b"----", [] => { boxes: [AppleItem], };
+    ILongDescription, b"ldes", [] => { boxes: [AppleItem], };
+    IMediaType, b"stik", [] => { boxes: [AppleItem], };
+    ITempoBox, b"tmpo", [] => { boxes: [AppleItem], };
+    ITrackNoBox, b"trkn", [] => { boxes: [AppleItem], };
+
+    IDataBox, b"data", [0u8];
+    INameBox, b"name", [0] => { name: ZString, };
+    IMeanBox, b"mean", [0] => { mean: ZString, };
+}
+
