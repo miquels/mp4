@@ -4,10 +4,12 @@
 //
 
 use std::io;
+
 use crate::serialize::{FromBytes, ToBytes, ReadBytes, WriteBytes};
 use crate::mp4box::{BoxInfo, BoxReader, BoxWriter};
 use crate::boxes::MP4Box;
 use crate::types::*;
+use crate::bitreader::BitReader;
 
 def_box! {
     /// AC-3 sample entry.
@@ -170,43 +172,6 @@ impl std::fmt::Debug for AC3SpecificBox {
         dbg.field("sub_channel", &self.lfeon);
         dbg.field("num_channels", &self.num_channels());
         dbg.finish()
-    }
-}
-
-// Read binary data bit-by-bit.
-struct BitReader<'a> {
-    data:   &'a[u8],
-    pos:    usize,
-}
-
-impl<'a> BitReader<'a> {
-    fn new(data: &'a [u8]) -> BitReader<'a> {
-        BitReader {
-            data,
-            pos: 0,
-        }
-    }
-
-    fn read_bit(&self, pos: usize) -> io::Result<bool> {
-        let b = pos / 8;
-        if b >= self.data.len() {
-            return Err(io::ErrorKind::UnexpectedEof.into());
-        }
-        let c = pos - 8 * b;
-        let bit = self.data[b] & (128 >> c);
-        Ok(bit > 0)
-    }
-
-    fn read_bits(&mut self, count: u8) -> io::Result<u32> {
-        let mut count = count;
-        let mut r = 0;
-
-        while count > 0 {
-            r = r << 1 | (self.read_bit(self.pos)?) as u32;
-            self.pos += 1;
-            count -= 1;
-        }
-        Ok(r)
     }
 }
 
