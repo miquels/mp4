@@ -10,6 +10,7 @@ use crate::mp4box::BoxInfo;
 use crate::boxes::MP4Box;
 use crate::types::*;
 use crate::bitreader::BitReader;
+use crate::track::AudioTrackInfo;
 
 def_box! {
     /// AAC sample entry (AudioSampleEntry).
@@ -22,26 +23,72 @@ def_box! {
         // audio sample number of bits 8 or 16
         sample_size: u16,
         skip:                   4,
-        sample_rate: FixedFloat16_16,
+        sample_rate_hi: u16,
+        sample_rate_lo: u16,
         // sub boxes, probably only esds.
         sub_boxes: [MP4Box],
 }
 
 impl AacSampleEntry {
-    /// Return description of codec ("MPEG 4 audio").
-    pub fn codec_name(&self) -> &'static str {
-        match first_box!(&self.sub_boxes, ESDescriptorBox) {
-            Some(b) => b.codec_name(),
-            None => "MPEG 4 audio",
-        }
-    }
+    /// Return audio specific track info.
+    pub fn track_info(&self) -> AudioTrackInfo {
+        let mut ai = AudioTrackInfo {
+            codec_id:   "mp4a".to_string(),
+            codec_name: Some("MPEG4 Audio".to_string()),
+            channel_count:  self.channel_count as u16,
+            bit_depth: if self.sample_size > 0 { Some(self.sample_size) } else { None },
+            sample_rate: if self.sample_rate_hi > 0 { Some(self.sample_rate_hi as u32) } else { None },
+            ..AudioTrackInfo::default()
+        };
 
-    /// Return codec id as mp4a.40.2
-    pub fn codec_id(&self) -> String {
-        match first_box!(&self.sub_boxes, ESDescriptorBox) {
-            Some(b) => b.codec_id(),
-            None => "mp4a".to_string(),
+        if let Some(esds) = first_box!(&self.sub_boxes, ESDescriptorBox) {
+            ai.codec_id = esds.codec_id();
+            ai.codec_name = Some(esds.codec_name().to_string());
+            let config = &esds.es_descriptor.decoder_config;
+            if let Some(ref audio) = config.specific_info.audio {
+                ai.channel_configuration = match audio.channel_config {
+                    1 => Some("1"),
+                    2 => Some("L,R"),
+                    3 => Some("C,L,R"),
+                    4 => Some("C,L,R,S"),
+                    5 => Some("C,L,R,LS,RS"),
+                    6 => Some("C,L,R,LS,RS"),
+                    _ => None,
+                }.map(|x| x.to_string());
+                let c = match audio.channel_config {
+                    1 => 1,
+                    2 => 2,
+                    3 => 3,
+                    4 => 4,
+                    5 => 5,
+                    6 => 5,
+                    7 => 7,
+                    11 => 6,
+                    12 => 7,
+                    13 => 22,
+                    14 =>7,
+                    _ => 0,
+                };
+                if c > 0 {
+                    ai.channel_count = c;
+                }
+                ai.lfe_channel = match audio.channel_config {
+                    6|7|11|12|13|14 => true,
+                    _ => false,
+                };
+                if audio.sampling_frequency_index < 12 {
+                    let sr: u32 = [ 
+                        96000, 88200, 64000, 48000, 44100, 32000,
+                        24000, 22050, 16000, 12000, 11025, 8000
+                    ][audio.sampling_frequency_index as usize];
+                    ai.sample_rate = Some(sr);
+                } else if audio.sampling_frequency_index == 0xf && audio.sampling_frequency > 0 {
+                    ai.sample_rate = Some(audio.sampling_frequency);
+                }
+            }
         }
+
+        ai
     }
 }
 

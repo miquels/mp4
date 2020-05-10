@@ -8,6 +8,7 @@ use crate::serialize::{FromBytes, ToBytes, ReadBytes, WriteBytes};
 use crate::mp4box::BoxInfo;
 use crate::boxes::MP4Box;
 use crate::types::*;
+use crate::track::VideoTrackInfo;
 
 def_box! {
     /// AVC sample entry (VideoSampleEntry).
@@ -51,23 +52,23 @@ impl Default for AvcSampleEntry {
 }
 
 impl AvcSampleEntry {
-    /// Return codec id as avc1.4D401F
-    pub fn codec_id(&self) -> String {
-        match first_box!(self.sub_boxes, AvcConfigurationBox) {
-            Some(a) => a.configuration.codec_id(),
+    /// Return video specific track info.
+    pub fn track_info(&self) -> VideoTrackInfo {
+        let config = first_box!(self.sub_boxes, AvcConfigurationBox);
+        let codec_id = match config {
+            Some(ref a) => a.configuration.codec_id(),
             None => "avc1.unknown".to_string(),
-        }
-    }
-
-    /// Return human name of codec, like "AVC Baseline" or "AVC High".
-    pub fn codec_name(&self) -> &'static str {
-        match first_box!(self.sub_boxes, AvcConfigurationBox) {
-            Some(a) => a.configuration.codec_name(),
+        };
+        let codec_name = match config {
+            Some(ref a) => a.configuration.codec_name(),
             None => "AVC",
+        }.to_string();
+        VideoTrackInfo {
+            codec_id,
+            codec_name: Some(codec_name.to_string()),
         }
     }
 }
-
 
 def_box! {
     /// Box that contains AVC Decoder Configuration Record.

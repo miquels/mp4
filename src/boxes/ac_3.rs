@@ -10,32 +10,62 @@ use crate::mp4box::{BoxInfo, BoxReader, BoxWriter};
 use crate::boxes::MP4Box;
 use crate::types::*;
 use crate::bitreader::BitReader;
+use crate::track::AudioTrackInfo;
 
 def_box! {
     /// AC-3 sample entry.
     Ac3SampleEntry, "ac-3",
         skip:                   6,
         data_reference_index:   u16,
-        skip:                   4,
+        skip:                   8,
         // (mono = 1 ; stereo = 2)
         channel_count: u16,
         // audio sample number of bits 8 or 16
         sample_size: u16,
         skip:                   4,
-        sample_rate: FixedFloat16_16,
+        sample_rate_hi:         u16,
+        sample_rate_lo:         u16,
         // sub boxes, probably only dac3.
         boxes: [MP4Box],
 }
 
-impl Ac3SampleEntry {
-    /// Return human name of codec, like "Baseline" or "High".
-    pub fn codec_name(&self) -> &'static str {
-        "AC-3 Dolby Digital"
+impl Default for Ac3SampleEntry {
+    fn default() -> Ac3SampleEntry {
+        Ac3SampleEntry {
+            data_reference_index:   0,
+            channel_count:          2,
+            sample_size:            16,
+            sample_rate_hi:         0,
+            sample_rate_lo:         0,
+            boxes:                  Vec::new(),
+        }
     }
+}
 
-    /// Return codec id as avc1.4D401F
-    pub fn codec_id(&self) -> String {
-        "ac-3".to_string()
+impl Ac3SampleEntry {
+    /// Return audio specific track info.
+    pub fn track_info(&self) -> AudioTrackInfo {
+        let mut ai = AudioTrackInfo {
+            codec_id:   "ac-3".to_string(),
+            codec_name: Some("AC-3 Dolby Digital".to_string()),
+            channel_count:  self.channel_count,
+            bit_depth: if self.sample_size > 0 { Some(self.sample_size) } else { None },
+            sample_rate: if self.sample_rate_hi > 0 { Some(self.sample_rate_hi as u32) } else { None },
+            ..AudioTrackInfo::default()
+        };
+
+        if let Some(dac3) = first_box!(&self.boxes, AC3SpecificBox) {
+            ai.channel_count = dac3.num_channels() as u16;
+            ai.lfe_channel = dac3.lfe_channel();
+            if dac3.sampling_rate() > 0 {
+                ai.sample_rate = Some(dac3.sampling_rate());
+            }
+            ai.channel_configuration = Some(dac3.channel_configuration().to_string());
+            ai.avg_bitrate = if dac3.bitrate() > 0 { Some(dac3.bitrate()) } else { None };
+            ai.max_bitrate = if dac3.bitrate() > 0 { Some(dac3.bitrate()) } else { None };
+        }
+
+        ai
     }
 }
 
@@ -129,7 +159,7 @@ impl AC3SpecificBox {
     /// C=Center, LC=Left Center, RC=Right Center
     /// LFE=Low Frequency Effects (sub)
     ///
-    pub fn audio_channels(&self) -> &'static str {
+    pub fn channel_configuration(&self) -> &'static str {
         match self.acmod {
             0 => "1+2",
             1 => "C",
@@ -146,9 +176,15 @@ impl AC3SpecificBox {
     /// Number of audio channels.
     pub fn num_channels(&self) -> u8 {
         if self.acmod > 7 {
-            return 0;
+            // unknown, so it's probably going to be decoded as stereo.
+            return 2;
         }
-        [2, 1, 2, 3, 3, 4, 4, 5][self.acmod as usize] + self.lfeon as u8
+        [2, 1, 2, 3, 3, 4, 4, 5][self.acmod as usize]
+    }
+
+    /// LFE (sub) channel?
+    pub fn lfe_channel(&self) -> bool {
+        self.lfeon
     }
 
     /// Bitrate from bitrate_code.
@@ -168,7 +204,7 @@ impl std::fmt::Debug for AC3SpecificBox {
         let mut dbg = f.debug_struct("AC3SpecificBox");
         dbg.field("bitrate", &self.bitrate());
         dbg.field("audio_service", &self.audio_service());
-        dbg.field("audio_channels", &self.audio_channels());
+        dbg.field("channel_configuration", &self.channel_configuration());
         dbg.field("sub_channel", &self.lfeon);
         dbg.field("num_channels", &self.num_channels());
         dbg.finish()
