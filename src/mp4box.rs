@@ -689,3 +689,47 @@ macro_rules! def_box {
         }
     };
 }
+
+/// Find the first box of type $type in $vec.
+macro_rules! first_box {
+    (@FIELD $val:expr, SampleDescriptionBox) => {
+        &$val.entries
+    };
+    (@FIELD $val:expr, $type:ident) => {
+        &$val.sub_boxes
+    };
+    (@MAIN $vec:expr, $type:ident) => {
+        {
+            let _x: Option<&$type> = iter_box!($vec, $type).next();
+            _x
+        }
+    };
+    (@MAIN $vec:expr, $type:ident $(/$path:ident)+) => {
+        first_box!($vec, $type).and_then(|x| {
+            let _i = first_box!(@FIELD x, $type);
+            first_box!(@MAIN _i, $($path) / *)
+        })
+    };
+    ($vec:ident, $type:ident $($tt:tt)*) => {
+        first_box!(@MAIN $vec.sub_boxes, $type $($tt)*)
+    };
+    ($vec:expr, $type:ident $($tt:tt)*) => {
+        first_box!(@MAIN $vec, $type $($tt)*)
+    };
+}
+
+/// Find all boxes of type $type in $vec.
+macro_rules! iter_box {
+    ($vec:ident, $type:ident) => {
+        iter_box!($vec.sub_boxes, $type)
+    };
+    ($vec:expr, $type:ident) => {
+            $vec.iter().filter_map(|x| {
+                match x {
+                    &MP4Box::$type(ref b) => Some(b),
+                    _ => None,
+                }
+            })
+    };
+}
+

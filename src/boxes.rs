@@ -116,7 +116,7 @@ def_boxes! {
     MediaHeaderBox, b"mdhd", [1, cr_time, mod_time, duration] => {
         cr_time:    Time,
         mod_time:   Time,
-        time_scale: u32,
+        timescale:  u32,
         duration:   Duration_,
         language:   IsoLanguageCode,
         quality:    u16,
@@ -231,7 +231,8 @@ def_boxes! {
 
     MdatBox, b"mdat", [] => mdat;
 
-    SampleDescriptionBox, b"stsd", [1] => stsd;
+    // Max version 0, since we do not support AudioSampleEntryV1 right now.
+    SampleDescriptionBox, b"stsd", [0] => stsd;
         AvcSampleEntry, b"avc1", [];
         AvcConfigurationBox, b"avcC", [];
         AacSampleEntry, b"mp4a", [];

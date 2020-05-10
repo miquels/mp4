@@ -324,6 +324,13 @@ impl Debug for IsoLanguageCode {
     }
 }
 
+impl Default for IsoLanguageCode {
+    fn default() -> IsoLanguageCode {
+        // "und"
+        IsoLanguageCode(0x55c4)
+    }
+}
+
 /// Zero terminated ASCII string.
 pub struct ZString(pub String);
 

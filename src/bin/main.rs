@@ -30,6 +30,9 @@ pub enum Command {
     #[structopt(display_order = 2)]
     /// Rewrite the mp4 file.
     Rewrite(RewriteOpts),
+    #[structopt(display_order = 3)]
+    /// Trac information.
+    TrackInfo(TrackInfoOpts),
 }
 
 #[derive(StructOpt, Debug)]
@@ -53,6 +56,16 @@ pub struct RewriteOpts {
     pub output: String,
 }
 
+#[derive(StructOpt, Debug)]
+pub struct TrackInfoOpts {
+    #[structopt(short, long)]
+    /// Select track.
+    pub track: Option<u32>,
+
+    /// Input filename.
+    pub input: String,
+}
+
 fn main() -> Result<()> {
 
     let opts = MainOpts::from_args();
@@ -70,6 +83,7 @@ fn main() -> Result<()> {
     match opts.cmd {
         Command::Dump(opts) => return dump(opts),
         Command::Rewrite(opts) => return rewrite(opts),
+        Command::TrackInfo(opts) => return trackinfo(opts),
     }
 }
 
@@ -95,6 +109,26 @@ fn rewrite(opts: RewriteOpts) -> Result<()> {
     let outfh = File::create(&opts.output)?;
     let writer = Mp4File::new(outfh);
     write_boxes(writer, &boxes)?;
+
+    Ok(())
+}
+
+fn trackinfo(opts: TrackInfoOpts) -> Result<()> {
+    let infh = File::open(&opts.input)?;
+
+    let mut reader = Mp4File::new(infh);
+    let boxes = read_boxes(&mut reader)?;
+
+    let res = mp4::track::track_info(&boxes);
+    if let Some(track) = opts.track {
+        for t in &res {
+            if t.id == track {
+                println!("{:#?}", t);
+            }
+        }
+    } else {
+        println!("{:#?}", res);
+    }
 
     Ok(())
 }

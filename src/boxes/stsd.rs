@@ -5,7 +5,7 @@
 
 use std::io;
 use crate::serialize::{FromBytes, ToBytes, ReadBytes, WriteBytes, BoxBytes};
-use crate::mp4box::{BoxInfo, FullBox, BoxReader, BoxWriter};
+use crate::mp4box::{BoxInfo, BoxReader, BoxWriter};
 use crate::boxes::MP4Box;
 use crate::types::*;
 
@@ -15,34 +15,27 @@ def_box! {
         entries:    [MP4Box, sized],
 }
 
-// version is set to zero unless the box contains an AudioSampleEntryV1, whereupon version must be 1
-impl FullBox for SampleDescriptionBox {
-}
-
 def_box! {
-    /// AVC sample entry.
+    /// AVC sample entry (VideoSampleEntry).
     AvcSampleEntry, "avc1",
         skip:                   6,
         data_reference_index:   u16,
-        _video_encoding_version:    u16,
-        _video_encoding_revision:   u16,
-        _video_encoding_vendor:     FourCC,
-        _video_temporal_quality:    u32,
-        _video_spatial_quality:     u32,
+        skip:                   16,
         wirdth:                 u16,
         height:                 u16,
         // defaults to 72, 72
-        _video_horizontal_dpi:   FixedFloat16_16,
-        _video_vertical_dpi:     FixedFloat16_16,
-        _video_data_size:       u32,
+        _video_horizontal_dpi:  FixedFloat16_16,
+        _video_vertical_dpi:    FixedFloat16_16,
+        skip:                   4,
         // defaults to 1
         _video_frame_count:     u16,
         // Video encoder name is a fixed-size pascal string.
         // _video_encoder_name: PascalString<32>,
         skip:                   32,
+        // defaults to 0x0018;
         video_pixel_depth:      u16,
-        // -1: no table, 0: table follows inline (do not use?), >0: id.
-        _video_color_table_id:   u16,
+        // always -1
+        _pre_defined:           u16,
         // avcC and other boxes (pasp?)
         sub_boxes:              [MP4Box, unsized],
 }
@@ -51,23 +44,36 @@ impl Default for AvcSampleEntry {
     fn default() -> Self {
         AvcSampleEntry {
             data_reference_index:     0,
-            _video_encoding_version:  0,
-            _video_encoding_revision: 0,
-            _video_encoding_vendor:   FourCC::default(),
-            _video_temporal_quality:  0,
-            _video_spatial_quality:   0,
             wirdth:                   1280,
             height:                   720,
             _video_horizontal_dpi:    FixedFloat16_16::from(72f64),
             _video_vertical_dpi:      FixedFloat16_16::from(72f64),
-            _video_data_size:         0,
-            _video_frame_count:       1,
+            _video_frame_count:      1,
             video_pixel_depth:       24,
-            _video_color_table_id:    0xffff,
+            _pre_defined:            0xffff,
             sub_boxes:                Vec::new(),
         }
     }
 }
+
+impl AvcSampleEntry {
+    /// Return codec id as avc1.4D401F
+    pub fn codec_id(&self) -> String {
+        match first_box!(self.sub_boxes, AvcConfigurationBox) {
+            Some(a) => a.configuration.codec_id(),
+            None => "avc1.unknown".to_string(),
+        }
+    }
+
+    /// Return human name of codec, like "AVC Baseline" or "AVC High".
+    pub fn codec_name(&self) -> &'static str {
+        match first_box!(self.sub_boxes, AvcConfigurationBox) {
+            Some(a) => a.configuration.codec_name(),
+            None => "AVC",
+        }
+    }
+}
+
 
 def_box! {
     /// Box that contains AVC Decoder Configuration Record.
@@ -87,47 +93,38 @@ def_struct! {
 
 impl AvcDecoderConfigurationRecord {
     /// Return human name of codec, like "Baseline" or "High".
-    pub fn codec_description(&self) -> Option<&'static str> {
-        let v = match self.profile_idc {
-            0x2c => "CAVLC 4:4:4",
-            0x42 => "Baseline",
-            0x4d => "Main",
-            0x58 => "Extended",
-            0x64 => "High",
-            0x6e => "High 10",
-            0x7a => "High 4:2:2",
-            0xf4 => "High 4:4:4",
+    pub fn codec_name(&self) -> &'static str {
+        match self.profile_idc {
+            0x2c => "AVC CAVLC 4:4:4",
+            0x42 => "AVC Baseline",
+            0x4d => "AVC Main",
+            0x58 => "AVC Extended",
+            0x64 => "AVC High",
+            0x6e => "AVC High 10",
+            0x7a => "AVC High 4:2:2",
+            0xf4 => "AVC High 4:4:4",
 
-            0x53 => "Scalable Baseline",
-            0x56 => "Scalable High",
+            0x53 => "AVC Scalable Baseline",
+            0x56 => "AVC Scalable High",
 
-            0x76 => "Multiview High",
-            0x80 => "Stereo High",
-            0x8a => "Multiview Depth High",
-            _ => return None,
-        };
-        Some(v)
+            0x76 => "AVC Multiview High",
+            0x80 => "AVC Stereo High",
+            0x8a => "AVC Multiview Depth High",
+            _ => "AVC",
+        }
     }
 
-    /// Return codec name as avc1.64001f (High)
-    pub fn codec_name(&self) -> String {
-        /// FIXME not sure if this is correct, what is the middle value?
-        /// Is it `constraint_set_flags`? or something else.
-        let mut s = format!("avc1.{:02X}{:02X}{:02X}",
-                            self.profile_idc, self.constraint_set_flags, self.level_idc);
-        if let Some(p) = self.codec_description() {
-            s.push_str(" (");
-            s.push_str(p);
-            s.push_str(")");
-        }
-        s
+    /// Return codec id as avc1.4d401f
+    pub fn codec_id(&self) -> String {
+        format!("avc1.{:02x}{:02x}{:02x}",
+                    self.profile_idc, self.constraint_set_flags, self.level_idc)
     }
 }
 
-/// delegated to AvcDecoderConfigurationRecord::codec_name().
+/// delegated to AvcDecoderConfigurationRecord::codec_id().
 impl std::fmt::Display for AvcDecoderConfigurationRecord {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.codec_name())
+        write!(f, "{}", self.codec_id())
     }
 }
 
@@ -136,23 +133,27 @@ def_box! {
     Ac3SampleEntry, "ac-3",
         skip:                   6,
         data_reference_index:   u16,
-        // default = 0 ; audio data size before decompression = 1
-        _audio_encoding_version: u16,
-        // always 0
-        _audio_encoding_revision: u16,
-        // default 0
-        _audio_encoding_vendor: FourCC,
+        skip:                   4,
         // (mono = 1 ; stereo = 2)
         channel_count: u16,
         // audio sample number of bits 8 or 16
         sample_size: u16,
-        // default = 0
-        _audio_compression_id: u16,
-        // default = 0
-        _audio_packet_size: u16,
+        skip:                   4,
         sample_rate: FixedFloat16_16,
-        // sub boxes, probably only dac3. FIXME: really only dac3?
+        // sub boxes, probably only dac3.
         boxes: [MP4Box],
+}
+
+impl Ac3SampleEntry {
+    /// Return human name of codec, like "Baseline" or "High".
+    pub fn codec_name(&self) -> &'static str {
+        "AC-3 Dolby Digital"
+    }
+
+    /// Return codec id as avc1.4D401F
+    pub fn codec_id(&self) -> String {
+        "ac-3".to_string()
+    }
 }
 
 pub struct AC3SpecificBox {
@@ -239,6 +240,12 @@ impl AC3SpecificBox {
     }
 
     /// Audio channels. "1+2", "L,C,R,SL,SR", etc.
+    ///
+    /// L=Left, R=Right,
+    /// S=Surround, SL=Surround Left, SR=Surround Right, BS=Back Surround
+    /// C=Center, LC=Left Center, RC=Right Center
+    /// LFE=Low Frequency Effects (sub)
+    ///
     pub fn audio_channels(&self) -> &'static str {
         match self.acmod {
             0 => "1+2",
@@ -286,34 +293,76 @@ impl std::fmt::Debug for AC3SpecificBox {
 }
 
 def_box! {
-    /// AAC sample entry.
+    /// AAC sample entry (AudioSampleEntry).
     AacSampleEntry, "mp4a",
         skip:                   6,
         data_reference_index:   u16,
-        // default = 0 ; audio data size before decompression = 1
-        _audio_encoding_version: u16,
-        // always 0
-        _audio_encoding_revision: u16,
-        // default 0
-        _audio_encoding_vendor: FourCC,
+        skip:                   8,
         // (mono = 1 ; stereo = 2)
         channel_count: u16,
         // audio sample number of bits 8 or 16
         sample_size: u16,
-        // default = 0
-        _audio_compression_id: u16,
-        // default = 0
-        _audio_packet_size: u16,
+        skip:                   4,
         sample_rate: FixedFloat16_16,
-        // sub boxes, probably only esds. FIXME: really only esds?
-        boxes: [MP4Box],
+        // sub boxes, probably only esds.
+        sub_boxes: [MP4Box],
 }
+
+impl AacSampleEntry {
+    /// Return description of codec ("MPEG 4 audio").
+    pub fn codec_name(&self) -> &'static str {
+        match first_box!(&self.sub_boxes, ESDescriptorBox) {
+            Some(b) => b.codec_name(),
+            None => "MPEG 4 audio",
+        }
+    }
+
+    /// Return codec id as mp4a.40.2
+    pub fn codec_id(&self) -> String {
+        match first_box!(&self.sub_boxes, ESDescriptorBox) {
+            Some(b) => b.codec_id(),
+            None => "mp4a".to_string(),
+        }
+    }
+}
+
 
 def_box! {
     /// MPEG4 ESDescriptor.
     // FIXME? "m4ds" is an alias we currently do not reckognize.
     ESDescriptorBox, "esds",
         es_descriptor:   ESDescriptor,
+}
+
+impl ESDescriptorBox {
+    /// Return human name of codec, like "Baseline" or "High".
+    pub fn codec_name(&self) -> &'static str {
+        let config = &self.es_descriptor.decoder_config;
+        if config.stream_type != 5 {
+            return "mp4a";
+        }
+        match config.specific_info.audio {
+            Some(ref audio) => match audio.profile {
+                2 => "AAC-LC",
+                5 => "HE-AAC",
+                29 => "HE-AACv2",
+                _ => "AAC",
+            },
+            None => "MPEG-4 Audio",
+        }
+    }
+
+    /// Return codec id as avc1.4D401F
+    pub fn codec_id(&self) -> String {
+        let config = &self.es_descriptor.decoder_config;
+        if config.stream_type != 5 {
+            return "mp4a".to_string();
+        }
+        match config.specific_info.audio {
+            Some(ref audio) => format!("mp4a.{:02x}.{}", config.object_type, audio.profile),
+            None => format!("mp4a.{:02x}", config.object_type),
+        }
+    }
 }
 
 //
