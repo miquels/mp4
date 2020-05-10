@@ -1,11 +1,11 @@
 use std::time::Duration;
 
-use crate::mp4box::BoxInfo;
 use crate::boxes::*;
+use crate::mp4box::BoxInfo;
 use crate::types::*;
 
 /// General track information.
-#[derive (Debug, Default)]
+#[derive(Debug, Default)]
 pub struct TrackInfo {
     pub id:             u32,
     pub track_type:     String,
@@ -48,7 +48,10 @@ pub fn track_info(base: &[MP4Box]) -> Vec<TrackInfo> {
         let hdlr = pick_or!(first_box!(mdia, HandlerBox), continue);
         info.track_type = hdlr.handler_type.to_string();
 
-        let stsd = pick_or!(first_box!(mdia, MediaInformationBox / SampleTableBox / SampleDescriptionBox), continue);
+        let stsd = pick_or!(
+            first_box!(mdia, MediaInformationBox / SampleTableBox / SampleDescriptionBox),
+            continue
+        );
         if let Some(avc1) = first_box!(stsd.entries, AvcSampleEntry) {
             info.codec_id = avc1.codec_id();
             info.codec_name = avc1.codec_name().to_string();
@@ -67,6 +70,6 @@ pub fn track_info(base: &[MP4Box]) -> Vec<TrackInfo> {
 
         v.push(info)
     }
-    
+
     v
 }

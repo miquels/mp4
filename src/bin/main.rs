@@ -13,12 +13,12 @@ use mp4::mp4box::{read_boxes, write_boxes};
 pub struct MainOpts {
     #[structopt(short, long)]
     /// Maximum log verbosity: debug (info)
-    pub debug:  bool,
+    pub debug: bool,
     #[structopt(short, long)]
     /// Maximum log verbosity: debug (trace)
-    pub trace:  bool,
+    pub trace: bool,
     #[structopt(subcommand)]
-    pub cmd:    Command,
+    pub cmd:   Command,
 }
 
 #[derive(StructOpt, Debug)]
@@ -48,10 +48,10 @@ pub struct RewriteOpts {
     pub fragment: bool,
     #[structopt(short, long)]
     /// Select track.
-    pub track: Option<u32>,
+    pub track:    Option<u32>,
 
     /// Input filename.
-    pub input: String,
+    pub input:  String,
     /// Output filename.
     pub output: String,
 }
@@ -67,7 +67,6 @@ pub struct TrackInfoOpts {
 }
 
 fn main() -> Result<()> {
-
     let opts = MainOpts::from_args();
     /*
     if opts.trace {
@@ -132,4 +131,3 @@ fn trackinfo(opts: TrackInfoOpts) -> Result<()> {
 
     Ok(())
 }
-

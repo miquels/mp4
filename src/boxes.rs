@@ -290,4 +290,3 @@ def_boxes! {
     INameBox, b"name", [0] => { name: ZString, };
     IMeanBox, b"mean", [0] => { mean: ZString, };
 }
-

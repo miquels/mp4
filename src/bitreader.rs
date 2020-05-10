@@ -2,16 +2,13 @@ use std::io;
 
 // Read binary data bit-by-bit.
 pub(crate) struct BitReader<'a> {
-    pub data:   &'a[u8],
-    pub pos:    usize,
+    pub data: &'a [u8],
+    pub pos:  usize,
 }
 
 impl<'a> BitReader<'a> {
     pub fn new(data: &'a [u8]) -> BitReader<'a> {
-        BitReader {
-            data,
-            pos: 0,
-        }
+        BitReader { data, pos: 0 }
     }
 
     pub fn read_bit(&self, pos: usize) -> io::Result<bool> {
@@ -36,4 +33,3 @@ impl<'a> BitReader<'a> {
         Ok(r)
     }
 }
-

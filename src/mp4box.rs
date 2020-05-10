@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::io;
 
-use crate::boxes::{MP4Box, AppleItem};
+use crate::boxes::{AppleItem, MP4Box};
 use crate::io::ReadAt;
 use crate::serialize::{BoxBytes, FromBytes, ReadBytes, ToBytes, WriteBytes};
 use crate::types::*;
@@ -58,7 +58,8 @@ impl BoxHeader {
             x => x.saturating_sub(8) as u64,
         };
 
-        let max_version = MP4Box::max_version_from_fourcc(fourcc.clone()).or_else(|| AppleItem::max_version_from_fourcc(fourcc.clone()));
+        let max_version = MP4Box::max_version_from_fourcc(fourcc.clone())
+            .or_else(|| AppleItem::max_version_from_fourcc(fourcc.clone()));
         let mut version = None;
         let mut flags = 0;
         if max_version.is_some() {
@@ -724,12 +725,11 @@ macro_rules! iter_box {
         iter_box!($vec.sub_boxes, $type)
     };
     ($vec:expr, $type:ident) => {
-            $vec.iter().filter_map(|x| {
-                match x {
-                    &MP4Box::$type(ref b) => Some(b),
-                    _ => None,
-                }
-            })
+        $vec.iter().filter_map(|x| {
+            match x {
+                &MP4Box::$type(ref b) => Some(b),
+                _ => None,
+            }
+        })
     };
 }
-
