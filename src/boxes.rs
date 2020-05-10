@@ -233,11 +233,12 @@ def_boxes! {
 
     // Max version 0, since we do not support AudioSampleEntryV1 right now.
     SampleDescriptionBox, b"stsd", [0] => stsd;
-        AvcSampleEntry, b"avc1", [];
+
+    AvcSampleEntry, b"avc1", [] => avc1;
         AvcConfigurationBox, b"avcC", [];
-        AacSampleEntry, b"mp4a", [];
+    AacSampleEntry, b"mp4a", [] => mp4a;
         ESDescriptorBox, b"esds", [0];
-        Ac3SampleEntry, b"ac-3", [];
+    Ac3SampleEntry, b"ac-3", [] => ac_3;
         AC3SpecificBox, b"dac3", [];
 
     SampleSizeBox, b"stsz", [0] => stsz;
