@@ -1,6 +1,5 @@
 use std::io;
-use crate::serialize::{FromBytes, ToBytes, ReadBytes, WriteBytes};
-use crate::mp4box::{BoxReader, BoxWriter};
+use crate::boxes::prelude::*;
 
 macro_rules! free_box {
     ($name:ident) => {

@@ -479,12 +479,12 @@ macro_rules! def_boxes {
     // empty def_box.
     (@DEF_BOX $name:ident, $fourcc:expr,) => {
     };
-
     // Define the MP4Box enum.
     (@DEF_MP4BOX $enum:ident, $($name:ident, $fourcc:expr),*) => {
         //
         // First define the enum.
         //
+
 
         /// All the boxes we know.
         pub enum $enum {
@@ -697,7 +697,7 @@ macro_rules! first_box {
         &$val.entries
     };
     (@FIELD $val:expr, $type:ident) => {
-        &$val.sub_boxes
+        &$val.boxes
     };
     (@MAIN $vec:expr, $type:ident) => {
         {
@@ -712,22 +712,64 @@ macro_rules! first_box {
         })
     };
     ($vec:ident, $type:ident $($tt:tt)*) => {
-        first_box!(@MAIN $vec.sub_boxes, $type $($tt)*)
+        first_box!(@MAIN $vec.boxes, $type $($tt)*)
     };
     ($vec:expr, $type:ident $($tt:tt)*) => {
         first_box!(@MAIN $vec, $type $($tt)*)
     };
 }
 
+/// Find the first box of type $type in $vec, mutable.
+macro_rules! first_box_mut {
+    (@FIELD $val:expr, SampleDescriptionBox) => {
+        &mut $val.entries
+    };
+    (@FIELD $val:expr, $type:ident) => {
+        &mut $val.boxes
+    };
+    (@MAIN $vec:expr, $type:ident) => {
+        {
+            let _x: Option<&mut $type> = iter_box_mut!($vec, $type).next();
+            _x
+        }
+    };
+    (@MAIN $vec:expr, $type:ident $(/$path:ident)+) => {
+        first_box_mut!($vec, $type).and_then(|mut x| {
+            let &mut _i = first_box_mut!(@FIELD x, $type);
+            first_box_mut!(@MAIN _i, $($path) / *)
+        })
+    };
+    ($vec:ident, $type:ident $($tt:tt)*) => {
+        first_box_mut!(@MAIN $vec.boxes, $type $($tt)*)
+    };
+    ($vec:expr, $type:ident $($tt:tt)*) => {
+        first_box_mut!(@MAIN $vec, $type $($tt)*)
+    };
+}
+
 /// Find all boxes of type $type in $vec.
 macro_rules! iter_box {
     ($vec:ident, $type:ident) => {
-        iter_box!($vec.sub_boxes, $type)
+        iter_box!($vec.boxes, $type)
     };
     ($vec:expr, $type:ident) => {
         $vec.iter().filter_map(|x| {
             match x {
                 &MP4Box::$type(ref b) => Some(b),
+                _ => None,
+            }
+        })
+    };
+}
+
+macro_rules! iter_box_mut {
+    ($vec:ident, $type:ident) => {
+        iter_box_mut!($vec.boxes, $type)
+    };
+    ($vec:expr, $type:ident) => {
+        $vec.iter_mut().filter_map(|x| {
+            match x {
+                &mut MP4Box::$type(ref mut b) => Some(b),
                 _ => None,
             }
         })

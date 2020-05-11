@@ -1,7 +1,5 @@
 use std::io;
-use crate::serialize::{FromBytes, ToBytes, ReadBytes, WriteBytes};
-use crate::types::*;
-use crate::mp4box::{BoxReader, BoxWriter};
+use crate::boxes::prelude::*;
 
 #[derive(Debug)]
 pub struct SampleSizeBox {

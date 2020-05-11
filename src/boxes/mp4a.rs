@@ -5,10 +5,7 @@
 
 use std::io;
 
-use crate::serialize::{FromBytes, ToBytes, ReadBytes, WriteBytes, BoxBytes};
-use crate::mp4box::BoxInfo;
-use crate::boxes::MP4Box;
-use crate::types::*;
+use crate::boxes::prelude::*;
 use crate::bitreader::BitReader;
 use crate::track::AudioTrackInfo;
 
@@ -26,7 +23,7 @@ def_box! {
         sample_rate_hi: u16,
         sample_rate_lo: u16,
         // sub boxes, probably only esds.
-        sub_boxes: [MP4Box],
+        boxes: [MP4Box],
 }
 
 impl AacSampleEntry {
@@ -41,7 +38,7 @@ impl AacSampleEntry {
             ..AudioTrackInfo::default()
         };
 
-        if let Some(esds) = first_box!(&self.sub_boxes, ESDescriptorBox) {
+        if let Some(esds) = first_box!(&self.boxes, ESDescriptorBox) {
             ai.codec_id = esds.codec_id();
             ai.codec_name = Some(esds.codec_name().to_string());
             let config = &esds.es_descriptor.decoder_config;

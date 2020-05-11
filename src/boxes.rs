@@ -1,6 +1,8 @@
 use std::fmt::Debug;
 use std::io;
 
+pub (crate) mod prelude;
+
 use crate::mp4box::*;
 use crate::serialize::{FromBytes, ReadBytes, ToBytes, WriteBytes};
 use crate::types::*;
@@ -20,11 +22,11 @@ def_boxes! {
     };
 
     MovieBox, b"moov", [] => {
-        sub_boxes:      [MP4Box],
+        boxes:      [MP4Box],
     };
 
     TrackBox, b"trak", [] => {
-        sub_boxes:      [MP4Box],
+        boxes:      [MP4Box],
     };
 
     // Don't forget to set volume to default 0x100 when creating this box.
@@ -46,7 +48,7 @@ def_boxes! {
     };
 
     EditBox, b"edts", [] => {
-        sub_boxes:  [EditListBox],
+        boxes:  [EditListBox],
     };
 
     EditListBox, b"elst", [1, entries] => {
@@ -54,19 +56,19 @@ def_boxes! {
     };
 
     MediaBox, b"mdia", [] => {
-        sub_boxes:      [MP4Box, unsized],
+        boxes:      [MP4Box, unsized],
     };
 
     SampleTableBox, b"stbl", [] => {
-        sub_boxes:      [MP4Box],
+        boxes:      [MP4Box],
     };
 
     BaseMediaInformationHeaderBox, b"gmhd", [] => {
-        sub_boxes:      [MP4Box],
+        boxes:      [MP4Box],
     };
 
     DataInformationBox, b"dinf", [] => {
-        sub_boxes:      [MP4Box],
+        boxes:      [MP4Box],
     };
 
     // XXX TODO something with version inheritance.
@@ -87,7 +89,7 @@ def_boxes! {
     };
 
     MediaInformationBox, b"minf", [] => {
-        sub_boxes:      [MP4Box],
+        boxes:      [MP4Box],
     };
 
     VideoMediaInformationBox, b"vmhd", [0, flags] => {
@@ -105,7 +107,7 @@ def_boxes! {
     };
 
     UserDataBox, b"udta", [] => {
-        sub_boxes:      [MP4Box],
+        boxes:      [MP4Box],
     };
 
     TrackSelectionBox, b"tsel", [0] => {
@@ -151,7 +153,7 @@ def_boxes! {
     };
 
     MetaBox, b"meta", [0] => {
-        sub_boxes:  [MP4Box],
+        boxes:  [MP4Box],
     };
 
     NameBox, b"name", [] => {
@@ -186,7 +188,7 @@ def_boxes! {
     };
 
     MovieExtendsBox, b"mvex", [] => {
-        sub_boxes:      [MP4Box],
+        boxes:      [MP4Box],
     };
 
     TrackExtendsBox, b"trex", [0] => {
@@ -204,7 +206,7 @@ def_boxes! {
     };
 
     MovieFragmentBox, b"moof", [] => {
-        sub_boxes:      [MP4Box],
+        boxes:      [MP4Box],
     };
 
     MovieExtendsHeaderBox, b"mehd", [0, fragment_duration] => {
@@ -216,7 +218,7 @@ def_boxes! {
     };
 
     TrackFragmentBox, b"traf", [] => {
-        sub_boxes:      [MP4Box],
+        boxes:      [MP4Box],
     };
 
     TrackFragmentBaseMediaDecodeTimeBox, b"tfdt", [1, base_media_decode_time] => {

@@ -4,9 +4,7 @@
 //
 
 use std::io;
-use crate::serialize::{FromBytes, ToBytes, ReadBytes, WriteBytes};
-use crate::types::*;
-use crate::mp4box::BoxInfo;
+use crate::boxes::prelude::*;
 
 def_box! {
     /// 8.16.3 Segment Index Box (ISO/IEC 14496-12:2015(E))

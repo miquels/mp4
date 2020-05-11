@@ -4,10 +4,8 @@
 //
 
 use std::io;
-use crate::serialize::{FromBytes, ToBytes, ReadBytes, WriteBytes};
-use crate::mp4box::BoxInfo;
-use crate::boxes::MP4Box;
-use crate::types::*;
+
+use crate::boxes::prelude::*;
 use crate::track::VideoTrackInfo;
 
 def_box! {
@@ -32,7 +30,7 @@ def_box! {
         // always -1
         _pre_defined:           u16,
         // avcC and other boxes (pasp?)
-        sub_boxes:              [MP4Box, unsized],
+        boxes:              [MP4Box, unsized],
 }
 
 impl Default for AvcSampleEntry {
@@ -46,7 +44,7 @@ impl Default for AvcSampleEntry {
             _video_frame_count:      1,
             video_pixel_depth:       24,
             _pre_defined:            0xffff,
-            sub_boxes:                Vec::new(),
+            boxes:                Vec::new(),
         }
     }
 }
@@ -54,7 +52,7 @@ impl Default for AvcSampleEntry {
 impl AvcSampleEntry {
     /// Return video specific track info.
     pub fn track_info(&self) -> VideoTrackInfo {
-        let config = first_box!(self.sub_boxes, AvcConfigurationBox);
+        let config = first_box!(self.boxes, AvcConfigurationBox);
         let codec_id = match config {
             Some(ref a) => a.configuration.codec_id(),
             None => "avc1.unknown".to_string(),
