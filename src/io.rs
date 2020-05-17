@@ -253,6 +253,52 @@ impl BoxBytes for Mp4Data {
     }
 }
 
+// A writer that doesn't really write, it just counts the bytes
+// that it would write if it were a real writer. How much wood
+// would a woodchuck etc.
+#[derive(Debug, Default)]
+pub(crate) struct CountBytes {
+    pos:    usize,
+    max:    usize,
+}
+
+impl CountBytes {
+    pub fn new() -> CountBytes {
+        CountBytes {
+            pos: 0,
+            max: 0,
+        }
+    }
+}
+
+impl WriteBytes for CountBytes {
+    fn write(&mut self, newdata: &[u8]) -> io::Result<()> {
+        self.pos += newdata.len();
+        if self.max < self.pos {
+            self.max = self.pos;
+        }
+        Ok(())
+    }
+
+    fn skip(&mut self, amount: u64) -> io::Result<()> {
+        self.pos += amount as usize;
+        Ok(())
+    }
+}
+
+impl BoxBytes for CountBytes {
+    fn pos(&self) -> u64 {
+        self.pos as u64
+    }
+    fn seek(&mut self, pos: u64) -> io::Result<()> {
+        self.pos = pos as usize;
+        Ok(())
+    }
+    fn size(&self) -> u64 {
+        self.max as u64
+    }
+}
+
 impl<'a, B: ?Sized + ReadBytes + 'a> ReadBytes for Box<B> {
     fn read(&mut self, amount: u64) -> io::Result<&[u8]> {
         B::read(&mut *self, amount)

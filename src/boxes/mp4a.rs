@@ -8,6 +8,7 @@ use std::io;
 use crate::boxes::prelude::*;
 use crate::bitreader::BitReader;
 use crate::track::AudioTrackInfo;
+use crate::io::CountBytes;
 
 def_box! {
     /// AAC sample entry (AudioSampleEntry).
@@ -536,52 +537,6 @@ impl ToBytes for PString {
         let len = std::cmp::min(self.0.len(), 254);
         (len as u8).to_bytes(stream)?;
         stream.write(self.0[..len].as_bytes())
-    }
-}
-
-// A writer that doesn't really write, it just counts the bytes
-// that it would write if it were a real writer. How much wood
-// would a woodchuck etc.
-#[derive(Debug, Default)]
-struct CountBytes {
-    pos:    usize,
-    max:    usize,
-}
-
-impl CountBytes {
-    pub fn new() -> CountBytes {
-        CountBytes {
-            pos: 0,
-            max: 0,
-        }
-    }
-}
-
-impl WriteBytes for CountBytes {
-    fn write(&mut self, newdata: &[u8]) -> io::Result<()> {
-        self.pos += newdata.len();
-        if self.max < self.pos {
-            self.max = self.pos;
-        }
-        Ok(())
-    }
-
-    fn skip(&mut self, amount: u64) -> io::Result<()> {
-        self.pos += amount as usize;
-        Ok(())
-    }
-}
-
-impl BoxBytes for CountBytes {
-    fn pos(&self) -> u64 {
-        self.pos as u64
-    }
-    fn seek(&mut self, pos: u64) -> io::Result<()> {
-        self.pos = pos as usize;
-        Ok(())
-    }
-    fn size(&self) -> u64 {
-        self.max as u64
     }
 }
 
