@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::time::Duration;
 
 use crate::boxes::*;
-use crate::mp4box::BoxInfo;
+use crate::mp4box::{BoxInfo, MP4};
 use crate::types::*;
 
 /// General track information.
@@ -73,42 +73,30 @@ pub struct UnknownTrackInfo {
     pub codec_name: Option<String>,
 }
 
-macro_rules! pick_or {
-    ($e:expr, $($tt:tt)+) => {
-        match $e {
-            Some(v) => v,
-            None => $($tt)+,
-        }
-    };
-}
-
 /// Extract general track information for all tracks in the movie.
-pub fn track_info(base: &[MP4Box]) -> Vec<TrackInfo> {
+pub fn track_info(mp4: &MP4) -> Vec<TrackInfo> {
     let mut v = Vec::new();
 
-    let moov = pick_or!(first_box!(&base, MovieBox), return v);
-    let mvhd = pick_or!(first_box!(moov, MovieHeaderBox), return v);
+    let movie = mp4.movie();
+    let mvhd = movie.movie_header();
 
-    for track in iter_box!(moov, TrackBox) {
+    for track in &movie.tracks() {
         let mut info = TrackInfo::default();
 
-        let tkhd = pick_or!(first_box!(track, TrackHeaderBox), continue);
+        let tkhd = track.track_header();
         info.id = tkhd.track_id;
         info.duration = Duration::from_millis((1000 * tkhd.duration.0) / (mvhd.timescale as u64));
 
-        let mdia = pick_or!(first_box!(track, MediaBox), continue);
+        let mdia = track.media();
 
-        let mdhd = pick_or!(first_box!(mdia, MediaHeaderBox), continue);
+        let mdhd = mdia.media_header();
         info.duration = Duration::from_millis((1000 * mdhd.duration.0) / (mdhd.timescale as u64));
         info.language = mdhd.language;
 
-        let hdlr = pick_or!(first_box!(mdia, HandlerBox), continue);
+        let hdlr = mdia.handler();
         info.track_type = hdlr.handler_type.to_string();
 
-        let stsd = pick_or!(
-            first_box!(mdia, MediaInformationBox / SampleTableBox / SampleDescriptionBox),
-            continue
-        );
+        let stsd = mdia.media_info().sample_table().sample_description();
 
         if let Some(avc1) = first_box!(stsd.entries, AvcSampleEntry) {
             info.specific_info = SpecificTrackInfo::VideoTrackInfo(avc1.track_info());

@@ -5,25 +5,26 @@ use crate::boxes::prelude::*;
 
 /// 8.1.1 Media Data Box (ISO/IEC 14496-12:2015(E))
 #[derive(Debug, Default)]
-pub struct MdatBox {
+pub struct MediaDataBox {
     pub data:   DataRef
 }
 
-impl FromBytes for MdatBox {
-    fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<MdatBox> {
+impl FromBytes for MediaDataBox {
+    fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<MediaDataBox> {
         let pos = stream.pos();
         let mut reader = BoxReader::new(stream)?;
         let is_large = reader.pos() - pos > 8;
-        let mut data = DataRef::from_bytes(&mut reader)?;
+        let size = reader.left();
+        let mut data = DataRef::from_bytes(&mut reader, size)?;
         if is_large {
             data.is_large = is_large;
         }
-        Ok(MdatBox{ data })
+        Ok(MediaDataBox{ data })
     }
     fn min_size() -> usize { 8 }
 }
 
-impl ToBytes for MdatBox {
+impl ToBytes for MediaDataBox {
     fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
 
         // First write a header.
@@ -53,10 +54,9 @@ pub struct DataRef {
     pub data_size:  u64,
 }
 
-impl FromBytes for DataRef {
-    fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<DataRef> {
+impl DataRef {
+    pub fn from_bytes<R: ReadBytes>(stream: &mut R, data_size: u64) -> io::Result<DataRef> {
         let data_pos = stream.pos();
-        let data_size = stream.left();
         let is_large = data_size + 32 > std::u32::MAX as u64;
         stream.skip(data_size)?;
         Ok(DataRef {
@@ -65,8 +65,6 @@ impl FromBytes for DataRef {
             data_size,
         })
     }
-
-    fn min_size() -> usize { 0 }
 }
 
 impl ToBytes for DataRef {

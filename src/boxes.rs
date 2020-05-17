@@ -21,14 +21,6 @@ def_boxes! {
         video_profile:  u8,
     };
 
-    MovieBox, b"moov", [] => {
-        boxes:      [MP4Box],
-    };
-
-    TrackBox, b"trak", [] => {
-        boxes:      [MP4Box],
-    };
-
     // Don't forget to set volume to default 0x100 when creating this box.
     TrackHeaderBox, b"tkhd", [1, flags, cr_time, mod_time, duration] => {
         flags:      TrackFlags,
@@ -55,14 +47,6 @@ def_boxes! {
         entries:    [EditListEntry, sized],
     };
 
-    MediaBox, b"mdia", [] => {
-        boxes:      [MP4Box, unsized],
-    };
-
-    SampleTableBox, b"stbl", [] => {
-        boxes:      [MP4Box],
-    };
-
     BaseMediaInformationHeaderBox, b"gmhd", [] => {
         boxes:      [MP4Box],
     };
@@ -86,10 +70,6 @@ def_boxes! {
         flags:          DataEntryFlags,
         name:           ZString,
         location:       ZString,
-    };
-
-    MediaInformationBox, b"minf", [] => {
-        boxes:      [MP4Box],
     };
 
     VideoMediaInformationBox, b"vmhd", [0, flags] => {
@@ -152,12 +132,32 @@ def_boxes! {
         name:       ZString,
     };
 
+    ExtendedLanguageBox, b"elng", [0] => {
+        language:   ZString,
+    };
+
     MetaBox, b"meta", [0] => {
         boxes:  [MP4Box],
     };
 
     NameBox, b"name", [] => {
         name:       ZString,
+    };
+
+    PixelAspectRatioBox, b"pasp", [] => {
+        h_spacing:  u32,
+        v_spacing:  u32,
+    };
+
+    CleanApertureBox, b"clap", [] => {
+        clean_aperture_width_n: u32,
+        clean_aperture_width_d: u32,
+        clean_aperture_height_n: u32,
+        clean_aperture_height_d: u32,
+        horiz_off_n: u32,
+        horiz_off_d: u32,
+        vert_off_n: u32,
+        vert_off_d: u32,
     };
 
     TimeToSampleBox, b"stts", [0] => {
@@ -227,11 +227,17 @@ def_boxes! {
 
     // Below are boxes that are defined manually in boxes/ *.rs
 
+    MovieBox, b"moov", [] => moov;
+    TrackBox, b"trak", [] => trak;
+    MediaBox, b"mdia", [] => mdia;
+    SampleTableBox, b"stbl", [] => stbl;
+    MediaInformationBox, b"minf", [] => minf;
+
     Free, b"free", [] => free;
     Skip, b"skip", [];
     Wide, b"wide", [];
 
-    MdatBox, b"mdat", [] => mdat;
+    MediaDataBox, b"mdat", [] => mdat;
 
     // Max version 0, since we do not support AudioSampleEntryV1 right now.
     SampleDescriptionBox, b"stsd", [0] => stsd;

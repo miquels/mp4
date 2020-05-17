@@ -6,7 +6,7 @@ use clap;
 use structopt::StructOpt;
 
 use mp4::io::Mp4File;
-use mp4::mp4box::{read_boxes, write_boxes};
+use mp4::mp4box::MP4;
 
 #[derive(StructOpt, Debug)]
 #[structopt(setting = clap::AppSettings::VersionlessSubcommands)]
@@ -90,11 +90,11 @@ fn dump(opts: DumpOpts) -> Result<()> {
     let infh = File::open(&opts.input)?;
 
     let mut reader = Mp4File::new(infh);
-    let boxes = read_boxes(&mut reader)?;
+    let mp4 = MP4::read(&mut reader)?;
 
     let stdout = io::stdout();
     let mut handle = BufWriter::with_capacity(128000, stdout.lock());
-    let _ = writeln!(handle, "{:#?}", boxes);
+    let _ = writeln!(handle, "{:#?}", mp4);
 
     Ok(())
 }
@@ -103,11 +103,11 @@ fn rewrite(opts: RewriteOpts) -> Result<()> {
     let infh = File::open(&opts.input)?;
 
     let mut reader = Mp4File::new(infh);
-    let boxes = read_boxes(&mut reader)?;
+    let mp4 = MP4::read(&mut reader)?;
 
     let outfh = File::create(&opts.output)?;
     let writer = Mp4File::new(outfh);
-    write_boxes(writer, &boxes)?;
+    mp4.write(writer)?;
 
     Ok(())
 }
@@ -116,9 +116,9 @@ fn trackinfo(opts: TrackInfoOpts) -> Result<()> {
     let infh = File::open(&opts.input)?;
 
     let mut reader = Mp4File::new(infh);
-    let boxes = read_boxes(&mut reader)?;
+    let mp4 = MP4::read(&mut reader)?;
 
-    let res = mp4::track::track_info(&boxes);
+    let res = mp4::track::track_info(&mp4);
     if let Some(track) = opts.track {
         for t in &res {
             if t.id == track {

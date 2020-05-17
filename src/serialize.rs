@@ -138,6 +138,20 @@ pub trait ToBytes {
     fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) -> io::Result<()>;
 }
 
+/*
+thread_local!(static MP4BOX: RefCell<Vec<Mp4Box>> = RefCell::new(Vec::new());
+macro_rules set_vec! {
+    (Mp4Box, $field:ident, $value:expr) => {
+        MP4BOX.with(|v| {
+            *f.borrow_mut() = v;
+        });
+    },
+    ($_type:ty, $field:ident, $value:expr) => {
+        let $field = $value;
+    }
+}
+*/
+
 // Convenience macro to implement FromBytes/ToBytes for u* types.
 macro_rules! def_from_to_bytes {
     ($type:ident) => {
@@ -226,10 +240,30 @@ macro_rules! def_struct {
     (@min_size [ $type:ty, sized32 ]) => { 4 };
     (@min_size [ $type:ty, unsized ]) => { 0 };
     (@min_size [ $_type:ty ]) => { 0 };
+    (@min_size ( $_type:ty )) => { 0 };
+    (@min_size { $_type:ty }) => { 0 };
     (@min_size $type:ident) => {
         $type::min_size()
     };
     (@min_size $amount:expr) => { $amount };
+
+    // Extract a box from the boxes array.
+    (@EXTRACT $name:ident, $type:ident) => {
+        |boxes: &mut Vec<MP4Box>| {
+            use io::ErrorKind::InvalidData;
+            let idx = boxes.iter().enumerate().find_map(|(i, b)| {
+                match b {
+                    &$crate::boxes::MP4Box::$type(..) => Some(i),
+                    _ => None,
+                }
+            }).ok_or_else(|| io::Error::new(InvalidData, format!("{}: missing {}", $name, stringify!($type))))?;
+            let b = boxes.remove(idx);
+            match b {
+                $crate::boxes::MP4Box::$type(b) => Ok(b),
+                _ => unreachable!(),
+            }
+        }
+    };
 
     // @def_struct: Define a struct line by line using accumulation and recursion.
     (@def_struct $(#[$outer:meta])* $name:ident, $( $field:tt: $type:tt $(as $as:tt)? ),* $(,)?) => {
@@ -239,8 +273,8 @@ macro_rules! def_struct {
     (@def_struct_ $info:tt, [ skip: $amount:tt, $($tt:tt)*] -> [ $($res:tt)* ]) => {
         def_struct!(@def_struct_ $info, [$($tt)*] -> [ $($res)* ]);
     };
-    // Add normal field (as).
-    (@def_struct_ $info:tt, [ $field:ident: $_type:ident as $type:ident, $($tt:tt)*] -> [ $($res:tt)* ]) => {
+    // Add normal field (type in curlies)
+    (@def_struct_ $info:tt, [ $field:ident: {$type:ident}, $($tt:tt)*] -> [ $($res:tt)* ]) => {
         def_struct!(@def_struct_ $info, [$($tt)*] -> [ $($res)* pub $field: $type, ]);
     };
     // Add normal field (ArraySized16)
@@ -259,8 +293,12 @@ macro_rules! def_struct {
     (@def_struct_ $info:tt, [ $field:ident: [ $type:ty ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
         def_struct!(@def_struct_ $info, [$($tt)*] -> [ $($res)* pub $field: Vec<$type>, ]);
     };
+    // Add normal field (as).
+    (@def_struct_ $info:tt, [ $field:ident: $_type:ty as $type:ty, $($tt:tt)*] -> [ $($res:tt)* ]) => {
+        def_struct!(@def_struct_ $info, [$($tt)*] -> [ $($res)* pub $field: $type, ]);
+    };
     // Add normal field.
-    (@def_struct_ $info:tt, [ $field:ident: $type:ident, $($tt:tt)*] -> [ $($res:tt)* ]) => {
+    (@def_struct_ $info:tt, [ $field:ident: $type:ty, $($tt:tt)*] -> [ $($res:tt)* ]) => {
         def_struct!(@def_struct_ $info, [$($tt)*] -> [ $($res)* pub $field: $type, ]);
     };
     // Final.
@@ -273,58 +311,67 @@ macro_rules! def_struct {
 
     // @from_bytes: Generate the from_bytes details for a struct.
     (@from_bytes $name:ident, $base:tt, $stream:tt, $( $field:tt: $type:tt $(as $as:tt)? ),* $(,)?) => {
-        def_struct!(@from_bytes_ $name, $base, $stream, [ $( $field: $type $(as $as)?, )* ] -> [] []);
+        def_struct!(@from_bytes_ $name, $base, $stream, [ $( $field: $type $(as $as)?, )* ] -> [] [] []);
     };
     // Insert a skip instruction.
     (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ skip: $amount:tt, $($tt:tt)*]
-        -> [ $($set:tt)* ] [ $($fields:tt)* ] ) => {
+        -> [ $($set:tt)* ] $set2:tt [ $($fields:tt)* ] ) => {
         def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [ $stream.skip($amount).unwrap(); ] ] [$($fields)*]);
+            [ $($set)* [ $stream.skip($amount).unwrap(); ] ] $set2 [$($fields)*]);
     };
-    // Set a field (as)
-    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: $in:tt as $out:tt, $($tt:tt)*]
-        -> [ $($set:tt)* ] [ $($fields:tt)* ]) => {
+    // Set a field (in curlies, non-optional, from .boxes)
+    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: { $type:ident }, $($tt:tt)*]
+        -> $set:tt [ $($set2:tt)* ] [ $($fields:tt)* ]) => {
         def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [ let $field: $out = $in::from_bytes($stream)?.into(); ] ] [ $($fields)* $field ]);
+            //$set [ $($set2)* ] [$($fields)*]);
+            $set [ $($set2)* [ let $field = def_struct!{@EXTRACT $name, $type} ] ] [ $($fields)* $field ]);
     };
     // Set a field (ArraySized16)
     (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: [ $type:ty, sized16 ], $($tt:tt)*]
-        -> [ $($set:tt)* ] [ $($fields:tt)* ]) => {
+        -> [ $($set:tt)* ] $set2:tt [ $($fields:tt)* ]) => {
         def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [ let $field = ArraySized16::<$type>::from_bytes($stream)?; ] ] [ $($fields)* $field ]);
+            [ $($set)* [ let $field = ArraySized16::<$type>::from_bytes($stream)?; ] ] $set2 [ $($fields)* $field ]);
     };
     // Set a field (ArraySized32)
     (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: [ $type:ty, sized ], $($tt:tt)*]
-        -> [ $($set:tt)* ] [ $($fields:tt)* ]) => {
+        -> [ $($set:tt)* ] $set2:tt [ $($fields:tt)* ]) => {
         def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [ let $field = ArraySized32::<$type>::from_bytes($stream)?; ] ] [ $($fields)* $field ]);
+            [ $($set)* [ let $field = ArraySized32::<$type>::from_bytes($stream)?; ] ] $set2 [ $($fields)* $field ]);
     };
     // Set a field (ArrayUnsized)
     (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: [ $type:ty, unsized ], $($tt:tt)*]
-        -> [ $($set:tt)* ] [ $($fields:tt)* ]) => {
+        -> [ $($set:tt)* ] $set2:tt [ $($fields:tt)* ]) => {
         def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [ let $field = Vec::<$type>::from_bytes($stream)?; ] ] [ $($fields)* $field ]);
+            [ $($set)* [ let $field = Vec::<$type>::from_bytes($stream)?; ] ] $set2 [ $($fields)* $field ]);
     };
     // Set a field (Vec)
     (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: [ $type:ty ], $($tt:tt)*]
-        -> [ $($set:tt)* ] [ $($fields:tt)* ]) => {
+        -> [ $($set:tt)* ] $set2:tt [ $($fields:tt)* ]) => {
         def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [ let $field = Vec::<$type>::from_bytes($stream)?; ] ] [ $($fields)* $field ]);
+            [ $($set)* [ let $field = Vec::<$type>::from_bytes($stream)?; ] ] $set2 [ $($fields)* $field ]);
+    };
+    // Set a field (as)
+    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: $in:ty as $out:ty, $($tt:tt)*]
+        -> [ $($set:tt)* ] $set2:tt [ $($fields:tt)* ]) => {
+        def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
+            [ $($set)* [ let $field: $out = <$in>::from_bytes($stream)?.into(); ] ] $set2 [ $($fields)* $field ]);
     };
     // Set a field.
-    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: $type:tt, $($tt:tt)*]
-        -> [ $($set:tt)* ] [ $($fields:tt)* ]) => {
+    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: $type:ty, $($tt:tt)*]
+        -> [ $($set:tt)* ] $set2:tt [ $($fields:tt)* ]) => {
         def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [ let $field = $type::from_bytes($stream)?; ] ] [ $($fields)* $field ]);
+            [ $($set)* [ let $field = <$type>::from_bytes($stream)?; ] ] $set2 [ $($fields)* $field ]);
     };
     // Final.
-    (@from_bytes_ $name:ident, [ $($base:tt)* ], $_stream:tt, [] -> [ $([$($set:tt)*])* ] [ $($field:tt)* ]) => {
+    (@from_bytes_ $name:ident, [ $($base:tt)* ], $_stream:tt, [] -> [ $([$($set:tt)*])* ] [ $([$($set2:tt)*])* ] [ $($field:tt)* ]) => {
         Ok({
         $(
             $($set)*
         )*
+        $(
+            $($set2)*(&mut boxes)?;
+        )*
         $name {
-            $($base)*
             $(
                 $field,
             )*
@@ -344,12 +391,20 @@ macro_rules! def_struct {
     (@to_bytes_ $struct:expr, $stream:ident, skip: $amount:tt) => {
         $stream.skip($amount)?;
     };
+    // Write a field value (type in curlies)
+    (@to_bytes_ $struct:expr, $stream:ident, $field:tt: { $type:ty }) => {
+        $struct.$field.to_bytes($stream)?;
+    };
+    // Write a field value (Array or Vec)
+    (@to_bytes_ $struct:expr, $stream:ident, $field:tt: [ $type:ty $(, $_tt:tt)?]) => {
+        $struct.$field.to_bytes($stream)?;
+    };
     // Write a field value (as)
-    (@to_bytes_ $struct:expr, $stream:ident, $field:tt: $type:tt as $_type:tt) => {
-        $type::from($struct.$field).to_bytes($stream)?;
+    (@to_bytes_ $struct:expr, $stream:ident, $field:tt: $type:ty as $_type:ty) => {
+        <$type>::from($struct.$field).to_bytes($stream)?;
     };
     // Write a field value.
-    (@to_bytes_ $struct:expr, $stream:ident, $field:tt: $type:tt) => {
+    (@to_bytes_ $struct:expr, $stream:ident, $field:tt: $type:ty) => {
         $struct.$field.to_bytes($stream)?;
     };
 
