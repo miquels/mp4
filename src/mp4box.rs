@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::io;
 
-use crate::boxes::{MP4Box, MovieBox, FileTypeBox};
+use crate::boxes::{MP4Box, MovieBox, FileTypeBox, DataRef};
 use crate::io::ReadAt;
 use crate::serialize::{BoxBytes, FromBytes, ReadBytes, ToBytes, WriteBytes};
 use crate::types::*;
@@ -395,9 +395,9 @@ pub fn write_boxes<W: WriteBytes>(mut file: W, boxes: &[MP4Box]) -> io::Result<(
 /// Any unknown boxes we encounted are put into a GenericBox.
 pub struct GenericBox {
     fourcc: FourCC,
-    data:   Vec<u8>,
+    data:   Option<Vec<u8>>,
+    data_ref:   Option<DataRef>,
     size:   u64,
-    skip:   bool,
 }
 
 impl FromBytes for GenericBox {
@@ -406,26 +406,19 @@ impl FromBytes for GenericBox {
         let stream = &mut reader;
 
         let size = stream.left();
-        let data;
-        let skip;
+        let mut data = None;
+        let mut data_ref = None;
         if size == 0 {
-            skip = false;
-            data = vec![];
+            data = Some(vec![]);
         } else if size < 65536 {
-            if size == 0 || size == 3353696 {
-                debug!("GenericBox::from_bytes: size {}", size);
-            }
-            skip = false;
-            data = stream.read(size)?.to_vec();
+            data = Some(stream.read(size)?.to_vec());
         } else {
-            skip = true;
-            stream.skip(size)?;
-            data = vec![];
+            data_ref = Some(DataRef::from_bytes(stream, size)?);
         }
         Ok(GenericBox {
             fourcc: stream.fourcc(),
             data,
-            skip,
+            data_ref,
             size,
         })
     }
@@ -437,7 +430,12 @@ impl FromBytes for GenericBox {
 impl ToBytes for GenericBox {
     fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
         let mut writer = BoxWriter::new(stream, self)?;
-        writer.write(&self.data)?;
+        if let Some(ref data) = self.data {
+            writer.write(data)?;
+        }
+        if let Some(ref data_ref) = self.data_ref {
+            data_ref.to_bytes(&mut writer)?;
+        }
         writer.finalize()
     }
 }
@@ -455,10 +453,13 @@ impl Debug for GenericBox {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let mut dbg = f.debug_struct("GenericBox");
         dbg.field("fourcc", &self.fourcc);
-        let data = format!("[u8; {}]", self.size);
-        dbg.field("data", &data);
-        if self.skip {
-            dbg.field("skip", &true);
+        if let Some(ref _data) = self.data {
+            let data = format!("[u8; {}]", self.size);
+            dbg.field("data", &data);
+        }
+        if let Some(ref data_ref) = self.data_ref {
+            let data = format!("[u8; {}]", data_ref.data_size);
+            dbg.field("data", &data);
         }
         dbg.finish()
     }
