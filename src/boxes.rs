@@ -256,39 +256,3 @@ def_boxes! {
 
     AppleItemListBox, b"ilst", [] => ilst;
 }
-
-def_boxes! {
-    AppleItem,
-
-    IAlbumBox, b"\xa9alb", [] => { boxes: [AppleItem], };
-    IArtistBox, b"\xa9art", [] => { boxes: [AppleItem], };
-    ICommentBox, b"\xa9cmt", [] => { boxes: [AppleItem], };
-    IComposerBox, b"\xa9com", [] => { boxes: [AppleItem], };
-    IEncoderBox, b"\xa9too", [] => { boxes: [AppleItem], };
-    IGenBox, b"\xa9gen", [] => { boxes: [AppleItem], };
-    IGroupingBox, b"\xa9grp", [] => { boxes: [AppleItem], };
-    ILyricsBox, b"\xa9lyr", [] => { boxes: [AppleItem], };
-    IMovementIndexBox, b"\xa9mvi", [] => { boxes: [AppleItem], };
-    IMovementNameBox, b"\xa9mvm", [] => { boxes: [AppleItem], };
-    IMovementTotalBox, b"\xa9mvc", [] => { boxes: [AppleItem], };
-    ITitleBox, b"\xa9nam", [] => { boxes: [AppleItem], };
-    ITrackBox, b"\xa9trk", [] => { boxes: [AppleItem], };
-    IWrittenByBox, b"\xa9wrt", [] => { boxes: [AppleItem], };
-    IYearBox, b"\xa9day", [] => { boxes: [AppleItem], };
-
-    ICompilationBox, b"cpil", [] => { boxes: [AppleItem] ,};
-    ICoverArtBox, b"covr", [] => { boxes: [AppleItem], };
-    IDescription, b"desc", [] => { boxes: [AppleItem], };
-    IGenreBox, b"gnre", [] => { boxes: [AppleItem], };
-    IHDVideoFlag, b"hdvd", [] => { boxes: [AppleItem], };
-    IICDSetNoBox, b"disk", [] => { boxes: [AppleItem], };
-    IItunesBox, b"----", [] => { boxes: [AppleItem], };
-    ILongDescription, b"ldes", [] => { boxes: [AppleItem], };
-    IMediaType, b"stik", [] => { boxes: [AppleItem], };
-    ITempoBox, b"tmpo", [] => { boxes: [AppleItem], };
-    ITrackNoBox, b"trkn", [] => { boxes: [AppleItem], };
-
-    IDataBox, b"data", [0u8];
-    INameBox, b"name", [0] => { name: ZString, };
-    IMeanBox, b"mean", [0] => { mean: ZString, };
-}

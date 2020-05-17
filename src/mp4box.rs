@@ -58,8 +58,7 @@ impl BoxHeader {
             x => x.saturating_sub(8) as u64,
         };
 
-        let max_version = MP4Box::max_version_from_fourcc(fourcc.clone())
-            .or_else(|| AppleItem::max_version_from_fourcc(fourcc.clone()));
+        let max_version = MP4Box::max_version_from_fourcc(fourcc.clone());
         let mut version = None;
         let mut flags = 0;
         if max_version.is_some() {
@@ -80,6 +79,34 @@ impl BoxHeader {
         });
         debug!("BoxHeader::read: {:?}", b);
         b
+    }
+
+    pub(crate) fn read_base(mut stream: &mut impl ReadBytes) -> io::Result<BoxHeader> {
+        let size1 = u32::from_bytes(&mut stream)?;
+        let fourcc = FourCC::from_bytes(&mut stream)?;
+        let size = match size1 {
+            0 => stream.size() - stream.pos(),
+            1 => u64::from_bytes(&mut stream)?.saturating_sub(16),
+            x => x.saturating_sub(8) as u64,
+        };
+
+        Ok(BoxHeader {
+            size,
+            fourcc,
+            version: None,
+            flags: 0,
+            max_version: None,
+        })
+    }
+
+    pub(crate) fn read_full(mut stream: &mut impl ReadBytes, header: &mut BoxHeader) -> io::Result<()> {
+        header.version = Some(u8::from_bytes(&mut stream)?);
+        let data = stream.read(3)?;
+        let mut buf = [0u8; 4];
+        (&mut buf[1..]).copy_from_slice(&data);
+        header.flags = u32::from_be_bytes(buf);
+        header.size -= 4;
+        Ok(())
     }
 }
 
