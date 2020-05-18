@@ -16,6 +16,11 @@ impl TrackBox {
         first_box!(&self.boxes, TrackHeaderBox).unwrap()
     }
 
+    /// Get a mutable reference to this track's TrackHeaderBox.
+    pub fn track_header_mut(&mut self) -> &mut TrackHeaderBox {
+        first_box_mut!(&mut self.boxes, TrackHeaderBox).unwrap()
+    }
+
     /// Get a reference to this track's MediaBox.
     pub fn media(&self) -> &MediaBox {
         first_box!(&self.boxes, MediaBox).unwrap()
@@ -24,6 +29,11 @@ impl TrackBox {
     /// Get a mutable reference to this track's MediaBox.
     pub fn media_mut(&mut self) -> &mut MediaBox {
         first_box_mut!(&mut self.boxes, MediaBox).unwrap()
+    }
+
+    /// Get the track id.
+    pub fn track_id(&self) -> u32 {
+        self.track_header().track_id
     }
 
     /// Check if this track is valid (has header and media boxes).

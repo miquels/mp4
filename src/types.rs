@@ -284,6 +284,12 @@ impl std::cmp::PartialEq<&[u8]> for FourCC {
     }
 }
 
+impl std::cmp::PartialEq<FourCC> for FourCC {
+    fn eq(&self, other: &FourCC) -> bool {
+        self.0 == other.0
+    }
+}
+
 impl Debug for FourCC {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.fmt_fourcc(true))
@@ -825,12 +831,31 @@ macro_rules! define_array {
             }
         }
 
+        impl<T> std::ops::DerefMut for $name<T> {
+            fn deref_mut(&mut self) -> &mut[T] {
+                std::ops::DerefMut::deref_mut(&mut self.vec)
+            }
+        }
+
         impl<'a, T> IntoIterator for &'a $name<T> {
             type Item = &'a T;
             type IntoIter = std::slice::Iter<'a, T>;
 
             fn into_iter(self) -> std::slice::Iter<'a, T> {
                 self.iter()
+            }
+        }
+
+        impl<T> std::iter::FromIterator<T> for $name<T> {
+            fn from_iter<I>(iter: I) -> Self where I: IntoIterator<Item = T> {
+                let mut v = Vec::new();
+                for i in iter {
+                    v.push(i);
+                }
+                $name {
+                    vec: v,
+                    nosize: $nosize,
+                }
             }
         }
     }

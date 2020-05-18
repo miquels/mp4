@@ -294,7 +294,7 @@ impl<'a> BoxBytes for BoxWriter<'a> {
     fn fourcc(&self) -> FourCC {
         self.inner.fourcc()
     }
-    fn mdat_ref(&self) -> Option<&dyn ReadAt> {
+    fn mdat_ref(&self) -> Option<&Box<dyn ReadAt>> {
         self.inner.mdat_ref()
     }
 }

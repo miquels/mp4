@@ -25,6 +25,30 @@ pub enum ChunkOffsetMut<'a> {
     CO64(&'a mut ChunkLargeOffsetBox),
 }
 
+impl ChunkOffset<'_> {
+    #[inline]
+    pub fn len(&self) -> usize {
+        match self {
+            &ChunkOffset::CO32(ref co) => co.entries.len(),
+            &ChunkOffset::CO64(ref co) => co.entries.len(),
+        }
+    }
+
+    /// Get value at an index.
+    ///
+    /// Unfortunately the Index trait does not work, since it returns a
+    /// reference. We'd need to return &(entry as u64), but that results
+    /// in "cannot return a reference to a temporary value".
+    /// Thus, the discrete function.
+    #[inline]
+    pub fn index(&self, idx: usize) -> u64 {
+        match self {
+            &ChunkOffset::CO32(ref co) => co.entries[idx] as u64,
+            &ChunkOffset::CO64(ref co) => co.entries[idx],
+        }
+    }
+}
+
 impl SampleTableBox {
 
     declare_box_methods!(SampleDescriptionBox, sample_description, sample_description_mut);
@@ -52,6 +76,36 @@ impl SampleTableBox {
             return ChunkOffsetMut::<'a>::CO64(first_box_mut!(&mut self.boxes, ChunkLargeOffsetBox).unwrap());
         }
         unreachable!()
+    }
+
+    /// Rewrite the stco table to a co64 table.
+    pub fn move_chunk_offsets_up(&mut self, delta: u64) {
+        match self.chunk_offset_mut() {
+            ChunkOffsetMut::CO32(ref mut co) => {
+                if co.entries.len() == 0 {
+                    return;
+                }
+                if co.entries[0] as u64 + delta > 0xffffffff {
+                    // We need to change to a 64 bit offset table.
+                    let entries = co.entries.iter().map(|o| *o as u64).collect::<ArraySized32<_>>();
+                    let idx = self.boxes.iter().enumerate().find_map(|(idx, b)| {
+                        match b {
+                            MP4Box::ChunkOffsetBox(_) => Some(idx),
+                            _ => None,
+                        }
+                    }).unwrap();
+                    self.boxes[idx] = MP4Box::ChunkLargeOffsetBox(ChunkLargeOffsetBox{ entries });
+                    return;
+                }
+                // Increment in-place.
+                let d32 = delta as u32;
+                co.entries.iter_mut().for_each(|o| *o += d32);
+            },
+            ChunkOffsetMut::CO64(ref mut co) => {
+                // Increment in-place.
+                co.entries.iter_mut().for_each(|o| *o += delta);
+            },
+        }
     }
 
     /// Check if this SampleTableBox is valid (has stsd, stts, stsc, stco boxes).

@@ -8,8 +8,15 @@ const MIN_BUFSIZE: usize = 4096;
 const SEEK_BUFSIZE: usize = 4096;
 const BUFSIZE: usize = 65536;
 
-pub trait ReadAt: Read + FileExt {}
-impl<T> ReadAt for T where T: Read + FileExt {}
+pub trait ReadAt {
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize>;
+}
+
+impl<T> ReadAt for T where T: Read + FileExt {
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+        FileExt::read_at(self, buf, offset)
+    }
+}
 
 pub struct Mp4File<F> {
     file:  Box<F>,
@@ -18,6 +25,7 @@ pub struct Mp4File<F> {
     buf:   Vec<u8>,
     rdpos: usize,
     wrpos: usize,
+    data_reader: Option<Box<dyn ReadAt + 'static>>,
 }
 
 impl<F> Mp4File<F> {
@@ -41,7 +49,22 @@ impl<F> Mp4File<F> {
             buf,
             rdpos: 0,
             wrpos: 0,
+            data_reader: None,
         }
+    }
+
+    pub fn new_with_reader<R>(file: F, reader: R) -> Mp4File<F>
+    where
+        F: Seek,
+        R: ReadAt + 'static,
+    {
+        let mut mf = Mp4File::new(file);
+        mf.data_reader = Some(Box::new(reader));
+        mf
+    }
+
+    pub fn into_inner(self) -> F {
+        *self.file
     }
 }
 
@@ -171,6 +194,9 @@ where
     }
     fn size(&self) -> u64 {
         self.size
+    }
+    fn mdat_ref(&self) -> Option<&Box<dyn ReadAt>> {
+        self.data_reader.as_ref()
     }
 }
 
@@ -340,3 +366,4 @@ impl<'a, B: ?Sized + BoxBytes + 'a> BoxBytes for Box<B> {
         B::fourcc(&*self)
     }
 }
+

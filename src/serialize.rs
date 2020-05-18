@@ -62,7 +62,7 @@ pub trait BoxBytes {
         unimplemented!()
     }
     /// Get a reference to the mdat source data.
-    fn mdat_ref(&self) -> Option<&dyn ReadAt> {
+    fn mdat_ref(&self) -> Option<&Box<dyn ReadAt>> {
         None
     }
 }

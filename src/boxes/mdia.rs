@@ -27,7 +27,7 @@ impl MediaBox {
     }
 
     /// Get a mutable to the MediaInformationBox.
-    pub fn media_info_mut(&mut self) -> &MediaInformationBox {
+    pub fn media_info_mut(&mut self) -> &mut MediaInformationBox {
         first_box_mut!(&mut self.boxes, MediaInformationBox).unwrap()
     }
 

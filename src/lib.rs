@@ -11,5 +11,4 @@ pub mod mp4box;
 pub mod boxes;
 pub mod track;
 pub mod types;
-
-//pub mod rewrite;
+pub mod rewrite;

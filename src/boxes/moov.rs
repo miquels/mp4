@@ -10,6 +10,8 @@ def_box! {
 }
 
 impl MovieBox {
+
+    /// Get a reference to the list of tracks.
     pub fn tracks(&self) -> Vec<&TrackBox> {
         self.boxes.iter().filter_map(|b| {
             match b {
@@ -19,6 +21,7 @@ impl MovieBox {
         }).collect::<Vec<_>>()
     }
 
+    /// Get a mutable reference to the list of tracks.
     pub fn tracks_mut(&mut self) -> Vec<&mut TrackBox> {
         self.boxes.iter_mut().filter_map(|b| {
             match b {
@@ -28,15 +31,29 @@ impl MovieBox {
         }).collect::<Vec<_>>()
     }
 
+    /// Get a reference to the MovieHeaderBox.
     pub fn movie_header(&self) -> &MovieHeaderBox {
-        self.movie_header_option().unwrap()
+        first_box!(&self.boxes, MovieHeaderBox).unwrap()
     }
 
-    pub(crate) fn movie_header_option(&self) -> Option<&MovieHeaderBox> {
-        self.boxes.iter().find_map(|b| {
-            match b {
-                MP4Box::MovieHeaderBox(ref t) => Some(t),
-                _ => None,
+    /// Get the track index by id.
+    pub fn track_idx_by_id(&self, track_id: u32) -> Option<usize> {
+        self.tracks().iter().enumerate().find_map(|(idx, t)| {
+            if t.track_id() == track_id {
+                Some(idx)
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Get the index of the first track with this handler.
+    pub fn track_idx_by_handler(&self, handler: FourCC) -> Option<usize> {
+        self.tracks().iter().enumerate().find_map(|(idx, t)| {
+            if t.media().handler().handler_type == handler {
+                Some(idx)
+            } else {
+                None
             }
         })
     }
@@ -47,7 +64,7 @@ impl MovieBox {
             error!("MovieBox: no TrackBoxes present");
             valid = false;
         }
-        if self.movie_header_option().is_none() {
+        if first_box!(&self.boxes, MovieHeaderBox).is_none() {
             error!("MovieBox: no MovieHeaderBox present");
             valid = false;
         }
