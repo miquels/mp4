@@ -101,6 +101,6 @@ pub fn movie_at_front(mp4: &mut MP4) {
     }
 
     // Then move the MovieBox to the front of the MP4.
-    mp4.movie_mut().tracks_mut().swap(mdat_idx.unwrap(), moov_idx.unwrap());
+    mp4.boxes.swap(mdat_idx.unwrap(), moov_idx.unwrap());
 }
 

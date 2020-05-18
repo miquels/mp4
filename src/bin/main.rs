@@ -67,17 +67,18 @@ pub struct TrackInfoOpts {
 }
 
 fn main() -> Result<()> {
-    env_logger::init();
 
     let opts = MainOpts::from_args();
 
-    if opts.trace {
-        log::set_max_level(log::LevelFilter::Trace);
+    let level = if opts.trace {
+        "trace"
     } else if opts.debug {
-        log::set_max_level(log::LevelFilter::Debug);
+        "debug"
     } else {
-        log::set_max_level(log::LevelFilter::Info);
-    }
+        "info"
+    };
+
+    env_logger::from_env(env_logger::Env::default().default_filter_or(level)).init();
 
     match opts.cmd {
         Command::Dump(opts) => return dump(opts),
@@ -103,7 +104,9 @@ fn rewrite(opts: RewriteOpts) -> Result<()> {
     let infh = File::open(&opts.input)?;
 
     let mut reader = Mp4File::new(infh);
-    let mp4 = MP4::read(&mut reader)?;
+    let mut mp4 = MP4::read(&mut reader)?;
+
+    mp4::rewrite::movie_at_front(&mut mp4);
 
     let outfh = File::create(&opts.output)?;
     let writer = Mp4File::new_with_reader(outfh, reader.into_inner());
