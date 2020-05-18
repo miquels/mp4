@@ -173,7 +173,7 @@ impl FromBytes for IDataBox {
 
         // If it's too big, don't read it into memory.
         if size > 32768 {
-            let data = DataRef::from_bytes(stream, stream.left())?;
+            let data = DataRef::from_bytes(stream, size)?;
             return Ok(IDataBox {
                 flags,
                 data: AppleData::Extern(data),
@@ -212,9 +212,15 @@ impl ToBytes for IDataBox {
 
         0u32.to_bytes(stream)?;
         match &self.data {
-            &AppleData::Text(ref s) => stream.write(s.as_bytes())?,
-            &AppleData::Binary(ref b) => b.to_bytes(stream)?,
-            &AppleData::Extern(ref e) => e.to_bytes(stream)?,
+            &AppleData::Text(ref s) => {
+                stream.write(s.as_bytes())?;
+            },
+            &AppleData::Binary(ref b) => {
+                b.to_bytes(stream)?;
+            },
+            &AppleData::Extern(ref e) => {
+                e.to_bytes(stream)?;
+            },
         }
 
         stream.finalize()
@@ -225,6 +231,10 @@ impl BoxInfo for IDataBox {
     #[inline]
     fn fourcc(&self) -> FourCC {
         FourCC(u32::from_be_bytes(*b"data"))
+    }
+    #[inline]
+    fn max_version() -> Option<u8> {
+        Some(0)
     }
 }
 
