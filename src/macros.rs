@@ -80,7 +80,9 @@ macro_rules! def_boxes {
         }
     };
 
-    // Implement the BoxInfo trait for this struct.
+    // Implement the BoxInfo trait for this struct, unless version is 42.
+    (@BOXINFO $name:ident, $fourcc:expr, [42 $(,$deps:ident)*]) => {
+    };
     (@BOXINFO $name:ident, $fourcc:expr, [$($maxver:tt)? $(,$deps:ident)*]) => {
         impl BoxInfo for $name {
             #[inline]

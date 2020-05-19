@@ -176,13 +176,8 @@ def_boxes! {
         entries:        [SampleToChunkEntry, sized],
     };
 
-    ChunkOffsetBox, b"stco", [0] => {
-        entries:        [u32, sized],
-    };
-
-    ChunkLargeOffsetBox, b"co64", [0] => {
-        entries:        [u64, sized],
-    };
+    ChunkOffsetBox, b"stco", [42] => stco;
+    ChunkLargeOffsetBox, b"co64", [42];
 
     SubtitleMediaHeaderBox, b"sthd", [0] => {
     };

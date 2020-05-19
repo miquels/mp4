@@ -180,6 +180,7 @@ def_from_to_bytes!(i16);
 def_from_to_bytes!(u16);
 def_from_to_bytes!(i32);
 def_from_to_bytes!(u32);
+def_from_to_bytes!(i64);
 def_from_to_bytes!(u64);
 def_from_to_bytes!(u128);
 

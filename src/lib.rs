@@ -6,6 +6,7 @@ mod macros;
 #[macro_use]
 pub mod serialize;
 mod bitreader;
+pub mod debug;
 pub mod io;
 pub mod mp4box;
 pub mod boxes;

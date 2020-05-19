@@ -81,8 +81,9 @@ pub fn movie_at_front(mp4: &mut MP4) {
     for t in mp4.movie().tracks().iter() {
         let stbl = t.media().media_info().sample_table();
         let co = stbl.chunk_offset();
-        if co.len() > 0 {
-            if co.index(0) < mdat_offset || co.index(co.len()-1) >= mdat_offset + mdat_size {
+        let co_len = co.entries.len();
+        if co_len > 0 {
+            if co.entries[0] < mdat_offset || co.entries[co_len - 1] >= mdat_offset + mdat_size {
                 error!("movie_at_front: not all tracks in first MovieDataBox");
                 return;
             }

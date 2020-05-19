@@ -1,7 +1,7 @@
 use std::io;
 
 use crate::boxes::prelude::*;
-use crate::boxes::{TrackHeaderBox, MediaBox};
+use crate::boxes::{TrackHeaderBox, MediaBox, EditBox, EditListBox};
 
 def_box! {
     /// 8.3.1 Track Box (ISO/IEC 14496-12:2015(E))
@@ -34,6 +34,35 @@ impl TrackBox {
     /// Get the track id.
     pub fn track_id(&self) -> u32 {
         self.track_header().track_id
+    }
+
+    /// Get the edit list, if it is present and has at least one entry.
+    pub fn edit_list(&self) -> Option<&EditListBox> {
+        if let Some(edts) = first_box!(&self.boxes, EditBox) {
+            if let Some(elst) = edts.boxes.iter().next() {
+                if elst.entries.len() > 0 {
+                    return Some(&elst);
+                }
+            }
+        }
+        None
+    }
+
+    /// Check the editlist to see if there's an initial composition time shift (see 8.6.1.3.1).
+    ///
+    /// Return value is expressed in the movie timescale.
+    pub fn composition_time_shift(&self) -> Option<u32> {
+        if let Some(elst) = self.edit_list() {
+            let tkhd = self.track_header();
+            for e in &elst.entries {
+                if e.segment_duration == tkhd.duration.0 &&
+                   e.media_rate == 1 &&
+                   e.media_time >= 0 {
+                    return Some(std::cmp::min(0x7ffffff, e.media_time) as u32);
+                }
+            }
+        }
+        None
     }
 
     /// Check if this track is valid (has header and media boxes).

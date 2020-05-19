@@ -1,12 +1,16 @@
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
 
+#[macro_use]
+extern crate log;
+
 use anyhow::Result;
 use clap;
 use structopt::StructOpt;
 
 use mp4::io::Mp4File;
 use mp4::mp4box::MP4;
+use mp4::debug;
 
 #[derive(StructOpt, Debug)]
 #[structopt(setting = clap::AppSettings::VersionlessSubcommands)]
@@ -31,8 +35,11 @@ pub enum Command {
     /// Rewrite the mp4 file.
     Rewrite(RewriteOpts),
     #[structopt(display_order = 3)]
-    /// Trac information.
-    TrackInfo(TrackInfoOpts),
+    /// Track information.
+    Trackinfo(TrackinfoOpts),
+    #[structopt(display_order = 4)]
+    /// Debugging.
+    Debug(DebugOpts),
 }
 
 #[derive(StructOpt, Debug)]
@@ -57,7 +64,7 @@ pub struct RewriteOpts {
 }
 
 #[derive(StructOpt, Debug)]
-pub struct TrackInfoOpts {
+pub struct TrackinfoOpts {
     #[structopt(short, long)]
     /// Select track.
     pub track: Option<u32>,
@@ -65,6 +72,17 @@ pub struct TrackInfoOpts {
     /// Input filename.
     pub input: String,
 }
+
+#[derive(StructOpt, Debug)]
+pub struct DebugOpts {
+    #[structopt(short, long)]
+    /// Debug track.
+    pub debugtrack: Option<u32>,
+
+    /// Input filename.
+    pub input: String,
+}
+
 
 fn main() -> Result<()> {
 
@@ -83,7 +101,8 @@ fn main() -> Result<()> {
     match opts.cmd {
         Command::Dump(opts) => return dump(opts),
         Command::Rewrite(opts) => return rewrite(opts),
-        Command::TrackInfo(opts) => return trackinfo(opts),
+        Command::Trackinfo(opts) => return trackinfo(opts),
+        Command::Debug(opts) => return debug(opts),
     }
 }
 
@@ -115,7 +134,7 @@ fn rewrite(opts: RewriteOpts) -> Result<()> {
     Ok(())
 }
 
-fn trackinfo(opts: TrackInfoOpts) -> Result<()> {
+fn trackinfo(opts: TrackinfoOpts) -> Result<()> {
     let infh = File::open(&opts.input)?;
 
     let mut reader = Mp4File::new(infh);
@@ -131,6 +150,22 @@ fn trackinfo(opts: TrackInfoOpts) -> Result<()> {
     } else {
         println!("{:#?}", res);
     }
+
+    Ok(())
+}
+
+fn debug(opts: DebugOpts) -> Result<()> {
+    let infh = File::open(&opts.input)?;
+
+    let mut reader = Mp4File::new(infh);
+    let mp4 = MP4::read(&mut reader)?;
+
+    if let Some(track) = opts.debugtrack {
+        debug::dump_track(&mp4, track);
+        return Ok(());
+    }
+
+    error!("debug: no options");
 
     Ok(())
 }
