@@ -1,10 +1,11 @@
 ## Standards
 
+- ISO base media file format: [ISO/IEC 14496-12:2015](c068960_ISO_IEC_14496-12_2015.pdf)
 - HLS streaming: https://tools.ietf.org/html/rfc8216
 - ISO BMFF byte stream format: https://w3c.github.io/media-source/isobmff-byte-stream-format.html
 - MPEG-DASH Profile for Transport of ISO BMFF Based DVB Services over IP Based Networks:
   [ETSI TS 103 285 V1.2.1](https://www.etsi.org/deliver/etsi_ts/103200_103299/103285/01.02.01_60/ts_103285v010201p.pdf)
-- [ISO IEC 14496-12:2015](c068960_ISO_IEC_14496-12_2015.pdf)
+- DASH-IF implementation guidelines: [the DASH timing model](https://dashif-documents.azurewebsites.net/Guidelines-TimingModel/master/Guidelines-TimingModel.html)
 
 ## Docs.
 
