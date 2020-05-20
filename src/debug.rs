@@ -41,21 +41,25 @@ pub fn dump_track(mp4: &MP4, track_id: u32) {
     let mut stsc_iter = stbl.sample_to_chunk_iter();
 
     let chunk_offset = stbl.chunk_offset();
-    let mut fpos = if chunk_offset.entries.len() > 0 {
-        chunk_offset.entries[0]
-    } else {
-        0
-    };
+    let mut fpos = 0;
+    let mut this_chunk = 0xffffffff;
 
-    // Now loop over all entries.
     let mut samples = Vec::new();
     let mut dtime = 0;
-    let mut last_chunk = 0;
     let is_sync = stbl.sync_samples().is_none();
 
+    // Now loop over all entries.
     for size in &stbl.sample_size().entries {
 
-        let mut sample = Sample{ fpos, size: *size, is_sync, ..Sample::default() };
+        if let Some(chunk) = stsc_iter.next() {
+            if this_chunk != chunk.chunk {
+                this_chunk = chunk.chunk;
+                // XXX FIXME check chunk.chunk for index overflow
+                fpos = chunk_offset.entries[this_chunk as usize];
+            }
+        }
+
+        let mut sample = Sample{ fpos, size: *size, chunkno: this_chunk, is_sync, ..Sample::default() };
         fpos += *size as u64;
 
         if let Some(time) = stts_iter.next() {
@@ -64,14 +68,6 @@ pub fn dump_track(mp4: &MP4, track_id: u32) {
         }
         if let Some(delta) = ctts_iter.next() {
             sample.ctime_d = delta - shift;
-        }
-        if let Some(chunk) = stsc_iter.next() {
-            sample.chunkno = chunk.chunk;
-            if last_chunk != chunk.chunk {
-                last_chunk = chunk.chunk;
-                // XXX FIXME check chunk.chunk for index overflow
-                fpos = chunk_offset.entries[chunk.chunk as usize];
-            }
         }
 
         samples.push(sample);
@@ -85,9 +81,7 @@ pub fn dump_track(mp4: &MP4, track_id: u32) {
             }
         }
     }
-    println!("{} bytes", samples.len() * std::mem::size_of::<Sample>());
 
-    /*
     let mut next_pos = 1;
     println!("{} {:>8}  {:>10}  {:>6}  {:>10}  {:>6}  {:>5}  {:>7}",
              " ", "#", "filepos", "size", "dtime", "cdelta", "sync", "chunkno");
@@ -99,6 +93,7 @@ pub fn dump_track(mp4: &MP4, track_id: u32) {
         next_pos = sample.fpos + sample.size as u64;
         println!("{} {:>8}  {:>10}  {:>6}  {:>10.1}  {:>6.0}  {:>5}  {:>7}",
                  jump, idx, sample.fpos, sample.size, dtime, ctime_d, is_sync, sample.chunkno);
-    }*/
+    }
+    println!("Sample vector size: {} bytes", samples.len() * std::mem::size_of::<Sample>());
 }
 

@@ -1,10 +1,7 @@
 use std::fs::File;
-use std::io::{self, BufWriter, Write};
+use std::io::{self, BufWriter, Read, Seek, Write};
 
-#[macro_use]
-extern crate log;
-
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use clap;
 use structopt::StructOpt;
 
@@ -26,23 +23,17 @@ pub struct MainOpts {
 #[structopt(rename_all = "kebab-case")]
 pub enum Command {
     #[structopt(display_order = 1)]
-    /// Dump the mp4 file
-    Dump(DumpOpts),
+    /// Media information.
+    Mediainfo(MediainfoOpts),
     #[structopt(display_order = 2)]
     /// Rewrite the mp4 file.
     Rewrite(RewriteOpts),
     #[structopt(display_order = 3)]
-    /// Track information.
-    Trackinfo(TrackinfoOpts),
+    /// Dump the mp4 file
+    Dump(DumpOpts),
     #[structopt(display_order = 4)]
     /// Debugging.
     Debug(DebugOpts),
-}
-
-#[derive(StructOpt, Debug)]
-pub struct DumpOpts {
-    /// Input filename.
-    pub input: String,
 }
 
 #[derive(StructOpt, Debug)]
@@ -61,7 +52,7 @@ pub struct RewriteOpts {
 }
 
 #[derive(StructOpt, Debug)]
-pub struct TrackinfoOpts {
+pub struct MediainfoOpts {
     #[structopt(short, long)]
     /// Select track.
     pub track: Option<u32>,
@@ -71,10 +62,26 @@ pub struct TrackinfoOpts {
 }
 
 #[derive(StructOpt, Debug)]
+pub struct DumpOpts {
+    #[structopt(short, long)]
+    /// Select a track.
+    pub track: u32,
+
+    /// Input filename.
+    pub input: String,
+}
+
+#[derive(StructOpt, Debug)]
 pub struct DebugOpts {
     #[structopt(short, long)]
-    /// Debug track.
-    pub debugtrack: Option<u32>,
+    /// Select a track.
+    pub track: Option<u32>,
+    #[structopt(short, long)]
+    /// Show all the boxes.
+    pub boxes: bool,
+    #[structopt(short, long)]
+    /// Debug a track.
+    pub debugtrack: bool,
 
     /// Input filename.
     pub input: String,
@@ -98,22 +105,9 @@ fn main() -> Result<()> {
     match opts.cmd {
         Command::Dump(opts) => return dump(opts),
         Command::Rewrite(opts) => return rewrite(opts),
-        Command::Trackinfo(opts) => return trackinfo(opts),
+        Command::Mediainfo(opts) => return mediainfo(opts),
         Command::Debug(opts) => return debug(opts),
     }
-}
-
-fn dump(opts: DumpOpts) -> Result<()> {
-    let infh = File::open(&opts.input)?;
-
-    let mut reader = Mp4File::new(infh);
-    let mp4 = MP4::read(&mut reader)?;
-
-    let stdout = io::stdout();
-    let mut handle = BufWriter::with_capacity(128000, stdout.lock());
-    let _ = writeln!(handle, "{:#?}", mp4);
-
-    Ok(())
 }
 
 fn rewrite(opts: RewriteOpts) -> Result<()> {
@@ -131,7 +125,7 @@ fn rewrite(opts: RewriteOpts) -> Result<()> {
     Ok(())
 }
 
-fn trackinfo(opts: TrackinfoOpts) -> Result<()> {
+fn mediainfo(opts: MediainfoOpts) -> Result<()> {
     let infh = File::open(&opts.input)?;
 
     let mut reader = Mp4File::new(infh);
@@ -151,18 +145,82 @@ fn trackinfo(opts: TrackinfoOpts) -> Result<()> {
     Ok(())
 }
 
+fn dump(opts: DumpOpts) -> Result<()> {
+    let infh = File::open(&opts.input)?;
+
+    let mut reader = Mp4File::new(infh);
+    let mp4 = MP4::read(&mut reader)?;
+    let movie = mp4.movie();
+
+    let mut infh = reader.into_inner();
+    infh.seek(io::SeekFrom::Start(0))?;
+
+    let tracks = movie.tracks();
+    let track = match movie.track_idx_by_id(opts.track) {
+        Some(idx) => &tracks[idx],
+        None => return Err(anyhow!("dump: track id {} not found", opts.track)),
+    };
+
+    let stdout = io::stdout();
+    let mut handle = BufWriter::with_capacity(128000, stdout.lock());
+
+    let stbl = track.media().media_info().sample_table();
+    let mut stsc_iter = stbl.sample_to_chunk_iter();
+    let chunk_offset = stbl.chunk_offset();
+
+    // Can be empty.
+    if stbl.sample_size().entries.len() == 0 {
+        return Ok(());
+
+    }
+    if chunk_offset.entries.len() == 0 {
+        return Err(anyhow!("dump: chunk offset table empty"));
+    }
+
+    let mut fpos = 0;
+    let mut this_chunk = 0xffffffff;
+
+    for size in &stbl.sample_size().entries {
+
+        if let Some(chunk) = stsc_iter.next() {
+            if this_chunk != chunk.chunk {
+                this_chunk = chunk.chunk;
+                fpos = chunk_offset.entries[this_chunk as usize];
+            }
+        }
+
+        infh.seek(io::SeekFrom::Start(fpos))?;
+        let mut sm = infh.take(*size as u64);
+        io::copy(&mut sm, &mut handle)?;
+        infh = sm.into_inner();
+
+        fpos += *size as u64;
+    }
+
+    Ok(())
+}
+
 fn debug(opts: DebugOpts) -> Result<()> {
     let infh = File::open(&opts.input)?;
 
     let mut reader = Mp4File::new(infh);
     let mp4 = MP4::read(&mut reader)?;
 
-    if let Some(track) = opts.debugtrack {
+    if opts.debugtrack {
+        let track = match opts.track {
+            Some(track) => track,
+            None => return Err(anyhow!("debug: debugtrack: need --track")),
+        };
         debug::dump_track(&mp4, track);
         return Ok(());
     }
 
-    error!("debug: no options");
+    if opts.boxes {
+        let stdout = io::stdout();
+        let mut handle = BufWriter::with_capacity(128000, stdout.lock());
+        let _ = writeln!(handle, "{:#?}", mp4);
+        return Ok(());
+    }
 
-    Ok(())
+    Err(anyhow!("debug: no options"))
 }
