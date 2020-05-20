@@ -5,7 +5,10 @@
 - ISO BMFF byte stream format: https://w3c.github.io/media-source/isobmff-byte-stream-format.html
 - MPEG-DASH Profile for Transport of ISO BMFF Based DVB Services over IP Based Networks:
   [ETSI TS 103 285 V1.2.1](https://www.etsi.org/deliver/etsi_ts/103200_103299/103285/01.02.01_60/ts_103285v010201p.pdf)
+-  DASH-IF implementation guidelines: [DASH-IF Interoperability Requirements](https://dashif-documents.azurewebsites.net/Guidelines-Interoperability/master/Guidelines-Interoperability.html)
 - DASH-IF implementation guidelines: [the DASH timing model](https://dashif-documents.azurewebsites.net/Guidelines-TimingModel/master/Guidelines-TimingModel.html)
+- Timed Text Format (tx3g): [ETSI TS 126 245 V8.0.0](https://www.etsi.org/deliver/etsi_ts/126200_126299/126245/08.00.00_60/ts_126245v080000p.pdf)
+- Common File Format: https://uvcentral.com/files/CFFMediaFormat-2_1.pdf
 
 ## Docs.
 
