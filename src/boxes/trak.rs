@@ -54,12 +54,15 @@ impl TrackBox {
     pub fn composition_time_shift(&self) -> Option<u32> {
         if let Some(elst) = self.edit_list() {
             let tkhd = self.track_header();
-            for e in &elst.entries {
-                if e.segment_duration == tkhd.duration.0 &&
-                   e.media_rate == 1 &&
-                   e.media_time >= 0 {
-                    return Some(std::cmp::min(0x7ffffff, e.media_time) as u32);
-                }
+            let entry = &elst.entries[0];
+            // If the first entry has about the same duration as the track,
+            // assume it covers the entire track.
+            if tkhd.duration.0 == 0 {
+                return None;
+            }
+            let x = (entry.segment_duration as f64) / (tkhd.duration.0 as f64);
+            if x >= 0.95f64 && x <= 1.05f64 {
+                return Some(std::cmp::min(0x7ffffff, entry.media_time) as u32);
             }
         }
         None

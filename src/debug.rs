@@ -20,7 +20,6 @@ pub struct Sample {
 pub fn dump_track(mp4: &MP4, track_id: u32) {
 
     let movie = mp4.movie();
-    let movie_timescale = movie.movie_header().timescale;
 
     // Find the track by id.
     let track_idx = match movie.track_idx_by_id(track_id) {
@@ -35,19 +34,7 @@ pub fn dump_track(mp4: &MP4, track_id: u32) {
     let stbl = trak.media().media_info().sample_table();
     let media_timescale = mdhd.timescale;
 
-    let shift_ticks = trak.composition_time_shift().unwrap_or(0) as u64;
-    debug!("XXX shift_ticks is {}", shift_ticks);
-    let mut shift = (shift_ticks * (media_timescale as u64) / (movie_timescale as u64)) as i32;
-    if let Some(ctts) = stbl.composition_time_to_sample_iter().next() {
-        debug!("XXX ctts is {}", ctts);
-        if ctts == shift_ticks as i32 {
-            // The editlist media_time is in the movie timescale, and the
-            // actual media itself is in the media_header timescale. They
-            // are usually different. If the offset matches, it's probably
-            // a botched MP4 packager.
-            shift = shift_ticks as i32;
-        }
-    }
+    let shift = trak.composition_time_shift().unwrap_or(0) as i32;
 
     let mut stts_iter = stbl.time_to_sample_iter();
     let mut ctts_iter = stbl.composition_time_to_sample_iter();
@@ -98,6 +85,9 @@ pub fn dump_track(mp4: &MP4, track_id: u32) {
             }
         }
     }
+    println!("{} bytes", samples.len() * std::mem::size_of::<Sample>());
+
+    /*
     let mut next_pos = 1;
     println!("{} {:>8}  {:>10}  {:>6}  {:>10}  {:>6}  {:>5}  {:>7}",
              " ", "#", "filepos", "size", "dtime", "cdelta", "sync", "chunkno");
@@ -109,6 +99,6 @@ pub fn dump_track(mp4: &MP4, track_id: u32) {
         next_pos = sample.fpos + sample.size as u64;
         println!("{} {:>8}  {:>10}  {:>6}  {:>10.1}  {:>6.0}  {:>5}  {:>7}",
                  jump, idx, sample.fpos, sample.size, dtime, ctime_d, is_sync, sample.chunkno);
-    }
+    }*/
 }
 

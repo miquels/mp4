@@ -15,12 +15,9 @@ use mp4::debug;
 #[derive(StructOpt, Debug)]
 #[structopt(setting = clap::AppSettings::VersionlessSubcommands)]
 pub struct MainOpts {
-    #[structopt(short, long)]
-    /// Maximum log verbosity: debug (info)
-    pub debug: bool,
-    #[structopt(short, long)]
-    /// Maximum log verbosity: debug (trace)
-    pub trace: bool,
+    #[structopt(long)]
+    /// Log options (like RUSTLOG; trace, debug, info etc)
+    pub log: Option<String>,
     #[structopt(subcommand)]
     pub cmd:   Command,
 }
@@ -88,15 +85,15 @@ fn main() -> Result<()> {
 
     let opts = MainOpts::from_args();
 
-    let level = if opts.trace {
-        "trace"
-    } else if opts.debug {
-        "debug"
+    let mut builder = env_logger::Builder::new();
+    if let Some(ref log_opts) = opts.log {
+        builder.parse_filters(log_opts);
+    } else if let Ok(ref log_opts) = std::env::var("RUST_LOG") {
+        builder.parse_filters(log_opts);
     } else {
-        "info"
-    };
-
-    env_logger::from_env(env_logger::Env::default().default_filter_or(level)).init();
+        builder.parse_filters("info");
+    }
+    builder.init();
 
     match opts.cmd {
         Command::Dump(opts) => return dump(opts),
