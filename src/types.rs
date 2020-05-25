@@ -151,7 +151,7 @@ impl Data {
 
 impl FromBytes for Data {
     fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> {
-        let data = bytes.read(0)?;
+        let data = bytes.read(bytes.left())?;
         let mut v = Vec::new();
         v.extend_from_slice(data);
         Ok(Data(v))
@@ -367,7 +367,7 @@ impl std::ops::Deref for ZString {
 
 impl FromBytes for ZString {
     fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> {
-        let data = bytes.read(0)?;
+        let data = bytes.read(bytes.left())?;
         let mut s = String::new();
         let mut idx = 0;
         let maxlen = data.len();
@@ -764,12 +764,12 @@ macro_rules! define_array {
         impl<T> FromBytes for $name<T> where T: FromBytes {
 
             fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<Self> {
-                let count = if $nosize {
-                    std::u32::MAX as usize
+                let (mut v, count) = if $nosize {
+                    (Vec::new(), std::u32::MAX as usize)
                 } else {
-                    <$sizetype>::from_bytes(stream)? as usize
+                    let sz = <$sizetype>::from_bytes(stream)? as usize;
+                    (Vec::with_capacity(sz), sz)
                 };
-                let mut v = Vec::<T>::new();
                 let min_size = T::min_size() as u64;
                 while ($nosize || v.len() < count) && stream.left() >= min_size && stream.left() > 0 {
                     v.push(T::from_bytes(stream)?);

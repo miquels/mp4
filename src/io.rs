@@ -78,6 +78,13 @@ where
             return Ok(());
         }
 
+        if amount > BUFSIZE {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("Mp4File::read({}): too large", amount),
+            ));
+        }
+
         // need to be able to store "amount", if not make space.
         let left = self.buf.len() - self.rdpos;
         debug!("Mp4File::fill_buf: left {}", left);
@@ -112,25 +119,18 @@ impl<F> ReadBytes for Mp4File<F>
 where
     F: Read + Seek,
 {
+    #[inline]
     fn read(&mut self, amount: u64) -> io::Result<&[u8]> {
-        let amount = if amount == 0 { self.left() } else { amount } as usize;
-        //debug!("XXX - read {} at pos {}", amount, self.pos);
-        if amount == 0 {
-            return Ok(b"");
+        if amount as usize > self.wrpos - self.rdpos {
+            self.fill_buf(amount as usize)?;
         }
-        if amount > BUFSIZE {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("Mp4File::read({}): too large", amount),
-            ));
-        }
-        self.fill_buf(amount as usize)?;
         self.pos += amount as u64;
         let rdpos = self.rdpos;
-        self.rdpos += amount;
-        Ok(&self.buf[rdpos..rdpos + amount])
+        self.rdpos += amount as usize;
+        Ok(&self.buf[rdpos..rdpos + amount as usize])
     }
 
+    #[inline]
     fn skip(&mut self, amount: u64) -> io::Result<()> {
         self.seek(self.pos + amount)
     }
@@ -170,9 +170,11 @@ impl<F> BoxBytes for Mp4File<F>
 where
     F: Seek,
 {
+    #[inline]
     fn pos(&self) -> u64 {
         self.pos
     }
+    #[inline]
     fn seek(&mut self, pos: u64) -> io::Result<()> {
         // see if it fits in the read buffer.
         let bpos = self.pos - (self.rdpos as u64);
@@ -192,6 +194,7 @@ where
         self.wrpos = 0;
         Ok(())
     }
+    #[inline]
     fn size(&self) -> u64 {
         self.size
     }
