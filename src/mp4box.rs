@@ -152,23 +152,14 @@ impl<'a> Drop for BoxReader<'a> {
 
 // Delegate ReadBytes to the inner reader.
 impl<'a> ReadBytes for BoxReader<'a> {
+    #[inline]
     fn read(&mut self, amount: u64) -> io::Result<&[u8]> {
-        if amount == 0 {
-            debug!(
-                "XXX self reader for {} amount 0 left {}",
-                self.header.fourcc,
-                self.left()
-            );
-        }
-        let amount = if amount == 0 { self.left() } else { amount };
-        if amount == 0 {
-            return Ok(b"");
-        }
         if self.inner.pos() + amount > self.maxsize {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
         self.inner.read(amount)
     }
+    #[inline]
     fn skip(&mut self, amount: u64) -> io::Result<()> {
         if self.inner.pos() + amount > self.maxsize {
             return Err(io::ErrorKind::UnexpectedEof.into());
@@ -188,15 +179,18 @@ impl<'a> ReadBytes for BoxReader<'a> {
 
 // Delegate BoxBytes to the inner reader.
 impl<'a> BoxBytes for BoxReader<'a> {
+    #[inline]
     fn pos(&self) -> u64 {
         self.inner.pos()
     }
+    #[inline]
     fn seek(&mut self, pos: u64) -> io::Result<()> {
         if pos > self.maxsize {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
         self.inner.seek(pos)
     }
+    #[inline]
     fn size(&self) -> u64 {
         self.maxsize
     }
