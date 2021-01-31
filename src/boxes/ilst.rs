@@ -7,8 +7,12 @@ use crate::mp4box::{BoxHeader, GenericBox};
 
 def_box! {
     /// Apple Item List.
-    AppleItemListBox, "ilst",
+    AppleItemListBox {
         items:  [AppleItem],
+    },
+    fourcc => "ilst",
+    version => [],
+    impls => [ basebox, boxinfo, debug, fromtobytes ],
 }
 
 macro_rules! apple_name_item {

@@ -1,259 +1,89 @@
 use std::fmt::Debug;
 use std::io;
 
+pub(crate) mod misc;
 pub (crate) mod prelude;
 
-use crate::mp4box::*;
-use crate::serialize::{FromBytes, ReadBytes, ToBytes, WriteBytes};
-use crate::types::*;
+pub use self::misc::*;
+use self::prelude::*;
+
+use crate::mp4box::{BoxHeader, GenericBox};
 
 def_boxes! {
-    MP4Box,
-
-    FileTypeBox, b"ftyp", [] => {
-        major_brand:        FourCC,
-        minor_version:      u32,
-        compatible_brands:  [FourCC],
-    };
-
-    InitialObjectDescriptionBox, b"iods", [0] => {
-        audio_profile:  u8,
-        video_profile:  u8,
-    };
-
-    // Don't forget to set volume to default 0x100 when creating this box.
-    TrackHeaderBox, b"tkhd", [1, flags, cr_time, mod_time, duration] => {
-        flags:      TrackFlags,
-        cr_time:    Time,
-        mod_time:   Time,
-        track_id:   u32,
-        skip:       4,
-        duration:   Duration_,
-        skip:       8,
-        layer:      u16,
-        alt_group:  u16,
-        volume:     FixedFloat8_8,
-        skip :      2,
-        matrix:     Matrix,
-        width:      FixedFloat16_16,
-        height:     FixedFloat16_16,
-    };
-
-    EditBox, b"edts", [] => {
-        boxes:  [EditListBox],
-    };
-
-    EditListBox, b"elst", [1, entries] => {
-        entries:    [EditListEntry, sized],
-    };
-
-    BaseMediaInformationHeaderBox, b"gmhd", [] => {
-        boxes:      [MP4Box],
-    };
-
-    DataInformationBox, b"dinf", [] => {
-        boxes:      [MP4Box],
-    };
-
-    // XXX TODO something with version inheritance.
-    DataReferenceBox, b"dref", [0, flags] => {
-        flags:          DataEntryFlags,
-        entries:        [MP4Box, sized],
-    };
-
-    DataEntryUrlBox, b"url ", [0, flags] => {
-        flags:          DataEntryFlags,
-        location:       ZString,
-    };
-
-    DataEntryUrnBox, b"urn ", [0, flags] => {
-        flags:          DataEntryFlags,
-        name:           ZString,
-        location:       ZString,
-    };
-
-    VideoMediaInformationBox, b"vmhd", [0, flags] => {
-        flags:          VideoMediaHeaderFlags,
-        graphics_mode:  u16,
-        opcolor:        OpColor,
-    };
-
-    SoundMediaHeaderBox, b"smhd", [0] => {
-        balance:        u16,
-        skip:           2,
-    };
-
-    NullMediaHeaderBox, b"nmhd", [0] => {
-    };
-
-    UserDataBox, b"udta", [] => {
-        boxes:      [MP4Box],
-    };
-
-    TrackSelectionBox, b"tsel", [0] => {
-        switch_group:   u32,
-        attribute_list: [FourCC],
-    };
-
-    MediaHeaderBox, b"mdhd", [1, cr_time, mod_time, duration] => {
-        cr_time:    Time,
-        mod_time:   Time,
-        timescale:  u32,
-        duration:   Duration_,
-        language:   IsoLanguageCode,
-        quality:    u16,
-    };
-
-    MovieHeaderBox, b"mvhd", [1, cr_time, mod_time, duration] => {
-        cr_time:    Time,
-        mod_time:   Time,
-        timescale:  u32,
-        duration:   Duration_,
-        pref_rate:  FixedFloat16_16,
-        pref_vol:   FixedFloat8_8,
-        skip:       10,
-        matrix:     Matrix,
-        // The next 6 32-bit values are "pre_defined" in ISO/IEC 14496-12:2015,
-        // but they appear to be the following:
-        preview_time:   u32,
-        preview_duration:   u32,
-        poster_time:    u32,
-        selection_time: u32,
-        selection_duration: u32,
-        current_time:   u32,
-        //
-        next_track_id: u32,
-    };
-
-    HandlerBox, b"hdlr", [0] => {
-        skip:       4,
-        handler_type:   FourCC,
-        skip:       12,
-        name:       ZString,
-    };
-
-    ExtendedLanguageBox, b"elng", [0] => {
-        language:   ZString,
-    };
-
-    MetaBox, b"meta", [0] => {
-        boxes:  [MP4Box],
-    };
-
-    NameBox, b"name", [] => {
-        name:       ZString,
-    };
-
-    PixelAspectRatioBox, b"pasp", [] => {
-        h_spacing:  u32,
-        v_spacing:  u32,
-    };
-
-    CleanApertureBox, b"clap", [] => {
-        clean_aperture_width_n: u32,
-        clean_aperture_width_d: u32,
-        clean_aperture_height_n: u32,
-        clean_aperture_height_d: u32,
-        horiz_off_n: u32,
-        horiz_off_d: u32,
-        vert_off_n: u32,
-        vert_off_d: u32,
-    };
-
-    TimeToSampleBox, b"stts", [0] => {
-        entries:        [TimeToSampleEntry, sized],
-    };
-
-    SyncSampleBox, b"stss", [0] => {
-        entries:        [u32, sized],
-    };
-
-    CompositionOffsetBox, b"ctts", [1, entries] => {
-        entries:        [CompositionOffsetEntry, sized],
-    };
-
-    SampleToChunkBox, b"stsc", [0] => {
-        entries:        [SampleToChunkEntry, sized],
-    };
-
-    ChunkOffsetBox, b"stco", [42] => stco;
-    ChunkLargeOffsetBox, b"co64", [42];
-
-    SubtitleMediaHeaderBox, b"sthd", [0] => {
-    };
-
-    MovieExtendsBox, b"mvex", [] => {
-        boxes:      [MP4Box],
-    };
-
-    TrackExtendsBox, b"trex", [0] => {
-        track_id:       u32,
-        default_sample_description_index:   u32,
-        default_sample_duration:    u32,
-        default_sample_size:        u32,
-        default_sample_flags:       SampleFlags,
-    };
-
-    SegmentTypeBox, b"styp", [] => {
-        major_brand:        FourCC,
-        minor_version:      u32,
-        compatible_brands:  [FourCC],
-    };
-
-    MovieFragmentBox, b"moof", [] => {
-        boxes:      [MP4Box],
-    };
-
-    MovieExtendsHeaderBox, b"mehd", [0, fragment_duration] => {
-        fragment_duration:  VersionSizedUint,
-    };
-
-    MovieFragmentHeaderBox, b"mfhd", [0] => {
-        sequence_number:    u32,
-    };
-
-    TrackFragmentBox, b"traf", [] => {
-        boxes:      [MP4Box],
-    };
-
-    TrackFragmentBaseMediaDecodeTimeBox, b"tfdt", [1, base_media_decode_time] => {
-        base_media_decode_time: VersionSizedUint,
-    };
+    BaseMediaInformationHeaderBox, b"gmhd";
+    CleanApertureBox, b"clap";
+    CompositionOffsetBox, b"ctts";
+    DataEntryUrlBox, b"url ";
+    DataEntryUrnBox, b"urn ";
+    DataInformationBox, b"dinf";
+    DataReferenceBox, b"dref";
+    EditBox, b"edts";
+    EditListBox, b"elst";
+    ExtendedLanguageBox, b"elng";
+    FileTypeBox, b"ftyp";
+    HandlerBox, b"hdlr";
+    InitialObjectDescriptionBox, b"iods";
+    MediaHeaderBox, b"mdhd";
+    MetaBox, b"meta";
+    MovieExtendsBox, b"mvex";
+    MovieExtendsHeaderBox, b"mehd";
+    MovieFragmentBox, b"moof";
+    MovieFragmentHeaderBox, b"mfhd";
+    MovieHeaderBox, b"mvhd";
+    NameBox, b"name";
+    NullMediaHeaderBox, b"nmhd";
+    PixelAspectRatioBox, b"pasp";
+    SampleToChunkBox, b"stsc";
+    SegmentTypeBox, b"styp";
+    SoundMediaHeaderBox, b"smhd";
+    SubtitleMediaHeaderBox, b"sthd";
+    SyncSampleBox, b"stss";
+    TimeToSampleBox, b"stts";
+    TrackExtendsBox, b"trex";
+    TrackFragmentBaseMediaDecodeTimeBox, b"tfdt";
+    TrackFragmentBox, b"traf";
+    TrackHeaderBox, b"tkhd";
+    TrackSelectionBox, b"tsel";
+    UserDataBox, b"udta";
+    VideoMediaInformationBox, b"vmhd";
 
     // Below are boxes that are defined manually in boxes/ *.rs
+    AvcSampleEntry, b"avc1" => avc1;
+    AvcConfigurationBox, b"avcC";
 
-    MovieBox, b"moov", [] => moov;
-    TrackBox, b"trak", [] => trak;
-    MediaBox, b"mdia", [] => mdia;
-    SampleTableBox, b"stbl", [] => stbl;
-    MediaInformationBox, b"minf", [] => minf;
+    AacSampleEntry, b"mp4a" => mp4a;
+    ESDescriptorBox, b"esds";
 
-    Free, b"free", [] => free;
-    Skip, b"skip", [];
-    Wide, b"wide", [];
+    Ac3SampleEntry, b"ac-3" => ac_3;
+    AC3SpecificBox, b"dac3";
 
-    MediaDataBox, b"mdat", [] => mdat;
+    AppleItemListBox, b"ilst" => ilst;
 
-    // Max version 0, since we do not support AudioSampleEntryV1 right now.
-    SampleDescriptionBox, b"stsd", [0] => stsd;
+    ChunkOffsetBox, b"stco" => stco;
+    ChunkLargeOffsetBox, b"co64";
 
-    AvcSampleEntry, b"avc1", [] => avc1;
-        AvcConfigurationBox, b"avcC", [];
-    AacSampleEntry, b"mp4a", [] => mp4a;
-        ESDescriptorBox, b"esds", [0];
-    Ac3SampleEntry, b"ac-3", [] => ac_3;
-        AC3SpecificBox, b"dac3", [];
+    MediaBox, b"mdia" => mdia;
+    MediaDataBox, b"mdat" => mdat;
+    MediaInformationBox, b"minf" => minf;
+    MovieBox, b"moov" => moov;
 
-    SampleSizeBox, b"stsz", [0] => stsz;
-    CompactSampleSizeBox, b"stz2", [0] => stz2;
+    Free, b"free" => free;
+    Skip, b"skip";
+    Wide, b"wide";
 
-    SampleToGroupBox, b"sbgp", [1] => sbgp;
-    SampleGroupDescriptionBox, b"sgpd", [2] => sgpd;
+    SampleDescriptionBox, b"stsd" => stsd;
+    SampleGroupDescriptionBox, b"sgpd" => sgpd;
+    SampleSizeBox, b"stsz" => stsz;
+    CompactSampleSizeBox, b"stz2" => stz2;
+    SampleTableBox, b"stbl" => stbl;
+    SampleToGroupBox, b"sbgp" => sbgp;
+    SegmentIndexBox, b"sidx" => sidx;
+    TrackBox, b"trak" => trak;
+    TrackFragmentHeaderBox, b"tfhd" => tfhd;
+    TrackRunBox, b"trun" => trun;
 
-    SegmentIndexBox, b"sidx", [1, earliest_presentation_time, first_offset] => sidx;
-
-    TrackFragmentHeaderBox, b"tfhd", [1] => tfhd;
-    TrackRunBox, b"trun", [1] => trun;
-
-    AppleItemListBox, b"ilst", [] => ilst;
+    TextSubtitleSampleEntry, b"sbtt" => sbtl;
+    Tx3gSubtitleSampleEntry, b"tx3g";
+    XMLSubtitleSampleEntry, b"stpp";
+    FontTableBox, b"ftab";
 }

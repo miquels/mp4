@@ -275,7 +275,7 @@ macro_rules! def_struct {
         def_struct!(@def_struct_ $info, [$($tt)*] -> [ $($res)* ]);
     };
     // Add normal field (type in curlies)
-    (@def_struct_ $info:tt, [ $field:ident: {$type:ident}, $($tt:tt)*] -> [ $($res:tt)* ]) => {
+    (@def_struct_ $info:tt, [ $field:ident: {$type:ty}, $($tt:tt)*] -> [ $($res:tt)* ]) => {
         def_struct!(@def_struct_ $info, [$($tt)*] -> [ $($res)* pub $field: $type, ]);
     };
     // Add normal field (ArraySized16)
@@ -288,7 +288,7 @@ macro_rules! def_struct {
     };
     // Add normal field (ArrayUnsized)
     (@def_struct_ $info:tt, [ $field:ident: [ $type:ty, unsized ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
-        def_struct!(@def_struct_ $info, [$($tt)*] -> [ $($res)* pub $field: Vec<$type>, ]);
+        def_struct!(@def_struct_ $info, [$($tt)*] -> [ $($res)* pub $field: ArrayUnsized<$type>, ]);
     };
     // Add normal field (Vec)
     (@def_struct_ $info:tt, [ $field:ident: [ $type:ty ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
@@ -343,7 +343,7 @@ macro_rules! def_struct {
     (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: [ $type:ty, unsized ], $($tt:tt)*]
         -> [ $($set:tt)* ] $set2:tt [ $($fields:tt)* ]) => {
         def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [ let $field = Vec::<$type>::from_bytes($stream)?; ] ] $set2 [ $($fields)* $field ]);
+            [ $($set)* [ let $field = ArrayUnsized::<$type>::from_bytes($stream)?; ] ] $set2 [ $($fields)* $field ]);
     };
     // Set a field (Vec)
     (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: [ $type:ty ], $($tt:tt)*]

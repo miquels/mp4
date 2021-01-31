@@ -1,11 +1,16 @@
 use std::io;
 use crate::boxes::prelude::*;
 
-#[derive(Debug, Default)]
-pub struct SampleSizeBox {
-    pub size:    u32,
-    pub count:   u32,
-    pub entries: ArrayUnsized<u32>,
+def_box! {
+    /// 8.7.3.2 Sample Size Box (ISO/IEC 14496-12:2015(E))
+    SampleSizeBox {
+        size:    u32,
+        count:   u32,
+        entries: [u32, unsized],
+    },
+    fourcc => "stsz",
+    version => [0],
+    impls => [ boxinfo, debug, fullbox ],
 }
 
 impl FromBytes for SampleSizeBox {

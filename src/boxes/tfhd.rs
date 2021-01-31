@@ -16,17 +16,21 @@ use crate::boxes::prelude::*;
 //      unsigned int(32) default_sample_flags
 //  } 
 
-/// 8.8.7 Track Fragment Header Box (ISO/IEC 14496-12:2015(E))
-#[derive(Debug)]
-pub struct TrackFragmentHeaderBox {
-    pub track_id:                   u32,
-    pub duration_is_empty:          bool,
-    pub default_base_is_moof:       bool,
-    pub base_data_offset:           Option<u64>,
-    pub sample_description_index:   Option<u32>,
-    pub default_sample_duration:    Option<u32>,
-    pub default_sample_size:        Option<u32>,
-    pub default_sample_flags:       Option<SampleFlags>,
+def_box! {
+    /// 8.8.7 Track Fragment Header Box (ISO/IEC 14496-12:2015(E))
+    TrackFragmentHeaderBox {
+        track_id:                   u32,
+        duration_is_empty:          bool,
+        default_base_is_moof:       bool,
+        base_data_offset:           {Option<u64>},
+        sample_description_index:   {Option<u32>},
+        default_sample_duration:    {Option<u32>},
+        default_sample_size:        {Option<u32>},
+        default_sample_flags:       {Option<SampleFlags>},
+    },
+    fourcc => "tfhd",
+    version => [0],
+    impls => [ boxinfo, debug ],
 }
 
 // as long as we don't have bool.then().

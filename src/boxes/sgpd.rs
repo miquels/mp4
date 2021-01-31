@@ -8,13 +8,17 @@ use std::io;
 
 use crate::boxes::prelude::*;
 
-/// 8.9.3 Sample Group Description Box
-#[derive(Debug)]
-pub struct SampleGroupDescriptionBox {
-    grouping_type:              FourCC,
-    default_length:             Option<u32>,
-    default_sample_description_index: Option<u32>,
-    entries:                    ArrayUnsized<SampleGroupDescriptionItem>,
+def_box! {
+    /// 8.9.3 Sample Group Description Box
+    SampleGroupDescriptionBox {
+        grouping_type:              FourCC,
+        default_length:             {Option<u32>},
+        default_sample_description_index: {Option<u32>},
+        entries:                    [SampleGroupDescriptionItem, unsized],
+    },
+    fourcc => "sgpd",
+    version => [],
+    impls => [ boxinfo, debug ],
 }
 
 impl FromBytes for SampleGroupDescriptionBox {
@@ -90,7 +94,7 @@ impl FullBox for SampleGroupDescriptionBox {
     }
 }
 
-/// 8.9.3 Sample Group Description Box
+/// 8.9.3 Item in a Sample Group Description Box.
 #[derive(Debug)]
 pub struct SampleGroupDescriptionItem {
     pub description_length: Option<u32>,

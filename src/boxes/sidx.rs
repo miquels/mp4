@@ -8,13 +8,17 @@ use crate::boxes::prelude::*;
 
 def_box! {
     /// 8.16.3 Segment Index Box (ISO/IEC 14496-12:2015(E))
-    SegmentIndexBox, "sidx",
+    SegmentIndexBox {
         reference_id:               u32,
         timescale:                  u32,
         earliest_presentation_time: VersionSizedUint,
         first_offset:               VersionSizedUint,
         skip:                       2,
         references:                 [SegmentReference, sized16],
+    },
+    fourcc => "sidx",
+    version => [1, earliest_presentation_time, first_offset],
+    impls => [ boxinfo, debug, fromtobytes, fullbox ],
 }
 
 /// 8.16.3 Segment Index Box, Segment Reference struct. (ISO/IEC 14496-12:2015(E))

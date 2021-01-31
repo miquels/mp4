@@ -12,7 +12,7 @@ use crate::io::CountBytes;
 
 def_box! {
     /// AAC sample entry (AudioSampleEntry).
-    AacSampleEntry, "mp4a",
+    AacSampleEntry {
         skip:                   6,
         data_reference_index:   u16,
         skip:                   8,
@@ -25,6 +25,10 @@ def_box! {
         sample_rate_lo: u16,
         // sub boxes, probably only esds.
         boxes: [MP4Box],
+    },
+    fourcc => "mp4a",
+    version => [],
+    impls => [ basebox, boxinfo, debug, fromtobytes ],
 }
 
 impl AacSampleEntry {
@@ -94,8 +98,12 @@ impl AacSampleEntry {
 def_box! {
     /// MPEG4 ESDescriptor.
     // FIXME? "m4ds" is an alias we currently do not reckognize.
-    ESDescriptorBox, "esds",
+    ESDescriptorBox {
         es_descriptor:   ESDescriptor,
+    },
+    fourcc => "esds",
+    version => [0],
+    impls => [ basebox, boxinfo, debug, fromtobytes ],
 }
 
 impl ESDescriptorBox {
@@ -141,6 +149,7 @@ impl ESDescriptorBox {
 //
 
 // Every descriptor starts with a length and a tag.
+#[derive(Debug)]
 struct BaseDescriptor {
     size: u32,
     tag:    u8,

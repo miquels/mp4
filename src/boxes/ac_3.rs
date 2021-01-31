@@ -11,7 +11,7 @@ use crate::track::AudioTrackInfo;
 
 def_box! {
     /// AC-3 sample entry.
-    Ac3SampleEntry, "ac-3",
+    Ac3SampleEntry {
         skip:                   6,
         data_reference_index:   u16,
         skip:                   8,
@@ -24,6 +24,10 @@ def_box! {
         sample_rate_lo:         u16,
         // sub boxes, probably only dac3.
         boxes: [MP4Box],
+    },
+    fourcc => "ac-3",
+    version => [],
+    impls => [ basebox, boxinfo, debug, fromtobytes ],
 }
 
 impl Default for Ac3SampleEntry {
@@ -66,15 +70,21 @@ impl Ac3SampleEntry {
     }
 }
 
-pub struct AC3SpecificBox {
-    pub fscod: u8,
-    // bsid is "version". usually 8.
-    pub bsid: u8,
-    pub bsmod: u8,
-    pub acmod: u8,
-    pub lfeon: bool,
-    pub bitrate_code: u8,
-    pub reserved: u8,
+def_box! {
+    /// AC-3 specific box.
+    AC3SpecificBox {
+        fscod: u8,
+        // bsid is "version". usually 8.
+        bsid: u8,
+        bsmod: u8,
+        acmod: u8,
+        lfeon: bool,
+        bitrate_code: u8,
+        reserved: u8,
+    },
+    fourcc => "dac3",
+    version => [],
+    impls => [ basebox, boxinfo ],
 }
 
 impl FromBytes for AC3SpecificBox {

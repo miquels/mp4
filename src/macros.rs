@@ -1,60 +1,107 @@
-
-//
 //
 // Macro that is used to declare _all_ boxes.
 //
 //
 
-/// Declare a complete list of all boxes.
+// List of boxes.
+//
+// For each box, include its module. Then build an enum with
+// a variant for each box.
 macro_rules! def_boxes {
 
     // main entry point.
-    ($enum:ident, $($name:ident, $fourcc:expr,  [$($maxver:tt)? $(,$deps:ident)*]  $(=> $block:tt)? ; )+) => {
+    ($($name:ident, $fourcc:expr $(=> $mod:tt)? ; )+) => {
 
-        def_boxes!(@DEF_MP4BOX $enum, $($name, $fourcc),*);
-
+        // include modules.
         $(
-            // Call def_box! if needed.
-            def_boxes!(@DEF_BOX $name, $fourcc, $($block)*);
+            $(
+                pub(crate) mod $mod;
+                pub(crate) use self::$mod::*;
+            )?
 
-            // Implement FullBox automatically if possible.
-            def_boxes!(@FULLBOX $name, [$($maxver)? $(,$deps)*]);
-
-            // Implement BoxInfo.
-            def_boxes!(@BOXINFO $name, $fourcc, [$($maxver)? $(,$deps)*]);
-
-            // Implement BoxChildren trait for this struct.
-            // def_boxes!(@CHILDREN $struct, $children);
         )+
+
+        // build enum.
+        impl_enum!(MP4Box, $($name, $fourcc),*);
     };
 
-    /*
-    // not implemented yet.
-    (@CHILDREN $name:ident, -) => {};
-    (@CHILDREN $name:ident, $field:ident) => {
-        impl BoxChildren for $name {
-            fn children(&self) -> Option<&[Box<dyn MP4Box>]> {
-                Some(&self.$field[..])
-            }
-        }
-    };
-    */
+}
 
-    // Implement the FullBox trait for this struct.
-    (@FULLBOX $name:ident, []) => {
+// Define one box.
+//
+// def_box! {
+//     TypeName => {
+//         member: type,
+//         member: type,
+//     },
+//     fourcc => "fourcc",
+//     version => [ 1, deps ],
+//     impls => [ fullbox, boxinfo ],
+//  }
+macro_rules! def_box {
+
+    // impls => [ basebox ]
+    (@IMPL basebox $name:ident $($_tt:tt)*) => {
+        impl_basebox!($name);
+    };
+
+    // impls => [ fullbox ]
+    (@IMPL fullbox $name:ident, $_fourcc:expr, $version:tt, $_block:tt) => {
+        impl_fullbox!($name, $version);
+    };
+
+    // impls => [ boxinfo ]
+    (@IMPL boxinfo $name:ident, $fourcc:expr, $version:tt, $_block:tt) => {
+        impl_boxinfo!($name, $fourcc, $version);
+    };
+
+    // impls => [ debug ]
+    (@IMPL debug $name:ident, $_fourcc:expr, $_version:tt, $block:tt) => {
+        impl_debug!($name, $block);
+    };
+
+    // impls => [ fromtobytes ]
+    (@IMPL fromtobytes $name:ident, $_fourcc:expr, $_version:tt, $block:tt) => {
+        impl_fromtobytes!($name, $block);
+    };
+
+    // expand block and call def_struct!
+    (@IMPL def_struct $(#[$outer:meta])* $name:ident, { $($block:tt)* }) => {
+        def_struct!(@def_struct $(#[$outer])* $name, $($block)*);
+    };
+
+    // Main entry point.
+    ($(#[$outer:meta])* $name:ident $block:tt, fourcc => $fourcc:expr,
+     version => $version:tt, impls => [ $($impl:ident),* ] $(,)?)  => {
+
+        // Define the struct itself.
+        def_box!(@IMPL def_struct $(#[$outer])* $name, $block);
+
+        // And the impl's we want for it.
+        $(
+            def_box!(@IMPL $impl $name, $fourcc, $version, $block);
+        )*
+    };
+
+}
+
+// Implement an empty FullBox trait for this struct.
+macro_rules! impl_basebox {
+    ($name:ident) => {
         // Not a fullbox - default impl.
         impl FullBox for $name {}
     };
-    (@FULLBOX $name:ident, [0]) => {
+}
+
+// Implement the FullBox trait for this struct.
+macro_rules! impl_fullbox {
+    ($name:ident, [0]) => {
         // Fullbox always version 0.
         impl FullBox for $name {
             fn version(&self) -> Option<u8> { Some(0) }
         }
     };
-    (@FULLBOX $name:ident, [$maxver:tt]) => {
-        // Nothing, delegated to boxes/*.rs
-    };
-    (@FULLBOX $name:ident, [$maxver:tt $(,$deps:ident)+ ]) => {
+    ($name:ident, [$maxver:tt $(,$deps:ident)+ ]) => {
         // Check all the dependencies for the minimum ver.
         // TODO what about conflicting versions for deps?
         impl FullBox for $name {
@@ -78,16 +125,19 @@ macro_rules! def_boxes {
                 flags
             }
         }
-    };
+    }
+}
 
-    // Implement the BoxInfo trait for this struct, unless version is 42.
-    (@BOXINFO $name:ident, $fourcc:expr, [42 $(,$deps:ident)*]) => {
-    };
-    (@BOXINFO $name:ident, $fourcc:expr, [$($maxver:tt)? $(,$deps:ident)*]) => {
+// Implement the BoxInfo trait for this struct.
+macro_rules! impl_boxinfo {
+    ($name:ident, $fourcc:expr, [$($maxver:tt)? $(,$deps:ident)*]) => {
         impl BoxInfo for $name {
             #[inline]
             fn fourcc(&self) -> FourCC {
-                FourCC(u32::from_be_bytes(*$fourcc))
+                // XXX FIXME make this b"four" instead of "four"
+                //FourCC(u32::from_be_bytes(*$fourcc))
+                use std::convert::TryInto;
+                FourCC(u32::from_be_bytes($fourcc.as_bytes().try_into().unwrap()))
             }
             $(
                 #[inline]
@@ -97,27 +147,92 @@ macro_rules! def_boxes {
             )?
         }
     };
+}
 
-    // Define the box itself, either through def_box! or by including a module.
-    (@DEF_BOX $name:ident, $fourcc:expr, { $($tt:tt)* }) => {
-        def_box! {
-            $name, $fourcc, $($tt)*
+// Implement the Debug trait for this struct.
+macro_rules! impl_debug {
+    ($name:ident, { $( $field:tt: $type:tt $(as $as:tt)? ),* $(,)? }) => {
+        // Debug implementation that adds fourcc field.
+        impl std::fmt::Debug for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                let mut dbg = f.debug_struct(stringify!($name));
+                dbg.field("fourcc", &self.fourcc());
+                $(
+                    if !stringify!($field).starts_with("_") {
+                        def_struct!(@filter_skip $field, dbg.field(stringify!($field), &self.$field););
+                    }
+                )*
+                dbg.finish()
+            }
+        }
+    }
+}
+
+// Implement the FromBytes and ToBytes traits for this struct.
+macro_rules! impl_fromtobytes {
+    ($name:ident, { $( $field:tt: $type:tt $(as $as:tt)? ),* $(,)? }) => {
+        impl FromBytes for $name {
+            #[allow(unused_variables)]
+            fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<$name> {
+
+                debug!("XXX frombyting {} min_size is {} stream.left is {}",
+                       stringify!($name), <$name>::min_size(), stream.left());
+
+                // Deserialize.
+                let mut reader = $crate::mp4box::BoxReader::new(stream)?;
+                let reader = &mut reader;
+
+                match (reader.header.version, reader.header.max_version) {
+                    (Some(version), Some(max_version)) => {
+                        if version > max_version {
+                            return Err(io::Error::new(io::ErrorKind::InvalidData,
+                                format!("{}: no suppor for version {}", stringify!($name), version)));
+                        }
+                    },
+                    _ => {},
+                }
+
+                let r: io::Result<$name> = {
+                    def_struct!(@from_bytes $name, [], reader, $(
+                        $field: $type $(as $as)?,
+                    )*)
+                };
+
+                debug!("XXX -- done frombyting {}", stringify!($name));
+
+                r
+            }
+
+            fn min_size() -> usize {
+                $(
+                    def_struct!(@min_size $type) +
+                )* 0
+            }
+        }
+
+        impl ToBytes for $name {
+            #[allow(unused_variables)]
+            fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
+
+                // Write the header.
+                let mut stream = $crate::mp4box::BoxWriter::new(stream, self)?;
+                let stream = &mut stream;
+
+                // Serialize.
+                def_struct!(@to_bytes self, stream, $(
+                    $field: $type $(as $as)?,
+                )*)
+            }
         }
     };
-    // def_box that points to module.
-    (@DEF_BOX $name:ident, $fourcc:expr, $mod:ident) => {
-        mod $mod;
-        pub use $mod::*;
-    };
-    // empty def_box.
-    (@DEF_BOX $name:ident, $fourcc:expr,) => {
-    };
-    // Define the MP4Box enum.
-    (@DEF_MP4BOX $enum:ident, $($name:ident, $fourcc:expr),*) => {
+}
+
+// Define the MP4Box enum.
+macro_rules! impl_enum {
+    ($enum:ident, $($name:ident, $fourcc:expr),*) => {
         //
         // First define the enum.
         //
-
 
         /// All the boxes we know.
         pub enum $enum {
@@ -204,7 +319,7 @@ macro_rules! def_boxes {
             }
         }
 
-        // Define BoxInfo trait for the enum.
+        // Define FullBox trait for the enum.
         impl FullBox for $enum {
             fn version(&self) -> Option<u8> {
                 match self {
@@ -233,93 +348,6 @@ macro_rules! def_boxes {
                     )+
                     &$enum::GenericBox(ref b) => Debug::fmt(b, f),
                 }
-            }
-        }
-    };
-}
-
-//
-//
-// Macro that is used to declare one box.
-//
-//
-
-// Define one box.
-macro_rules! def_box {
-
-    ($(#[$outer:meta])* $name:ident, $_fourcc:expr, $( $field:tt: $type:tt $(as $as:tt)? ),* $(,)?) => {
-        // Define the struct itself.
-        def_struct!(@def_struct $(#[$outer])* $name,
-            $(
-                $field: $type $(as $as)?,
-            )*
-        );
-
-        // Debug implementation that adds fourcc field.
-        impl std::fmt::Debug for $name {
-            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                let mut dbg = f.debug_struct(stringify!($name));
-                dbg.field("fourcc", &self.fourcc());
-                $(
-                    if !stringify!($field).starts_with("_") {
-                        def_struct!(@filter_skip $field, dbg.field(stringify!($field), &self.$field););
-                    }
-                )*
-                dbg.finish()
-            }
-        }
-
-        impl FromBytes for $name {
-            #[allow(unused_variables)]
-            fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<$name> {
-
-                debug!("XXX frombyting {} min_size is {} stream.left is {}",
-                       stringify!($name), <$name>::min_size(), stream.left());
-
-                // Deserialize.
-                let mut reader = $crate::mp4box::BoxReader::new(stream)?;
-                let reader = &mut reader;
-
-                match (reader.header.version, reader.header.max_version) {
-                    (Some(version), Some(max_version)) => {
-                        if version > max_version {
-                            return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                format!("{}: no suppor for version {}", stringify!($name), version)));
-                        }
-                    },
-                    _ => {},
-                }
-
-                let r: io::Result<$name> = {
-                    def_struct!(@from_bytes $name, [], reader, $(
-                        $field: $type $(as $as)?,
-                    )*)
-                };
-
-                debug!("XXX -- done frombyting {}", stringify!($name));
-
-                r
-            }
-
-            fn min_size() -> usize {
-                $(
-                    def_struct!(@min_size $type) +
-                )* 0
-            }
-        }
-
-        impl ToBytes for $name {
-            #[allow(unused_variables)]
-            fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
-
-                // Write the header.
-                let mut stream = $crate::mp4box::BoxWriter::new(stream, self)?;
-                let stream = &mut stream;
-
-                // Serialize.
-                def_struct!(@to_bytes self, stream, $(
-                    $field: $type $(as $as)?,
-                )*)
             }
         }
     };

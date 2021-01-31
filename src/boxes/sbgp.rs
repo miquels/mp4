@@ -2,11 +2,15 @@ use std::io;
 
 use crate::boxes::prelude::*;
 
-#[derive(Debug)]
-pub struct SampleToGroupBox {
-    grouping_type:  FourCC,
-    grouping_type_parameter:    Option<u32>,
-    entries:        ArraySized32<SampleToGroupEntry>,
+def_box! {
+    SampleToGroupBox {
+        grouping_type:  FourCC,
+        grouping_type_parameter: {Option<u32>},
+        entries:        [SampleToGroupEntry, sized],
+    },
+    fourcc => "sbgp",
+    version => [],
+    impls => [ boxinfo, debug ],
 }
 
 impl FromBytes for SampleToGroupBox {

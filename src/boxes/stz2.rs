@@ -1,13 +1,17 @@
 use std::io;
 use crate::boxes::prelude::*;
 
-/// 8.7.3.3 Compact Sample Size Box (ISO/IEC 14496-12:2015(E))
-#[derive(Debug)]
-pub struct CompactSampleSizeBox {
-    // skip:        3.
-    field_size:     u8,
-    count:   u32,
-    entries: Vec<u16>,
+def_box! {
+    /// 8.7.3.3 Compact Sample Size Box (ISO/IEC 14496-12:2015(E))
+    CompactSampleSizeBox {
+        // skip:        3.
+        field_size:     u8,
+        count:   u32,
+        entries: {Vec<u16>},
+    },
+    fourcc => "stz2",
+    version => [0],
+    impls => [ boxinfo, debug, fullbox ],
 }
 
 impl FromBytes for CompactSampleSizeBox {

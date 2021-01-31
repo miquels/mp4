@@ -3,10 +3,14 @@ use std::io;
 
 use crate::boxes::prelude::*;
 
-/// 8.1.1 Media Data Box (ISO/IEC 14496-12:2015(E))
-#[derive(Debug, Default)]
-pub struct MediaDataBox {
-    pub data:   DataRef
+def_box! {
+    /// 8.1.1 Media Data Box (ISO/IEC 14496-12:2015(E))
+    MediaDataBox {
+        data:   DataRef,
+    },
+    fourcc => "mdat",
+    version => [],
+    impls => [ basebox, boxinfo, debug ],
 }
 
 impl FromBytes for MediaDataBox {

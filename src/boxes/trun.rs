@@ -24,13 +24,17 @@ use crate::boxes::prelude::*;
 //      }[ sample_count ]
 //  }
 
-/// 8.8.8 Track Fragment Run Box (ISO/IEC 14496-12:2015(E))
-#[derive(Debug)]
-pub struct TrackRunBox {
-    sample_count:               u32,
-    data_offset:                Option<i32>,
-    first_sample_flags:         Option<SampleFlags>,
-    entries:                    ArrayUnsized<TrackRunEntry>,
+def_box! {
+    /// 8.8.8 Track Fragment Run Box (ISO/IEC 14496-12:2015(E))
+    TrackRunBox {
+        sample_count:               u32,
+        data_offset:                {Option<i32>},
+        first_sample_flags:         {Option<SampleFlags>},
+        entries:                    [TrackRunEntry, unsized],
+    },
+    fourcc => "trun",
+    version => [],
+    impls => [ boxinfo, debug ],
 }
 
 // as long as we don't have bool.then().

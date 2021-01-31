@@ -10,7 +10,7 @@ use crate::track::VideoTrackInfo;
 
 def_box! {
     /// AVC sample entry (VideoSampleEntry).
-    AvcSampleEntry, "avc1",
+    AvcSampleEntry {
         skip:                   6,
         data_reference_index:   u16,
         skip:                   16,
@@ -30,7 +30,11 @@ def_box! {
         // always -1
         _pre_defined:           u16,
         // avcC and other boxes (pasp?)
-        boxes:              [MP4Box, unsized],
+        boxes:              [MP4Box],
+    },
+    fourcc => "avc1",
+    version => [], 
+    impls => [ basebox, boxinfo, debug, fromtobytes ],
 }
 
 impl Default for AvcSampleEntry {
@@ -70,8 +74,12 @@ impl AvcSampleEntry {
 
 def_box! {
     /// Box that contains AVC Decoder Configuration Record.
-    AvcConfigurationBox, "avcC",
+    AvcConfigurationBox {
         configuration: AvcDecoderConfigurationRecord,
+    },
+    fourcc => "avcC",
+    version => [],
+    impls => [ basebox, boxinfo, debug, fromtobytes ],
 }
 
 def_struct! {

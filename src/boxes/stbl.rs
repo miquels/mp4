@@ -9,9 +9,13 @@ use crate::boxes::{CompositionOffsetBox, SyncSampleBox};
 // ctts, cslg, stsz, stz2, stss, stsh, padb, stdp, sbgp, sgpd, subs, saiz, saio
 
 def_box! {
-    /// 8.4.4 Media Information Box (ISO/IEC 14496-12:2015(E))
-    SampleTableBox, "minf",
+    /// 8.1.1 Sample Table Box (ISO/IEC 14496-12:2015(E))
+    SampleTableBox {
         boxes:      [MP4Box],
+    },
+    fourcc => "stbl",
+    version => [],
+    impls => [ basebox, boxinfo, debug, fromtobytes ],
 }
 
 impl SampleTableBox {

@@ -5,8 +5,12 @@ use crate::boxes::{TrackHeaderBox, MediaBox, EditBox, EditListBox};
 
 def_box! {
     /// 8.3.1 Track Box (ISO/IEC 14496-12:2015(E))
-    TrackBox, "trak",
+    TrackBox {
         boxes:      [MP4Box],
+    },
+    fourcc =>"trak",
+    version => [],
+    impls => [ basebox, boxinfo, debug, fromtobytes ],
 }
 
 impl TrackBox {
