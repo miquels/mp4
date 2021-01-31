@@ -1,9 +1,9 @@
 //
-// Macro that is used to declare _all_ boxes.
+// Several helper macros.
 //
 //
 
-// List of boxes.
+// List of all boxes, used in boxes.rs.
 //
 // For each box, include its module. Then build an enum with
 // a variant for each box.
@@ -18,7 +18,6 @@ macro_rules! def_boxes {
                 pub(crate) mod $mod;
                 pub(crate) use self::$mod::*;
             )?
-
         )+
 
         // build enum.
@@ -409,7 +408,7 @@ macro_rules! first_box_mut {
     };
 }
 
-/// Find all boxes of type $type in $vec.
+/// Iterate over all boxes of type $type in $vec.
 macro_rules! iter_box {
     ($vec:ident, $type:ident) => {
         iter_box!($vec.boxes, $type)
@@ -424,6 +423,7 @@ macro_rules! iter_box {
     };
 }
 
+/// Iterate over all boxes of type $type in $vec.
 macro_rules! iter_box_mut {
     ($vec:ident, $type:ident) => {
         iter_box_mut!($vec.boxes, $type)
@@ -438,6 +438,7 @@ macro_rules! iter_box_mut {
     };
 }
 
+/// Helper.
 macro_rules! declare_box_methods {
     ($type:ident, $method:ident, $method_mut:ident) => {
         /// Get a reference to the $type.
@@ -451,6 +452,7 @@ macro_rules! declare_box_methods {
     }
 }
 
+/// Helper.
 macro_rules! declare_box_methods_opt {
     ($type:ident, $method:ident, $method_mut:ident) => {
         /// Get an optional reference to the $type.
