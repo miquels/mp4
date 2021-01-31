@@ -82,8 +82,14 @@ def_boxes! {
     TrackFragmentHeaderBox, b"tfhd" => tfhd;
     TrackRunBox, b"trun" => trun;
 
+    Tx3gTextSampleEntry, b"tx3g";
+    Tx3gFontTableBox, b"ftab";
+    Tx3gTextStyleBox, b"styl";
+    Tx3gTextHighlightBox, b"hlit";
+    Tx3gTextHighlightColorBox, b"hclr";
+    Tx3gTextKaraokeBox, b"krok";
+    Tx3gTextScrollDelayBox, b"dlay";
+    Tx3gTextHyperTextBox, b"href";
     TextSubtitleSampleEntry, b"sbtt" => sbtl;
-    Tx3gSubtitleSampleEntry, b"tx3g";
     XMLSubtitleSampleEntry, b"stpp";
-    FontTableBox, b"ftab";
 }

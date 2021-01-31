@@ -106,11 +106,27 @@ pub fn track_info(mp4: &MP4) -> Vec<TrackInfo> {
             info.specific_info = SpecificTrackInfo::AudioTrackInfo(aac.track_info());
         } else {
             let id = stsd.entries.iter().next().map(|e| e.fourcc().to_string()).unwrap_or("unkn".to_string());
-            let u = UnknownTrackInfo {
-                codec_id: id,
-                codec_name: None,
+            let sp_info = match id.as_str() {
+                "tx3g" => {
+                    SpecificTrackInfo::SubtitleTrackInfo(SubtitleTrackInfo {
+                        codec_id: id.to_string(),
+                        codec_name: Some(String::from("3GPP Timed Text")),
+                    })
+                },
+                "stpp"|"sbtt" => {
+                    SpecificTrackInfo::SubtitleTrackInfo(SubtitleTrackInfo {
+                        codec_id: id.to_string(),
+                        codec_name: None,
+                    })
+                },
+                _ => {
+                    SpecificTrackInfo::UnknownTrackInfo(UnknownTrackInfo {
+                        codec_id: id,
+                        codec_name: None,
+                    })
+                },
             };
-            info.specific_info = SpecificTrackInfo::UnknownTrackInfo(u);
+            info.specific_info = sp_info;
         }
 
         v.push(info)
