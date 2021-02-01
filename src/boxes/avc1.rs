@@ -14,7 +14,7 @@ def_box! {
         skip:                   6,
         data_reference_index:   u16,
         skip:                   16,
-        wirdth:                 u16,
+        width:                 u16,
         height:                 u16,
         // defaults to 72, 72
         _video_horizontal_dpi:  FixedFloat16_16,
@@ -40,8 +40,8 @@ def_box! {
 impl Default for AvcSampleEntry {
     fn default() -> Self {
         AvcSampleEntry {
-            data_reference_index:     0,
-            wirdth:                   1280,
+            data_reference_index:     1,
+            width:                   1280,
             height:                   720,
             _video_horizontal_dpi:    FixedFloat16_16::from(72f64),
             _video_vertical_dpi:      FixedFloat16_16::from(72f64),

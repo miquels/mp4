@@ -22,7 +22,7 @@ impl FromBytes for SampleSizeBox {
         let count = u32::from_bytes(stream)?;
         let mut entries = ArrayUnsized::new();
 
-        debug!("SampleSizeBox: size {} count {}", size, count);
+        log::trace!("SampleSizeBox: size {} count {}", size, count);
         if size == 0 {
             while entries.len() < count as usize  && stream.left() >= 4 {
                 entries.push(u32::from_bytes(stream)?);

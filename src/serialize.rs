@@ -6,11 +6,12 @@
 //! primitive types u8/u16/u32/u64/u128.
 //!
 use std::convert::TryInto;
-use std::io::{self, ErrorKind::UnexpectedEof};
+use std::fs;
+use std::io::{self, ErrorKind::UnexpectedEof, Seek, SeekFrom, Write};
 
 use auto_impl::auto_impl;
 
-use crate::io::ReadAt;
+use crate::io::DataRef;
 use crate::types::FourCC;
 
 /// Byte reader in a stream.
@@ -21,7 +22,7 @@ pub trait ReadBytes: BoxBytes {
     /// Skip some bytes in the input.
     fn skip(&mut self, amount: u64) -> io::Result<()>;
     /// How much data is left?
-    fn left(&self) -> u64;
+    fn left(&mut self) -> u64;
 }
 
 /// Byte writer in a stream.
@@ -38,7 +39,7 @@ pub trait WriteBytes: BoxBytes {
 #[auto_impl(&mut)]
 pub trait BoxBytes {
     /// Get current position in the stream.
-    fn pos(&self) -> u64 {
+    fn pos(&mut self) -> u64 {
         unimplemented!()
     }
     /// Seek to a position in the output stream.
@@ -62,8 +63,9 @@ pub trait BoxBytes {
         unimplemented!()
     }
     /// Get a reference to the mdat source data.
-    fn mdat_ref(&self) -> Option<&Box<dyn ReadAt>> {
-        None
+    fn data_ref(&self, _size: u64) -> io::Result<DataRef> {
+        panic!("data reference unavailable");
+        //Err(io::Error::new(ErrorKind::NotConnected, "data reference unavailable"))
     }
 }
 
@@ -92,13 +94,42 @@ impl ReadBytes for &[u8] {
     }
 
     #[inline]
-    fn left(&self) -> u64 {
+    fn left(&mut self) -> u64 {
         (*self).len() as u64
     }
 }
 
-// Uses defaults.
-impl BoxBytes for &[u8] {}
+impl BoxBytes for &[u8] {
+    fn data_ref(&self, _size: u64) -> io::Result<DataRef> {
+        panic!("&[u8]: data reference unavailable");
+    }
+}
+
+impl WriteBytes for fs::File {
+    fn write(&mut self, data: &[u8]) -> io::Result<()> {
+        self.write_all(data)
+    }
+
+    fn skip(&mut self, amount: u64) -> io::Result<()> {
+        Seek::seek(self, SeekFrom::Current(amount as i64))?;
+        Ok(())
+    }
+}
+
+impl BoxBytes for fs::File {
+    fn pos(&mut self) -> u64 {
+        Seek::seek(self, SeekFrom::Current(0)).unwrap()
+    }
+
+    fn seek(&mut self, pos: u64) -> io::Result<()> {
+        Seek::seek(self, SeekFrom::Start(pos))?;
+        Ok(())
+    }
+
+    fn size(&self) -> u64 {
+        self.metadata().unwrap().len()
+    }
+}
 
 /// Implementation of WriteBytes on a byte slice.
 impl WriteBytes for &mut [u8] {
@@ -122,8 +153,11 @@ impl WriteBytes for &mut [u8] {
     }
 }
 
-// Uses defaults.
-impl BoxBytes for &mut [u8] {}
+impl BoxBytes for &mut [u8] {
+    fn data_ref(&self, _size: u64) -> io::Result<DataRef> {
+        panic!("&mut [u8]: data reference unavailable");
+    }
+}
 
 /// Trait to deserialize a type.
 pub trait FromBytes {

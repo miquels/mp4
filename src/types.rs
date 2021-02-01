@@ -151,7 +151,8 @@ impl Data {
 
 impl FromBytes for Data {
     fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> {
-        let data = bytes.read(bytes.left())?;
+        let left = bytes.left();
+        let data = bytes.read(left)?;
         let mut v = Vec::new();
         v.extend_from_slice(data);
         Ok(Data(v))
@@ -367,7 +368,8 @@ impl std::ops::Deref for ZString {
 
 impl FromBytes for ZString {
     fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> {
-        let data = bytes.read(bytes.left())?;
+        let left = bytes.left();
+        let data = bytes.read(left)?;
         let mut s = String::new();
         let mut idx = 0;
         let maxlen = data.len();

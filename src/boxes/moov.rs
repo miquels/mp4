@@ -65,11 +65,11 @@ impl MovieBox {
     pub fn is_valid(&self) -> bool {
         let mut valid = true;
         if self.tracks().len() == 0 {
-            error!("MovieBox: no TrackBoxes present");
+            log::error!("MovieBox: no TrackBoxes present");
             valid = false;
         }
         if first_box!(&self.boxes, MovieHeaderBox).is_none() {
-            error!("MovieBox: no MovieHeaderBox present");
+            log::error!("MovieBox: no MovieHeaderBox present");
             valid = false;
         }
         for t in &self.tracks() {

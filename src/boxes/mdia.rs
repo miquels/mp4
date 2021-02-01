@@ -8,7 +8,7 @@ def_box! {
     MediaBox {
         boxes:      [MP4Box],
     },
-    fourcc => "trak",
+    fourcc => "mdia",
     version => [],
     impls => [ basebox, boxinfo, debug, fromtobytes ],
 }
@@ -44,11 +44,11 @@ impl MediaBox {
     pub fn is_valid(&self) -> bool {
         let mut valid = true;
         if first_box!(&self.boxes, MediaHeaderBox).is_none() {
-            error!("MediaBox: no MediaHeaderBox present");
+            log::error!("MediaBox: no MediaHeaderBox present");
             valid = false;
         }
         if first_box!(&self.boxes, HandlerBox).is_none() {
-            error!("MediaBox: no HandlerBox present");
+            log::error!("MediaBox: no HandlerBox present");
             valid = false;
         }
         match first_box!(&self.boxes, MediaInformationBox) {
@@ -58,7 +58,7 @@ impl MediaBox {
                 }
             },
             None => {
-                error!("MediaBox: no MediaInformationBox present");
+                log::error!("MediaBox: no MediaInformationBox present");
                 valid = false;
             }
         }

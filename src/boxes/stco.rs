@@ -71,6 +71,8 @@ impl ToBytes for ChunkOffsetBox {
 }
 
 impl BoxInfo for ChunkOffsetBox {
+    const FOURCC: &'static str = "stco";
+
     #[inline]
     fn fourcc(&self) -> FourCC {
         self.fourcc

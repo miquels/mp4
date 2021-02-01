@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::io;
 
 use crate::boxes::prelude::*;
-use crate::boxes::DataRef;
+use crate::io::DataRef;
 use crate::mp4box::{BoxHeader, GenericBox};
 
 def_box! {
@@ -62,6 +62,9 @@ macro_rules! apple_name_item {
             #[inline]
             fn fourcc(&self) -> FourCC {
                 FourCC(u32::from_be_bytes(*$box_fourcc))
+            }
+            fn max_version() -> Option<u8> {
+                Some(0)
             }
         }
 

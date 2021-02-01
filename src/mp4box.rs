@@ -1,13 +1,17 @@
 use std::fmt::Debug;
 use std::io;
 
-use crate::boxes::{MP4Box, MovieBox, FileTypeBox, DataRef};
-use crate::io::ReadAt;
+use crate::boxes::{MovieBox, FileTypeBox};
+use crate::io::DataRef;
 use crate::serialize::{BoxBytes, FromBytes, ReadBytes, ToBytes, WriteBytes};
 use crate::types::*;
 
+pub use crate::boxes::MP4Box;
+
 /// Gets implemented for every box.
 pub trait BoxInfo {
+    const FOURCC: &'static str = "xxxx";
+
     /// The "fourcc" name of this box.
     fn fourcc(&self) -> FourCC;
     /// Sub-boxes if this is a container.
@@ -77,7 +81,6 @@ impl BoxHeader {
             flags,
             max_version,
         });
-        debug!("BoxHeader::read: {:?}", b);
         b
     }
 
@@ -123,7 +126,7 @@ impl<'a> BoxReader<'a> {
     pub fn new<R: ReadBytes>(mut stream: &'a mut R) -> io::Result<BoxReader<'a>> {
         let header = BoxHeader::read(&mut stream)?;
         let maxsize = std::cmp::min(stream.size(), stream.pos() + header.size);
-        debug!(
+        log::trace!(
             "XXX header {:?} maxsize {} left {}",
             header,
             maxsize,
@@ -139,13 +142,14 @@ impl<'a> BoxReader<'a> {
 
 impl<'a> Drop for BoxReader<'a> {
     fn drop(&mut self) {
-        if self.pos() < self.maxsize {
-            debug!(
+        let pos = self.pos();
+        if pos < self.maxsize {
+            log::trace!(
                 "XXX BoxReader {} drop: skipping {}",
                 self.header.fourcc,
-                self.maxsize - self.pos()
+                self.maxsize - pos
             );
-            let _ = self.skip(self.maxsize - self.pos());
+            let _ = self.skip(self.maxsize - pos);
         }
     }
 }
@@ -167,7 +171,7 @@ impl<'a> ReadBytes for BoxReader<'a> {
         self.inner.skip(amount)
     }
     #[inline]
-    fn left(&self) -> u64 {
+    fn left(&mut self) -> u64 {
         let pos = self.inner.pos();
         if pos > self.maxsize {
             0
@@ -180,7 +184,7 @@ impl<'a> ReadBytes for BoxReader<'a> {
 // Delegate BoxBytes to the inner reader.
 impl<'a> BoxBytes for BoxReader<'a> {
     #[inline]
-    fn pos(&self) -> u64 {
+    fn pos(&mut self) -> u64 {
         self.inner.pos()
     }
     #[inline]
@@ -202,6 +206,9 @@ impl<'a> BoxBytes for BoxReader<'a> {
     }
     fn fourcc(&self) -> FourCC {
         self.header.fourcc.clone()
+    }
+    fn data_ref(&self, size: u64) -> io::Result<DataRef> {
+        self.inner.data_ref(size)
     }
 }
 
@@ -270,7 +277,7 @@ impl<'a> WriteBytes for BoxWriter<'a> {
 
 // Delegate BoxBytes to the inner writer.
 impl<'a> BoxBytes for BoxWriter<'a> {
-    fn pos(&self) -> u64 {
+    fn pos(&mut self) -> u64 {
         self.inner.pos()
     }
     fn seek(&mut self, pos: u64) -> io::Result<()> {
@@ -288,8 +295,8 @@ impl<'a> BoxBytes for BoxWriter<'a> {
     fn fourcc(&self) -> FourCC {
         self.inner.fourcc()
     }
-    fn mdat_ref(&self) -> Option<&Box<dyn ReadAt>> {
-        self.inner.mdat_ref()
+    fn data_ref(&self, size: u64) -> io::Result<DataRef> {
+        self.inner.data_ref(size)
     }
 }
 
@@ -342,7 +349,7 @@ impl MP4 {
                 }
             },
             None => {
-                error!("no MovieBox present");
+                log::error!("no MovieBox present");
                 valid = false;
             }
         }
@@ -386,7 +393,7 @@ pub fn write_boxes<W: WriteBytes>(mut file: W, boxes: &[MP4Box]) -> io::Result<(
 //
 //
 
-/// Any unknown boxes we encounted are put into a GenericBox.
+/// Any unknown boxes we encounter are put into a GenericBox.
 pub struct GenericBox {
     fourcc: FourCC,
     data:   Option<Vec<u8>>,
@@ -452,7 +459,7 @@ impl Debug for GenericBox {
             dbg.field("data", &data);
         }
         if let Some(ref data_ref) = self.data_ref {
-            let data = format!("[u8; {}]", data_ref.data_size);
+            let data = format!("[u8; {}]", data_ref.len());
             dbg.field("data", &data);
         }
         dbg.finish()

@@ -17,7 +17,7 @@ def_box! {
         entries:                    [SampleGroupDescriptionItem, unsized],
     },
     fourcc => "sgpd",
-    version => [],
+    version => [2],
     impls => [ boxinfo, debug ],
 }
 

@@ -33,7 +33,7 @@ def_box! {
 impl Default for Ac3SampleEntry {
     fn default() -> Ac3SampleEntry {
         Ac3SampleEntry {
-            data_reference_index:   0,
+            data_reference_index:   1,
             channel_count:          2,
             sample_size:            16,
             sample_rate_hi:         0,

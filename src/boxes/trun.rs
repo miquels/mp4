@@ -33,7 +33,7 @@ def_box! {
         entries:                    [TrackRunEntry, unsized],
     },
     fourcc => "trun",
-    version => [],
+    version => [1],
     impls => [ boxinfo, debug ],
 }
 

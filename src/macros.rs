@@ -131,6 +131,7 @@ macro_rules! impl_fullbox {
 macro_rules! impl_boxinfo {
     ($name:ident, $fourcc:expr, [$($maxver:tt)? $(,$deps:ident)*]) => {
         impl BoxInfo for $name {
+            const FOURCC: &'static str = $fourcc;
             #[inline]
             fn fourcc(&self) -> FourCC {
                 // XXX FIXME make this b"four" instead of "four"
@@ -174,7 +175,7 @@ macro_rules! impl_fromtobytes {
             #[allow(unused_variables)]
             fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<$name> {
 
-                debug!("XXX frombyting {} min_size is {} stream.left is {}",
+                log::trace!("XXX frombyting {} min_size is {} stream.left is {}",
                        stringify!($name), <$name>::min_size(), stream.left());
 
                 // Deserialize.
@@ -197,7 +198,7 @@ macro_rules! impl_fromtobytes {
                     )*)
                 };
 
-                debug!("XXX -- done frombyting {}", stringify!($name));
+                log::trace!("XXX -- done frombyting {}", stringify!($name));
 
                 r
             }
@@ -251,6 +252,23 @@ macro_rules! impl_enum {
                     _ => None,
                 }
             }
+
+            pub fn check() {
+                let mut ok = true;
+                $(
+                    // check if $fourcc == $name::FOURCC
+                    if $name::FOURCC.as_bytes() != $fourcc {
+                        if !($name::FOURCC == "stco" && $fourcc == b"co64") {
+                            println!("mismatch: {:?} {:?}", std::str::from_utf8($fourcc), $name::FOURCC);
+                            ok = false;
+                        }
+                    }
+                )+
+                if !ok {
+                    panic!("MP4Box::check failed");
+                }
+            }
+
         }
 
         // Define FromBytes trait for the enum.
@@ -262,13 +280,13 @@ macro_rules! impl_enum {
                 let header = BoxHeader::read(stream)?;
                 stream.seek(saved_pos)?;
 
-                //debug!("XXX got reader for {:?} left {}", reader.header, reader.left());
+                log::debug!("header {:?}", header);
 
                 // If the version is too high, read it as a GenericBox.
                 match (header.version, header.max_version) {
                     (Some(version), Some(max_version)) => {
                         if version > max_version {
-                            println!("XXX {:?}", header);
+                            //println!("XXX {:?}", header);
                             return Ok($enum::GenericBox(GenericBox::from_bytes(&mut stream)?));
                         }
                     },

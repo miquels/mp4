@@ -167,7 +167,7 @@ impl FromBytes for BaseDescriptor {
                 break;
             }
             if i == 4 {
-                warn!("ESDescriptorBox: length field > 4 bytes (@{})", stream.pos());
+                log::warn!("ESDescriptorBox: length field > 4 bytes (@{})", stream.pos());
                 return Err(io::ErrorKind::InvalidData.into());
             }
         }
@@ -185,14 +185,24 @@ impl ToBytes for BaseDescriptor {
     fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
         self.tag.to_bytes(stream)?;
         let mut size = self.size;
-        while size > 0 {
+
+        if size >= 268435456 {
+            // 28 bits max.
+            log::warn!("ESDescriptorBox: tag {} length field does not find in 28 bits", self.tag);
+            return Err(io::ErrorKind::InvalidData.into());
+        }
+
+        let mut buf = [0u8; 4];
+        for idx in (0..=3).rev() {
             let mut b = (size & 0x7f) as u8;
             size >>= 7;
-            if size > 0 {
+            if idx != 3 {
                 b |= 0x80;
             }
-            b.to_bytes(stream)?;
+            buf[idx] = b;
         }
+        stream.write(&buf[..])?;
+
         Ok(())
     }
 }

@@ -18,8 +18,8 @@ def_box! {
         boxes:                  [MP4Box],
     },
     fourcc => "stpp",
-    version => [0], 
-    impls => [ boxinfo, debug, fromtobytes, fullbox ],
+    version => [], 
+    impls => [ basebox, boxinfo, debug, fromtobytes ],
 }
 
 def_box! {
@@ -32,8 +32,8 @@ def_box! {
         boxes:                  [MP4Box],
     },
     fourcc => "sbtt",
-    version => [0], 
-    impls => [ boxinfo, debug, fromtobytes, fullbox ],
+    version => [], 
+    impls => [ basebox, boxinfo, debug, fromtobytes ],
 }
 
 def_box! {
@@ -41,6 +41,7 @@ def_box! {
     Tx3gTextSampleEntry {
         skip:                   6,
         data_reference_index:   u16,
+        display_flags:          u32,
         horizontal_justification: u8,
         vertical_justification:   u8,
         background_color_rgba:  u32,
@@ -49,8 +50,8 @@ def_box! {
         fonts:                  [Tx3gFontTableBox, unsized],
     },
     fourcc => "tx3g",
-    version => [0], 
-    impls => [ boxinfo, debug, fromtobytes, fullbox ],
+    version => [], 
+    impls => [ basebox, boxinfo, debug, fromtobytes ],
 }
 
 def_struct! {

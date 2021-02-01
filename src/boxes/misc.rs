@@ -42,7 +42,7 @@ def_box! {
         width:      FixedFloat16_16,
         height:     FixedFloat16_16,
     },
-    fourcc => "iods",
+    fourcc => "tkhd",
     version => [1, flags, cr_time, mod_time, duration],
     impls => [ boxinfo, debug, fromtobytes, fullbox ],
 }
@@ -52,8 +52,8 @@ def_box! {
         boxes:  [EditListBox],
     },
     fourcc => "edts",
-    version => [0],
-    impls => [ boxinfo, debug, fromtobytes, fullbox ],
+    version => [],
+    impls => [ basebox, boxinfo, debug, fromtobytes ],
 }
 
 def_box! {
@@ -121,7 +121,7 @@ def_box! {
         graphics_mode:  u16,
         opcolor:        OpColor,
     },
-    fourcc => "vmdh",
+    fourcc => "vmhd",
     version => [0, flags],
     impls => [ boxinfo, debug, fromtobytes, fullbox ],
 }

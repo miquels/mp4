@@ -78,7 +78,7 @@ impl TrackBox {
         let track_id = match first_box!(&self.boxes, TrackHeaderBox) {
             Some(th) => th.track_id,
             None => {
-                error!("TrackBox: no TrackHeaderBox present");
+                log::error!("TrackBox: no TrackHeaderBox present");
                 return false;
             },
         };
@@ -89,7 +89,7 @@ impl TrackBox {
                 }
             },
             None => {
-                error!("TrackBox(id {}): no MediaBox present", track_id);
+                log::error!("TrackBox(id {}): no MediaBox present", track_id);
                 valid = false;
             },
         }

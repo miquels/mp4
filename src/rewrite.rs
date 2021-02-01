@@ -12,7 +12,7 @@ pub fn set_default_track(mp4: &mut MP4, track_id: u32) {
     let track_idx = match movie.track_idx_by_id(track_id) {
         Some(idx) => idx,
         None => {
-            debug!("track id {}: no such track", track_id);
+            log::debug!("track id {}: no such track", track_id);
             return;
         }
     };
@@ -26,12 +26,12 @@ pub fn set_default_track(mp4: &mut MP4, track_id: u32) {
 
     // Already the default track?
     if first_idx == track_idx {
-        debug!("set_default_audio_track: already default");
+        log::debug!("set_default_audio_track: already default");
         return;
     }
 
     let mut tracks = mp4.movie_mut().tracks_mut();
-    debug!("set_default_audio_track: setting {} as default", track_id);
+    log::debug!("set_default_audio_track: setting {} as default", track_id);
 
     // Swap the enabled flag, but set the first track to enabled always.
     let was_enabled = tracks[track_idx].track_header().flags.get_enabled();
@@ -61,7 +61,7 @@ pub fn movie_at_front(mp4: &mut MP4) {
         if let &MP4Box::MediaDataBox(ref m) = b {
             mdat_idx = Some(idx);
             mdat_offset = offset;
-            mdat_size = m.data.data_size + 12;
+            mdat_size = m.data.len() + 12;
         }
         if mdat_idx.is_some() && moov_idx.is_some() {
             break;
@@ -73,7 +73,7 @@ pub fn movie_at_front(mp4: &mut MP4) {
 
     // If moov is already before mdat, we're done.
     if moov_offset <= mdat_offset {
-        debug!("movie_at_front: MovieBox is already at the start");
+        log::debug!("movie_at_front: MovieBox is already at the start");
         return;
     }
 
@@ -84,7 +84,7 @@ pub fn movie_at_front(mp4: &mut MP4) {
         let co_len = co.entries.len();
         if co_len > 0 {
             if co.entries[0] < mdat_offset || co.entries[co_len - 1] >= mdat_offset + mdat_size {
-                error!("movie_at_front: not all tracks in first MovieDataBox");
+                log::error!("movie_at_front: not all tracks in first MovieDataBox");
                 return;
             }
         }

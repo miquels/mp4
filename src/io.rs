@@ -1,142 +1,84 @@
-use std::io::{self, Read, Seek, SeekFrom, Write};
-use std::os::unix::fs::FileExt;
+use std::fs;
+use std::io::{self, ErrorKind};
+use std::sync::Arc;
 
-use crate::serialize::{BoxBytes, ReadBytes, WriteBytes};
+use memmap::{Mmap, MmapOptions};
+
+use crate::serialize::{BoxBytes, ReadBytes, WriteBytes, ToBytes};
 use crate::types::FourCC;
 
-const MIN_BUFSIZE: usize = 4096;
-const SEEK_BUFSIZE: usize = 4096;
-const BUFSIZE: usize = 65536;
-
-pub trait ReadAt {
-    fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize>;
-}
-
-impl<T> ReadAt for T where T: Read + FileExt {
-    fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
-        FileExt::read_at(self, buf, offset)
-    }
-}
-
-pub struct Mp4File<F> {
-    file:  Box<F>,
+pub struct Mp4File {
+    mmap:  Arc<Mmap>,
+    file:  fs::File,
     pos:   u64,
     size:  u64,
-    buf:   Vec<u8>,
-    rdpos: usize,
-    wrpos: usize,
-    data_reader: Option<Box<dyn ReadAt + 'static>>,
 }
 
-impl<F> Mp4File<F> {
-    pub fn new(file: F) -> Mp4File<F>
-    where
-        F: Seek,
-    {
-        let mut file = file;
-        let pos = file.seek(SeekFrom::Current(0)).unwrap();
-        let size = file.seek(SeekFrom::End(0)).unwrap();
+/*
+pub enum ByteData {
+    Mmap {
+        Arc<Mmap>),
+        offset: u64,
+        len:    u64,
+    },
+    Vec(Arc<Vec<u8>>),
+}
 
-        let mut buf = Vec::new();
-        buf.resize(BUFSIZE + MIN_BUFSIZE + SEEK_BUFSIZE, 0);
+pub struct Chunk {
+    data:       ByteData,
+    is_mdat:    bool,
+}
 
-        file.seek(SeekFrom::Start(pos)).unwrap();
+pub struct MdatSource {
+    file:   fs::File,
+    offset: u64,
+    len:    u64,
+}
+*/
 
-        Mp4File {
-            file: Box::new(file),
-            pos,
+impl Mp4File {
+    pub fn open(path: impl AsRef<str>) -> io::Result<Mp4File> {
+        let path = path.as_ref();
+        let file = fs::File::open(path)?;
+        let size = file.metadata()?.len();
+        let mmap = unsafe { MmapOptions::new().map(&file)? };
+        Ok(Mp4File {
+            mmap: Arc::new(mmap),
+            file,
+            pos: 0,
             size,
-            buf,
-            rdpos: 0,
-            wrpos: 0,
-            data_reader: None,
-        }
+        })
     }
 
-    pub fn new_with_reader<R>(file: F, reader: R) -> Mp4File<F>
-    where
-        F: Seek,
-        R: ReadAt + 'static,
-    {
-        let mut mf = Mp4File::new(file);
-        mf.data_reader = Some(Box::new(reader));
-        mf
-    }
-
-    pub fn into_inner(self) -> F {
-        *self.file
+    pub fn into_inner(self) -> fs::File {
+        self.file
     }
 }
 
-impl<F> Mp4File<F>
-where
-    F: Read,
-{
-    // Make sure at least "amount" is buffered.
-    fn fill_buf(&mut self, amount: usize) -> io::Result<()> {
-        if self.wrpos - self.rdpos >= amount {
-            return Ok(());
-        }
-
-        if amount > BUFSIZE {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("Mp4File::read({}): too large", amount),
-            ));
-        }
-
-        // need to be able to store "amount", if not make space.
-        let left = self.buf.len() - self.rdpos;
-        debug!("Mp4File::fill_buf: left {}", left);
-        if left < std::cmp::min(amount, MIN_BUFSIZE) {
-            // copy everything down to the start of the buffer.
-            debug!("Mp4File::fill_buf: 1. rdpos {} wrpos {}", self.rdpos, self.wrpos);
-            let extra = std::cmp::min(self.rdpos, SEEK_BUFSIZE);
-            let len = self.wrpos - self.rdpos;
-            let pos = self.rdpos - extra;
-            self.buf.copy_within(pos..self.wrpos, 0);
-            self.rdpos = extra;
-            self.wrpos = extra + len;
-            debug!("Mp4File::fill_buf: 2. rdpos {} wrpos {}", self.rdpos, self.wrpos);
-
-            // make _sure_ we have enough free space now.
-            assert!(self.buf.len() - self.rdpos >= amount);
-        }
-
-        // Now fill the buffer.
-        while self.wrpos - self.rdpos < amount {
-            let n = self.file.read(&mut self.buf[self.wrpos..])?;
-            if n == 0 {
-                return Err(io::ErrorKind::UnexpectedEof.into());
-            }
-            self.wrpos += n;
-        }
-        Ok(())
-    }
-}
-
-impl<F> ReadBytes for Mp4File<F>
-where
-    F: Read + Seek,
+impl ReadBytes for Mp4File
 {
     #[inline]
     fn read(&mut self, amount: u64) -> io::Result<&[u8]> {
-        if amount as usize > self.wrpos - self.rdpos {
-            self.fill_buf(amount as usize)?;
+        //println!("XXX DBG read {}", amount);
+        if self.pos + amount > self.size {
+            return Err(io::Error::new(ErrorKind::UnexpectedEof, "tried to read past eof"));
         }
-        self.pos += amount as u64;
-        let rdpos = self.rdpos;
-        self.rdpos += amount as usize;
-        Ok(&self.buf[rdpos..rdpos + amount as usize])
+        let pos = self.pos as usize;
+        self.pos += amount;
+        Ok(&self.mmap[pos..pos+amount as usize])
     }
 
     #[inline]
     fn skip(&mut self, amount: u64) -> io::Result<()> {
-        self.seek(self.pos + amount)
+        if self.pos + amount > self.size {
+            return Err(io::Error::new(ErrorKind::UnexpectedEof, "tried to seek past eof"));
+        }
+        self.pos += amount;
+        Ok(())
     }
 
     #[inline]
-    fn left(&self) -> u64 {
+    fn left(&mut self) -> u64 {
         if self.pos > self.size {
             0
         } else {
@@ -145,146 +87,87 @@ where
     }
 }
 
-impl<F> WriteBytes for Mp4File<F>
-where
-    F: Write + Seek,
-{
-    fn write(&mut self, data: &[u8]) -> io::Result<()> {
-        assert!(self.wrpos == 0);
-        self.file.write_all(data)?;
-        self.pos += data.len() as u64;
-        Ok(())
-    }
-    fn skip(&mut self, amount: u64) -> io::Result<()> {
-        if amount < 4096 {
-            self.pos += amount;
-            let buf = [0u8; 4096];
-            self.file.write_all(&buf[..amount as usize])
-        } else {
-            self.seek(self.pos + amount)
-        }
-    }
-}
-
-impl<F> BoxBytes for Mp4File<F>
-where
-    F: Seek,
+impl BoxBytes for Mp4File
 {
     #[inline]
-    fn pos(&self) -> u64 {
+    fn pos(&mut self) -> u64 {
         self.pos
     }
+
     #[inline]
     fn seek(&mut self, pos: u64) -> io::Result<()> {
-        // see if it fits in the read buffer.
-        let bpos = self.pos - (self.rdpos as u64);
-        let epos = self.pos + ((self.wrpos - self.rdpos) as u64);
-        if pos >= bpos && pos < epos {
-            debug!("Mp4File::seek {} in buffer", pos);
-            self.rdpos = (pos - bpos) as usize;
-            self.pos = pos;
-            return Ok(());
+        if pos > self.size {
+            return Err(io::Error::new(ErrorKind::UnexpectedEof, "tried to seek past eof"));
         }
-        debug!("Mp4File::seek {} NOT in buffer", pos);
-
-        // Nope, seek and invalidate buffer.
-        self.file.seek(SeekFrom::Start(pos))?;
         self.pos = pos;
-        self.rdpos = 0;
-        self.wrpos = 0;
         Ok(())
     }
+
     #[inline]
     fn size(&self) -> u64 {
         self.size
     }
-    fn mdat_ref(&self) -> Option<&Box<dyn ReadAt>> {
-        self.data_reader.as_ref()
+
+    fn data_ref(&self, size: u64) -> io::Result<DataRef> {
+        if self.pos + size > self.size {
+            return Err(io::Error::new(ErrorKind::UnexpectedEof, "tried to seek past eof"));
+        }
+        Ok(DataRef {
+            mmap: self.mmap.clone(),
+            start: self.pos as usize,
+            end: (self.pos + size) as usize,
+        })
     }
 }
 
-pub struct Mp4Data {
-    data: Vec<u8>,
-    pos:  usize,
+/// reference to a chunk of data somewhere in the source file.
+pub struct DataRef {
+    mmap:  Arc<Mmap>,
+    start: usize,
+    end: usize,
 }
 
-impl Mp4Data {
-    pub fn new() -> Mp4Data {
-        Mp4Data {
-            data: Vec::new(),
-            pos:  0,
-        }
+impl DataRef {
+    // from_bytes is a bit different.
+    pub(crate) fn from_bytes<R: ReadBytes>(stream: &mut R, data_size: u64) -> io::Result<DataRef> {
+        let data_ref = stream.data_ref(data_size)?;
+        stream.skip(data_size)?;
+        Ok(data_ref)
+    }
+
+    pub(crate) fn len(&self) -> u64 {
+        (self.end - self.start) as u64
+    }
+
+    pub(crate) fn is_large(&self) -> bool {
+        self.len() > u32::MAX as u64 - 16
     }
 }
 
-impl ReadBytes for Mp4Data {
-    fn read(&mut self, amount: u64) -> io::Result<&[u8]> {
-        let amount = if amount == 0 { self.left() } else { amount };
-        if amount == 0 {
-            return Ok(b"");
-        }
-        if amount > self.left() {
-            return Err(io::ErrorKind::UnexpectedEof.into());
-        }
-        let pos = self.pos;
-        let end = self.pos + amount as usize;
-        self.pos += amount as usize;
-        Ok(&self.data[pos..end])
+impl ToBytes for DataRef {
+    // writing is simple.
+    fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
+        stream.write(&self[..])
     }
+}
 
-    fn skip(&mut self, amount: u64) -> io::Result<()> {
-        self.seek(self.pos as u64 + amount)
-    }
+// deref to &[u8]
+impl std::ops::Deref for DataRef {
+    type Target = [u8];
 
     #[inline]
-    fn left(&self) -> u64 {
-        if self.pos > self.data.len() {
-            0
-        } else {
-            (self.data.len() - self.pos) as u64
-        }
+    fn deref(&self) -> &Self::Target {
+        &self.mmap[self.start..self.end]
     }
 }
 
-impl WriteBytes for Mp4Data {
-    fn write(&mut self, newdata: &[u8]) -> io::Result<()> {
-        let pos = self.pos as usize;
-        if pos < self.data.len() {
-            if pos + newdata.len() > self.data.len() {
-                self.data.resize(pos + newdata.len(), 0);
-            }
-            self.data[pos..pos + newdata.len()].copy_from_slice(newdata);
-        } else {
-            self.data.extend_from_slice(newdata);
-        }
-        self.pos += newdata.len();
-        Ok(())
-    }
-    fn skip(&mut self, amount: u64) -> io::Result<()> {
-        self.seek(self.pos as u64 + amount)
+impl std::fmt::Debug for DataRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{{ &file[{}..{}] }}", self.start, self.end)
     }
 }
 
-impl BoxBytes for Mp4Data {
-    fn pos(&self) -> u64 {
-        self.pos as u64
-    }
-    fn seek(&mut self, pos: u64) -> io::Result<()> {
-        let pos = pos as usize;
-        if pos > self.data.len() {
-            self.data.resize(pos, 0);
-        }
-        self.pos = pos;
-        Ok(())
-    }
-    fn size(&self) -> u64 {
-        self.data.len() as u64
-    }
-}
-
-// A writer that doesn't really write, it just counts the bytes
-// that it would write if it were a real writer. How much wood
-// would a woodchuck etc.
+// Count bytes, don't actually write.
 #[derive(Debug, Default)]
 pub(crate) struct CountBytes {
     pos:    usize,
@@ -316,7 +199,7 @@ impl WriteBytes for CountBytes {
 }
 
 impl BoxBytes for CountBytes {
-    fn pos(&self) -> u64 {
+    fn pos(&mut self) -> u64 {
         self.pos as u64
     }
     fn seek(&mut self, pos: u64) -> io::Result<()> {
@@ -335,8 +218,8 @@ impl<'a, B: ?Sized + ReadBytes + 'a> ReadBytes for Box<B> {
     fn skip(&mut self, amount: u64) -> io::Result<()> {
         B::skip(&mut *self, amount)
     }
-    fn left(&self) -> u64 {
-        B::left(&*self)
+    fn left(&mut self) -> u64 {
+        B::left(&mut *self)
     }
 }
 
@@ -350,8 +233,8 @@ impl<'a, B: ?Sized + WriteBytes + 'a> WriteBytes for Box<B> {
 }
 
 impl<'a, B: ?Sized + BoxBytes + 'a> BoxBytes for Box<B> {
-    fn pos(&self) -> u64 {
-        B::pos(&*self)
+    fn pos(&mut self) -> u64 {
+        B::pos(&mut *self)
     }
     fn seek(&mut self, pos: u64) -> io::Result<()> {
         B::seek(&mut *self, pos)
@@ -367,6 +250,9 @@ impl<'a, B: ?Sized + BoxBytes + 'a> BoxBytes for Box<B> {
     }
     fn fourcc(&self) -> FourCC {
         B::fourcc(&*self)
+    }
+    fn data_ref(&self, size: u64) -> io::Result<DataRef> {
+        B::data_ref(&*self, size)
     }
 }
 

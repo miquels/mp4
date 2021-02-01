@@ -6,7 +6,7 @@ use clap;
 use structopt::StructOpt;
 
 use mp4::io::Mp4File;
-use mp4::mp4box::MP4;
+use mp4::mp4box::{MP4, MP4Box};
 use mp4::debug;
 
 #[derive(StructOpt, Debug)]
@@ -90,6 +90,8 @@ pub struct DebugOpts {
 
 fn main() -> Result<()> {
 
+    MP4Box::check();
+
     let opts = MainOpts::from_args();
 
     let mut builder = env_logger::Builder::new();
@@ -111,24 +113,19 @@ fn main() -> Result<()> {
 }
 
 fn rewrite(opts: RewriteOpts) -> Result<()> {
-    let infh = File::open(&opts.input)?;
-
-    let mut reader = Mp4File::new(infh);
+    let mut reader = Mp4File::open(&opts.input)?;
     let mut mp4 = MP4::read(&mut reader)?;
 
     mp4::rewrite::movie_at_front(&mut mp4);
 
-    let outfh = File::create(&opts.output)?;
-    let writer = Mp4File::new_with_reader(outfh, reader.into_inner());
+    let writer = File::create(&opts.output)?;
     mp4.write(writer)?;
 
     Ok(())
 }
 
 fn mediainfo(opts: MediainfoOpts) -> Result<()> {
-    let infh = File::open(&opts.input)?;
-
-    let mut reader = Mp4File::new(infh);
+    let mut reader = Mp4File::open(&opts.input)?;
     let mp4 = MP4::read(&mut reader)?;
 
     let res = mp4::track::track_info(&mp4);
@@ -146,9 +143,7 @@ fn mediainfo(opts: MediainfoOpts) -> Result<()> {
 }
 
 fn dump(opts: DumpOpts) -> Result<()> {
-    let infh = File::open(&opts.input)?;
-
-    let mut reader = Mp4File::new(infh);
+    let mut reader = Mp4File::open(&opts.input)?;
     let mp4 = MP4::read(&mut reader)?;
     let movie = mp4.movie();
 
@@ -201,9 +196,7 @@ fn dump(opts: DumpOpts) -> Result<()> {
 }
 
 fn debug(opts: DebugOpts) -> Result<()> {
-    let infh = File::open(&opts.input)?;
-
-    let mut reader = Mp4File::new(infh);
+    let mut reader = Mp4File::open(&opts.input)?;
     let mp4 = MP4::read(&mut reader)?;
 
     if opts.debugtrack {

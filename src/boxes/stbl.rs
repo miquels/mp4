@@ -54,19 +54,19 @@ impl SampleTableBox {
     pub fn is_valid(&self) -> bool {
         let mut valid = true;
         if first_box!(&self.boxes, SampleDescriptionBox).is_none() {
-            error!("SampleTableBox: no SampleDescriptionBox present");
+            log::error!("SampleTableBox: no SampleDescriptionBox present");
             valid = false;
         }
         if first_box!(&self.boxes, TimeToSampleBox).is_none() {
-            error!("SampleTableBox: no TimeToSampleBox present");
+            log::error!("SampleTableBox: no TimeToSampleBox present");
             valid = false;
         }
         if first_box!(&self.boxes, SampleToChunkBox).is_none() {
-            error!("SampleTableBox: no SampleDescriptionBox present");
+            log::error!("SampleTableBox: no SampleDescriptionBox present");
             valid = false;
         }
         if first_box!(&self.boxes, ChunkOffsetBox).is_none() {
-            error!("SampleTableBox: no ChunkOffsetBox present");
+            log::error!("SampleTableBox: no ChunkOffsetBox present");
             valid = false;
         }
         valid

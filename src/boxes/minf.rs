@@ -34,7 +34,7 @@ impl MediaInformationBox {
     pub fn is_valid(&self) -> bool {
         let mut valid = true;
         if first_box!(&self.boxes, DataInformationBox).is_none() {
-            error!("MediaInformationBox: no DataInformationBox present");
+            log::error!("MediaInformationBox: no DataInformationBox present");
             valid = false;
         }
         match first_box!(&self.boxes, SampleTableBox) {
@@ -44,7 +44,7 @@ impl MediaInformationBox {
                 }
             },
             None => {
-                error!("MediaInformationBox: no SampleTableBox present");
+                log::error!("MediaInformationBox: no SampleTableBox present");
                 valid = false;
             }
         }

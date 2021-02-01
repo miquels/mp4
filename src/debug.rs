@@ -25,7 +25,7 @@ pub fn dump_track(mp4: &MP4, track_id: u32) {
     let track_idx = match movie.track_idx_by_id(track_id) {
         Some(idx) => idx,
         None => {
-            debug!("track id {}: no such track", track_id);
+            log::debug!("track id {}: no such track", track_id);
             return;
         }
     };

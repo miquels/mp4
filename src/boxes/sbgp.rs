@@ -9,7 +9,7 @@ def_box! {
         entries:        [SampleToGroupEntry, sized],
     },
     fourcc => "sbgp",
-    version => [],
+    version => [1],
     impls => [ boxinfo, debug ],
 }
 
