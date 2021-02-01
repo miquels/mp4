@@ -8,6 +8,7 @@ use structopt::StructOpt;
 use mp4::io::Mp4File;
 use mp4::mp4box::{MP4, MP4Box};
 use mp4::debug;
+use mp4::subtitle;
 
 #[derive(StructOpt, Debug)]
 #[structopt(setting = clap::AppSettings::VersionlessSubcommands)]
@@ -76,12 +77,22 @@ pub struct DebugOpts {
     #[structopt(short, long)]
     /// Select a track.
     pub track: Option<u32>,
+
+    #[structopt(short, long)]
+    /// Select a language.
+    pub language: Option<String>,
+
     #[structopt(short, long)]
     /// Show all the boxes.
     pub boxes: bool,
+
     #[structopt(short, long)]
     /// Debug a track.
     pub debugtrack: bool,
+
+    #[structopt(short, long)]
+    /// Dump track subtitle data.
+    pub subtitle: bool,
 
     /// Input filename.
     pub input: String,
@@ -205,6 +216,15 @@ fn debug(opts: DebugOpts) -> Result<()> {
             None => return Err(anyhow!("debug: debugtrack: need --track")),
         };
         debug::dump_track(&mp4, track);
+        return Ok(());
+    }
+
+    if opts.subtitle {
+        let lang = match opts.language {
+            Some(lang) => lang,
+            None => return Err(anyhow!("debug: subtitle: need --lang")),
+        };
+        subtitle::dump_subtitle(&mp4, lang.as_str());
         return Ok(());
     }
 

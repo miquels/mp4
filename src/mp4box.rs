@@ -84,6 +84,12 @@ impl BoxHeader {
         b
     }
 
+    pub(crate) fn peek(stream: &mut impl ReadBytes) -> io::Result<BoxHeader> {
+        let size = stream.left();
+        let mut data = stream.peek(size)?;
+        BoxHeader::read(&mut data)
+    }
+
     pub(crate) fn read_base(mut stream: &mut impl ReadBytes) -> io::Result<BoxHeader> {
         let size1 = u32::from_bytes(&mut stream)?;
         let fourcc = FourCC::from_bytes(&mut stream)?;
@@ -162,6 +168,13 @@ impl<'a> ReadBytes for BoxReader<'a> {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
         self.inner.read(amount)
+    }
+    #[inline]
+    fn peek(&mut self, amount: u64) -> io::Result<&[u8]> {
+        if self.inner.pos() + amount > self.maxsize {
+            return Err(io::ErrorKind::UnexpectedEof.into());
+        }
+        self.inner.peek(amount)
     }
     #[inline]
     fn skip(&mut self, amount: u64) -> io::Result<()> {
@@ -300,17 +313,26 @@ impl<'a> BoxBytes for BoxWriter<'a> {
     }
 }
 
-def_struct! {
-    /// Main entry point for ISOBMFF box structure.
-    MP4,
-    boxes:  [MP4Box]
+/// Main entry point for ISOBMFF box structure.
+pub struct MP4 {
+    pub(crate) data_ref:   DataRef,
+    pub(crate) boxes:  Vec<MP4Box>,
+}
+
+impl Debug for MP4 {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let mut dbg = f.debug_struct("MP4");
+        dbg.field("boxes", &self.boxes);
+        dbg.finish()
+    }
 }
 
 impl MP4 {
     /// Read a ISOBMFF box structure into memory.
     pub fn read<R: ReadBytes>(file: R) -> io::Result<MP4> {
+        let data_ref = file.data_ref(file.size())?;
         let boxes = read_boxes(file)?;
-        let mut mp4 = MP4{ boxes };
+        let mut mp4 = MP4{ boxes, data_ref };
         mp4.insert_file_type_box();
         Ok(mp4)
     }
@@ -340,6 +362,8 @@ impl MP4 {
         first_box_mut!(&mut self.boxes, FileTypeBox).unwrap()
     }
 
+    /// Check if the structure of the file is valid and contains all
+    /// the primary boxes.
     pub fn is_valid(&self) -> bool {
         let mut valid = true;
         match first_box!(&self.boxes, MovieBox) {
@@ -354,6 +378,10 @@ impl MP4 {
             }
         }
         valid
+    }
+
+    pub(crate) fn data_ref(&self, offset: u64, len: u64) -> &[u8] {
+        &self.data_ref[offset as usize .. (offset + len) as usize]
     }
 
     pub(crate) fn insert_file_type_box(&mut self) {

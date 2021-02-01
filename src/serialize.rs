@@ -19,8 +19,13 @@ use crate::types::FourCC;
 pub trait ReadBytes: BoxBytes {
     /// Read an exact number of bytes, return a reference to the buffer.
     fn read(&mut self, amount: u64) -> io::Result<&[u8]>;
+
+    /// Read an exact number of bytes, but don't advance position.
+    fn peek(&mut self, amount: u64) -> io::Result<&[u8]>;
+
     /// Skip some bytes in the input.
     fn skip(&mut self, amount: u64) -> io::Result<()>;
+
     /// How much data is left?
     fn left(&mut self) -> u64;
 }
@@ -84,6 +89,16 @@ impl ReadBytes for &[u8] {
         Ok(res)
     }
 
+    fn peek(&mut self, amount: u64) -> io::Result<&[u8]> {
+        let mut amount = amount as usize;
+        if amount > (*self).len() {
+            return Ok(&b""[..]);
+        }
+        if amount == 0 {
+            amount = self.len();
+        }
+        Ok(&self[0..amount])
+    }
     fn skip(&mut self, amount: u64) -> io::Result<()> {
         let mut amount = amount;
         if amount > (*self).len() as u64 {
@@ -102,6 +117,12 @@ impl ReadBytes for &[u8] {
 impl BoxBytes for &[u8] {
     fn data_ref(&self, _size: u64) -> io::Result<DataRef> {
         panic!("&[u8]: data reference unavailable");
+    }
+    fn size(&self) -> u64 {
+        self.len() as u64
+    }
+    fn pos(&mut self) -> u64 {
+        0
     }
 }
 

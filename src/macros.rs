@@ -276,10 +276,7 @@ macro_rules! impl_enum {
             fn from_bytes<R: ReadBytes>(mut stream: &mut R) -> io::Result<$enum> {
 
                 // Peek at the header.
-                let saved_pos = stream.pos();
-                let header = BoxHeader::read(stream)?;
-                stream.seek(saved_pos)?;
-
+                let header = BoxHeader::peek(stream)?;
                 log::debug!("header {:?}", header);
 
                 // If the version is too high, read it as a GenericBox.

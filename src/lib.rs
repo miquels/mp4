@@ -12,3 +12,4 @@ pub mod track;
 pub mod types;
 pub mod rewrite;
 pub(crate) mod sample_info;
+pub mod subtitle;

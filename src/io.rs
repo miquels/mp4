@@ -69,6 +69,16 @@ impl ReadBytes for Mp4File
     }
 
     #[inline]
+    fn peek(&mut self, amount: u64) -> io::Result<&[u8]> {
+        //println!("XXX DBG peek {}", amount);
+        if self.pos + amount > self.size {
+            return Err(io::Error::new(ErrorKind::UnexpectedEof, "tried to read past eof"));
+        }
+        let pos = self.pos as usize;
+        Ok(&self.mmap[pos..pos+amount as usize])
+    }
+
+    #[inline]
     fn skip(&mut self, amount: u64) -> io::Result<()> {
         if self.pos + amount > self.size {
             return Err(io::Error::new(ErrorKind::UnexpectedEof, "tried to seek past eof"));
@@ -214,6 +224,9 @@ impl BoxBytes for CountBytes {
 impl<'a, B: ?Sized + ReadBytes + 'a> ReadBytes for Box<B> {
     fn read(&mut self, amount: u64) -> io::Result<&[u8]> {
         B::read(&mut *self, amount)
+    }
+    fn peek(&mut self, amount: u64) -> io::Result<&[u8]> {
+        B::peek(&mut *self, amount)
     }
     fn skip(&mut self, amount: u64) -> io::Result<()> {
         B::skip(&mut *self, amount)
