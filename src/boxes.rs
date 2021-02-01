@@ -12,7 +12,6 @@ use crate::mp4box::{BoxHeader, GenericBox};
 def_boxes! {
     BaseMediaInformationHeaderBox, b"gmhd";
     CleanApertureBox, b"clap";
-    CompositionOffsetBox, b"ctts";
     DataEntryUrlBox, b"url ";
     DataEntryUrnBox, b"urn ";
     DataInformationBox, b"dinf";
@@ -33,12 +32,10 @@ def_boxes! {
     NameBox, b"name";
     NullMediaHeaderBox, b"nmhd";
     PixelAspectRatioBox, b"pasp";
-    SampleToChunkBox, b"stsc";
     SegmentTypeBox, b"styp";
     SoundMediaHeaderBox, b"smhd";
     SubtitleMediaHeaderBox, b"sthd";
     SyncSampleBox, b"stss";
-    TimeToSampleBox, b"stts";
     TrackExtendsBox, b"trex";
     TrackFragmentBaseMediaDecodeTimeBox, b"tfdt";
     TrackFragmentBox, b"traf";
@@ -61,6 +58,7 @@ def_boxes! {
 
     ChunkOffsetBox, b"stco" => stco;
     ChunkLargeOffsetBox, b"co64";
+    CompositionOffsetBox, b"ctts" => ctts;
 
     MediaBox, b"mdia" => mdia;
     MediaDataBox, b"mdat" => mdat;
@@ -76,11 +74,13 @@ def_boxes! {
     SampleSizeBox, b"stsz" => stsz;
     CompactSampleSizeBox, b"stz2" => stz2;
     SampleTableBox, b"stbl" => stbl;
+    SampleToChunkBox, b"stsc" => stsc;
     SampleToGroupBox, b"sbgp" => sbgp;
     SegmentIndexBox, b"sidx" => sidx;
     TrackBox, b"trak" => trak;
     TrackFragmentHeaderBox, b"tfhd" => tfhd;
     TrackRunBox, b"trun" => trun;
+    TimeToSampleBox, b"stts" => stts;
 
     Tx3gTextSampleEntry, b"tx3g";
     Tx3gFontTableBox, b"ftab";

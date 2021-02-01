@@ -268,37 +268,10 @@ def_box! {
 }
 
 def_box! {
-    TimeToSampleBox {
-        entries:        [TimeToSampleEntry, sized],
-    },
-    fourcc => "stts",
-    version => [0],
-    impls => [ boxinfo, debug, fromtobytes, fullbox ],
-}
-
-def_box! {
     SyncSampleBox {
         entries:        [u32, sized],
     },
     fourcc => "stss",
-    version => [0],
-    impls => [ boxinfo, debug, fromtobytes, fullbox ],
-}
-
-def_box! {
-    CompositionOffsetBox {
-        entries:        [CompositionOffsetEntry, sized],
-    },
-    fourcc => "ctts",
-    version => [1, entries],
-    impls => [ boxinfo, debug, fromtobytes, fullbox ],
-}
-
-def_box! {
-    SampleToChunkBox {
-        entries:        [SampleToChunkEntry, sized],
-    },
-    fourcc => "stsc",
     version => [0],
     impls => [ boxinfo, debug, fromtobytes, fullbox ],
 }

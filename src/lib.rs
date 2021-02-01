@@ -11,3 +11,4 @@ pub mod boxes;
 pub mod track;
 pub mod types;
 pub mod rewrite;
+pub mod sample_info;

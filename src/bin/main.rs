@@ -160,7 +160,7 @@ fn dump(opts: DumpOpts) -> Result<()> {
     let mut handle = BufWriter::with_capacity(128000, stdout.lock());
 
     let stbl = track.media().media_info().sample_table();
-    let mut stsc_iter = stbl.sample_to_chunk_iter();
+    let mut stsc_iter = stbl.sample_to_chunk().iter();
     let chunk_offset = stbl.chunk_offset();
 
     // Can be empty.

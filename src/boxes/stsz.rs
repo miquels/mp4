@@ -13,6 +13,42 @@ def_box! {
     impls => [ boxinfo, debug, fullbox ],
 }
 
+impl SampleSizeBox {
+    pub fn iter(&self) -> SampleSizeIterator<'_> {
+        SampleSizeIterator {
+            size:   self.size,
+            count:  self.count,
+            entries: &self.entries,
+            index: 0,
+        }
+    }
+}
+
+pub struct SampleSizeIterator<'a> {
+    size:       u32,
+    count:      u32,
+    entries:    &'a [u32],
+    index:      usize,
+}
+
+impl<'a> Iterator for SampleSizeIterator<'a> {
+    type Item = u32;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index == self.count as usize {
+            return None;
+        }
+        if self.entries.len() == 0 {
+            Some(self.size)
+        } else {
+            let size = self.entries[self.index];
+            self.index += 1;
+            Some(size)
+        }
+    }
+}
+
 impl FromBytes for SampleSizeBox {
     fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<SampleSizeBox> {
         let mut reader = BoxReader::new(stream)?;
