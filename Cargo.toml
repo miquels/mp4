@@ -4,6 +4,14 @@ version = "0.1.0"
 authors = ["Miquel van Smoorenburg <mikevs@xs4all.net>"]
 edition = "2018"
 
+[lib]
+name = "mp4"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mp4"
+path = "src/main.rs"
+
 # Include debug info in release builds.
 [profile.release]
 debug = true
