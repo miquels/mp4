@@ -1,5 +1,5 @@
 use crate::mp4box::MP4;
-use crate::sample_info::{SampleInfo, sample_info_iter};
+use crate::boxes::SampleInfo;
 
 /// Dump sample information.
 pub fn dump_track(mp4: &MP4, track_id: u32) {
@@ -15,7 +15,8 @@ pub fn dump_track(mp4: &MP4, track_id: u32) {
         }
     };
 
-    let samples = sample_info_iter(movie.tracks()[track_idx]);
+    let trak = movie.tracks()[track_idx];
+    let samples = trak.sample_info_iter();
     let mut count = 0;
     let timescale = samples.timescale();
 

@@ -2,6 +2,10 @@ use std::io;
 
 use crate::boxes::prelude::*;
 use crate::boxes::{TrackHeaderBox, MediaBox, EditBox, EditListBox};
+use crate::sample_info::sample_info_iter;
+
+#[doc(inline)]
+pub use crate::sample_info::{SampleInfo, SampleInfoIterator};
 
 def_box! {
     /// 8.3.1 Track Box (ISO/IEC 14496-12:2015(E))
@@ -94,6 +98,14 @@ impl TrackBox {
             },
         }
         valid
+    }
+
+    /// Return an iterator over the SampleTableBox of this track.
+    ///
+    /// It iterates over multiple tables within the SampleTableBox, and
+    /// for each sample returns a SampleInfo.
+    pub fn sample_info_iter(&self) -> SampleInfoIterator<'_> {
+        sample_info_iter(self)
     }
 }
 
