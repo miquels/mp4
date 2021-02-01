@@ -268,15 +268,6 @@ def_box! {
 }
 
 def_box! {
-    SyncSampleBox {
-        entries:        [u32, sized],
-    },
-    fourcc => "stss",
-    version => [0],
-    impls => [ boxinfo, debug, fromtobytes, fullbox ],
-}
-
-def_box! {
     SubtitleMediaHeaderBox {
     },
     fourcc => "sthd",

@@ -35,7 +35,6 @@ def_boxes! {
     SegmentTypeBox, b"styp";
     SoundMediaHeaderBox, b"smhd";
     SubtitleMediaHeaderBox, b"sthd";
-    SyncSampleBox, b"stss";
     TrackExtendsBox, b"trex";
     TrackFragmentBaseMediaDecodeTimeBox, b"tfdt";
     TrackFragmentBox, b"traf";
@@ -77,6 +76,7 @@ def_boxes! {
     SampleToChunkBox, b"stsc" => stsc;
     SampleToGroupBox, b"sbgp" => sbgp;
     SegmentIndexBox, b"sidx" => sidx;
+    SyncSampleBox, b"stss" => stss;
     TrackBox, b"trak" => trak;
     TrackFragmentHeaderBox, b"tfhd" => tfhd;
     TrackRunBox, b"trun" => trun;
