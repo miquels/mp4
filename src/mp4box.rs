@@ -1,3 +1,4 @@
+//! Traits and `MP4` struct.
 use std::fmt::Debug;
 use std::io;
 
@@ -44,7 +45,7 @@ pub trait FullBox {
 //
 
 #[derive(Debug, Clone)]
-pub struct BoxHeader {
+pub(crate) struct BoxHeader {
     pub(crate) size:        u64,
     pub(crate) fourcc:      FourCC,
     pub(crate) version:     Option<u8>,
@@ -120,7 +121,7 @@ impl BoxHeader {
 }
 
 /// Limited reader that reads no further than the box size.
-pub struct BoxReader<'a> {
+pub(crate) struct BoxReader<'a> {
     pub(crate) header: BoxHeader,
     maxsize:           u64,
     // We box it, since a BoxReader might contain a BoxReader.
@@ -226,7 +227,7 @@ impl<'a> BoxBytes for BoxReader<'a> {
 }
 
 /// Writes the box header.
-pub struct BoxWriter<'a> {
+pub(crate) struct BoxWriter<'a> {
     offset:    u64,
     vflags:    u32,
     inner:     Box<dyn WriteBytes + 'a>,

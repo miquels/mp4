@@ -518,47 +518,6 @@ impl ToBytes for UnknownDescriptor {
     }
 }
 
-//
-//
-// Helpers.
-//
-//
-
-/// Pascal string. 1 byte of length followed by string itself.
-///
-/// Note that the length does not include the length byte itself.
-#[derive(Debug, Default)]
-pub struct PString(String);
-
-impl FromBytes for PString {
-    fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<PString> {
-        let len = u8::from_bytes(stream)? as u64;
-        let data = if len > 0 {
-            stream.read(len)?
-        } else {
-            b""
-        };
-        if let Ok(s) = std::str::from_utf8(data) {
-            return Ok(PString(s.to_string()));
-        }
-        // If it's not utf-8, mutilate the data.
-        let mut s = String::new();
-        for d in data {
-            s.push(std::cmp::min(*d, 127) as char);
-        }
-        Ok(PString(s))
-    }
-    fn min_size() -> usize { 0 }
-}
-
-impl ToBytes for PString {
-    fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
-        let len = std::cmp::min(self.0.len(), 254);
-        (len as u8).to_bytes(stream)?;
-        stream.write(self.0[..len].as_bytes())
-    }
-}
-
 // Helper to read any trailing data.
 fn trailing_data<R: ReadBytes>(stream: &mut R, start: u64, size: u32) -> io::Result<Data> {
     let done = stream.pos() - start;

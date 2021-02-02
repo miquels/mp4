@@ -23,107 +23,12 @@ def_box! {
 }
 
 def_box! {
-    /// 8.3.2 Track Header Box
-    ///
-    /// Don't forget to set volume to default 0x100 when creating this box.
-    TrackHeaderBox {
-        flags:      TrackFlags,
-        cr_time:    Time,
-        mod_time:   Time,
-        track_id:   u32,
-        skip:       4,
-        duration:   Duration_,
-        skip:       8,
-        layer:      u16,
-        alt_group:  u16,
-        volume:     FixedFloat8_8,
-        skip :      2,
-        matrix:     Matrix,
-        width:      FixedFloat16_16,
-        height:     FixedFloat16_16,
-    },
-    fourcc => "tkhd",
-    version => [1, flags, cr_time, mod_time, duration],
-    impls => [ boxinfo, debug, fromtobytes, fullbox ],
-}
-
-def_box! {
-    EditBox {
-        boxes:  [EditListBox],
-    },
-    fourcc => "edts",
-    version => [],
-    impls => [ basebox, boxinfo, debug, fromtobytes ],
-}
-
-def_box! {
-    EditListBox {
-        entries:    [EditListEntry, sized],
-    },
-    fourcc => "elst",
-    version => [1, entries ],
-    impls => [ boxinfo, debug, fromtobytes, fullbox ],
-}
-
-def_box! {
     BaseMediaInformationHeaderBox {
         boxes:      [MP4Box],
     },
     fourcc => "gmhd",
     version => [],
     impls => [ basebox, boxinfo, debug, fromtobytes ],
-}
-
-def_box! {
-    DataInformationBox {
-        boxes:      [MP4Box],
-    },
-    fourcc => "dinf",
-    version => [],
-    impls => [ basebox, boxinfo, debug, fromtobytes ],
-}
-
-def_box! {
-    // XXX TODO something with version inheritance.
-    DataReferenceBox {
-        flags:          DataEntryFlags,
-        entries:        [MP4Box, sized],
-    },
-    fourcc => "dref",
-    version => [0, flags],
-    impls => [ boxinfo, debug, fromtobytes, fullbox ],
-}
-
-def_box! {
-    DataEntryUrlBox {
-        flags:          DataEntryFlags,
-        location:       ZString,
-    },
-    fourcc => "url ",
-    version => [0, flags],
-    impls => [ boxinfo, debug, fromtobytes, fullbox ],
-}
-
-def_box! {
-    DataEntryUrnBox {
-        flags:          DataEntryFlags,
-        name:           ZString,
-        location:       ZString,
-    },
-    fourcc => "urn ",
-    version => [0, flags],
-    impls => [ boxinfo, debug, fromtobytes, fullbox ],
-}
-
-def_box! {
-    VideoMediaInformationBox {
-        flags:          VideoMediaHeaderFlags,
-        graphics_mode:  u16,
-        opcolor:        OpColor,
-    },
-    fourcc => "vmhd",
-    version => [0, flags],
-    impls => [ boxinfo, debug, fromtobytes, fullbox ],
 }
 
 def_box! {

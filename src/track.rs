@@ -1,3 +1,5 @@
+//! Tracks.
+//!
 use std::fmt::{self, Debug, Display};
 use std::time::Duration;
 
@@ -6,6 +8,8 @@ use serde::Serialize;
 use crate::boxes::*;
 use crate::mp4box::{BoxInfo, MP4};
 use crate::types::*;
+
+pub use crate::sample_info::*;
 
 /// General track information.
 #[derive(Debug, Default, Serialize)]
@@ -18,6 +22,7 @@ pub struct TrackInfo {
     pub specific_info:  SpecificTrackInfo,
 }
 
+/// Track-type specific info.
 #[derive(Serialize)]
 #[serde(untagged)]
 pub enum SpecificTrackInfo {
@@ -57,6 +62,8 @@ impl Display for SpecificTrackInfo {
         }
     }
 }
+
+/// Audio track details.
 #[derive(Debug, Default, Serialize)]
 pub struct AudioTrackInfo {
     pub codec_id:   String,
@@ -76,6 +83,7 @@ impl Display for AudioTrackInfo {
     }
 }
 
+/// Video track details.
 #[derive(Debug, Default, Serialize)]
 pub struct VideoTrackInfo {
     pub codec_id:   String,
@@ -92,6 +100,7 @@ impl Display for VideoTrackInfo {
     }
 }
 
+/// Subtitle track details.
 #[derive(Debug, Default, Serialize)]
 pub struct SubtitleTrackInfo {
     pub codec_id:   String,
@@ -108,6 +117,7 @@ impl Display for SubtitleTrackInfo {
     }
 }
 
+/// Unknown track type.
 #[derive(Debug, Default, Serialize)]
 pub struct UnknownTrackInfo {
     pub codec_id:   String,

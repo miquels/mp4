@@ -84,8 +84,6 @@ def_box! {
     impls => [ basebox, boxinfo, debug, fromtobytes ],
 }
 
-use super::mp4a::PString;
-
 def_struct! {
     /// 5.16. Font Record (ETSI TS 126 245 V10.0.0)
     Tx3gFontRecord,
@@ -172,55 +170,5 @@ def_box! {
     fourcc => "href",
     version => [],
     impls => [basebox, boxinfo, debug, fromtobytes ],
-}
-
-
-/// Pascal16 string. 2 bytes of length followed by string itself.
-///
-/// Note that the length does not include the length byte itself.
-#[derive(Debug, Default)]
-pub struct P16String(String);
-
-impl P16String {
-    pub fn as_str(&self) -> &str {
-        self.0.as_str()
-    }
-}
-
-impl std::ops::Deref for P16String {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        self.0.as_str()
-    }
-}
-
-impl FromBytes for P16String {
-    fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<P16String> {
-        let len = u16::from_bytes(stream)? as u64;
-        let data = if len > 0 {
-            stream.read(len)?
-        } else {
-            b""
-        };
-        if let Ok(s) = std::str::from_utf8(data) {
-            return Ok(P16String(s.to_string()));
-        }
-        // If it's not utf-8, mutilate the data.
-        let mut s = String::new();
-        for d in data {
-            s.push(std::cmp::min(*d, 127) as char);
-        }
-        Ok(P16String(s))
-    }
-    fn min_size() -> usize { 0 }
-}
-
-impl ToBytes for P16String {
-    fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
-        let len = std::cmp::min(self.0.len(), 254);
-        (len as u8).to_bytes(stream)?;
-        stream.write(self.0[..len].as_bytes())
-    }
 }
 

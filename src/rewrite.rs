@@ -1,3 +1,5 @@
+//! Track rewriting / reshuffling.
+//!
 use crate::mp4box::MP4;
 use crate::boxes::MP4Box;
 use crate::io::CountBytes;

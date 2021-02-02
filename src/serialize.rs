@@ -285,7 +285,7 @@ where
 ///     ....
 /// }
 /// ```
-#[macro_export]
+//#[macro_export]
 macro_rules! def_struct {
     // minimum size for a certain type. we hard-code u* here.
     (@min_size u8) => { 1 };

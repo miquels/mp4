@@ -1,8 +1,8 @@
-/// Definitions of types used in mp4 boxes.
-///
-/// This module contains fundamental types used in boxes (such as Time,
-/// ZString, IsoLanguageCode, etc).
-///
+//! Definitions of types used in mp4 boxes.
+//!
+//! This module contains fundamental types used in boxes (such as Time,
+//! ZString, IsoLanguageCode, etc).
+//!
 use std::convert::TryInto;
 use std::fmt::{Debug, Display, Write};
 use std::io;
@@ -130,7 +130,7 @@ impl Debug for Uuid {
     }
 }
 
-/// Just some data.
+/// Basically a blob of data.
 #[derive(Default)]
 pub struct Data(pub Vec<u8>);
 
@@ -190,6 +190,7 @@ impl Debug for Data {
     }
 }
 
+/// 32 bits in boxes with version 0, and 64 bits in boxes with version >= 1.
 #[derive(Clone, Copy)]
 pub struct VersionSizedUint(pub u64);
 def_from_to_bytes_versioned!(VersionSizedUint);
@@ -242,8 +243,9 @@ impl Debug for Time {
     }
 }
 
-/// FourCC is the 4-byte name of any atom. Usually this is four bytes
-/// of ASCII characters, but it could be anything.
+/// FourCC is the 4-byte name of any box.
+///
+/// Usually this is four bytes of ASCII characters, but it could be anything.
 #[derive(Clone, Copy, Default)]
 pub struct FourCC(pub u32);
 def_from_to_bytes_newtype!(FourCC, u32);
@@ -317,6 +319,8 @@ impl From<&[u8]> for FourCC {
     }
 }
 
+/// Language code ('eng', 'dut', 'fra', etc).
+///
 /// A 16-bit value containing 3 5-bit values that are interpreted as letters,
 /// so that we get a 3-character county code. Such as "eng", "ger", "dut" etc.
 #[derive(Clone, Copy, Serialize)]
@@ -511,7 +515,7 @@ macro_rules! impl_flags {
 
 macro_rules! impl_flags_debug {
     ($type:ty, debug) => {
-        impl Debug for $type {
+        impl std::fmt::Debug for $type {
             fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
                 write!(f, "Flags({:#x})", self.0)
             }
@@ -526,159 +530,6 @@ impl_flags!(
     Flags,
     debug
 );
-
-impl_flags!(
-    /// Always 0x01.
-    VideoMediaHeaderFlags,
-    debug
-);
-
-impl Default for VideoMediaHeaderFlags {
-    fn default() -> Self {
-        Self(0x01)
-    }
-}
-
-impl_flags!(
-    /// Track: enabled/in_movie/preview
-    TrackFlags
-);
-
-impl TrackFlags {
-    pub fn get_enabled(&self) -> bool {
-        self.get(0)
-    }
-    pub fn set_enabled(&mut self, on: bool) {
-        self.set(0, on)
-    }
-    pub fn get_in_movie(&self) -> bool {
-        self.get(1)
-    }
-    pub fn set_in_movie(&mut self, on: bool) {
-        self.set(1, on)
-    }
-    pub fn get_in_preview(&self) -> bool {
-        self.get(2)
-    }
-    pub fn set_in_preview(&mut self, on: bool) {
-        self.set(2, on)
-    }
-    pub fn get_in_poster(&self) -> bool {
-        self.get(3)
-    }
-    pub fn set_in_poster(&mut self, on: bool) {
-        self.set(3, on)
-    }
-}
-
-impl Debug for TrackFlags {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let mut v = vec!["["];
-        if self.get_enabled() {
-            v.push("enabled");
-        }
-        if self.get_in_movie() {
-            v.push("in_movie");
-        }
-        if self.get_in_preview() {
-            v.push("in_preview");
-        }
-        if self.get_in_poster() {
-            v.push("in_poster");
-        }
-        v.push("]");
-        write!(f, "TrackFlags({})", v.join(" "))
-    }
-}
-
-impl_flags!(
-    /// 0x01 if the data is in the same file (default).
-    DataEntryFlags
-);
-
-impl DataEntryFlags {
-    pub fn get_in_same_file(&self) -> bool {
-        self.get(0)
-    }
-    pub fn set_in_same_file(&mut self, on: bool) {
-        self.set(0, on)
-    }
-}
-
-impl Debug for DataEntryFlags {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let mut v = vec!["["];
-        if self.get_in_same_file() {
-            v.push("in_same_file");
-        }
-        v.push("]");
-        write!(f, "DataEntryFlags({})", v.join(" "))
-    }
-}
-
-impl Default for DataEntryFlags {
-    fn default() -> Self {
-        Self(0x01)
-    }
-}
-
-// self.movie.and_then(|m| self.boxes[m as usize].downcast_ref::<Movie>())
-pub struct IndexU32(u32);
-impl IndexU32 {
-    pub fn get(self) -> Option<u32> {
-        match self.0 {
-            0xffffffff => None,
-            some => Some(some),
-        }
-    }
-    pub fn set(&mut self, val: Option<u32>) {
-        self.0 = val.unwrap_or(0xffffffff);
-    }
-}
-
-/// Composition offset entry.
-#[derive(Debug, Default, Clone)]
-pub struct CompositionOffsetEntry {
-    pub count:  u32,
-    pub offset: i32,
-}
-
-impl FromBytes for CompositionOffsetEntry {
-    // NOTE: This implementation is not _entirely_ correct. If in a
-    // version 0 entry the offset >= 2^31 it breaks horribly.
-    fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<Self> {
-        let count = u32::from_bytes(stream)?;
-        let offset = if stream.version() == 0 {
-            let offset = u32::from_bytes(stream)?;
-            std::cmp::min(offset, 0x7fffffff) as i32
-        } else {
-            i32::from_bytes(stream)?
-        };
-        Ok(CompositionOffsetEntry { count, offset })
-    }
-
-    fn min_size() -> usize {
-        8
-    }
-}
-
-impl ToBytes for CompositionOffsetEntry {
-    fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
-        self.count.to_bytes(stream)?;
-        self.offset.to_bytes(stream)?;
-        Ok(())
-    }
-}
-
-impl FullBox for CompositionOffsetEntry {
-    fn version(&self) -> Option<u8> {
-        if self.offset < 0 {
-            Some(1)
-        } else {
-            None
-        }
-    }
-}
 
 /// 8.8.3.1 Sample Flags (ISO/IEC 14496-12:2015(E))
 ///
@@ -972,6 +823,7 @@ fixed_float!(
     u32,
     16
 );
+
 fixed_float!(
     /// 16 bits 8.8 fixed float.
     FixedFloat8_8,
@@ -979,87 +831,101 @@ fixed_float!(
     8
 );
 
-def_struct! {
-    /// OpColor
-    OpColor,
-        red:    u16,
-        green:  u16,
-        blue:   u16,
+/// Pascal string. 1 byte of length followed by string itself.
+///
+/// Note that the length does not include the length byte itself.
+#[derive(Debug, Default)]
+pub struct PString(String);
+
+impl PString {
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
 }
 
-#[derive(Debug)]
-pub struct EditListEntry {
-    pub segment_duration:   u64,
-    pub media_time:     i64,
-    pub media_rate: u16,
+impl std::ops::Deref for PString {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_str()
+    }
 }
 
-impl FromBytes for EditListEntry {
-    fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<Self> {
-        let entry = if stream.version() == 0 {
-            EditListEntry {
-                segment_duration:   u32::from_bytes(stream)? as u64,
-                media_time:         i32::from_bytes(stream)? as i64,
-                media_rate:         u16::from_bytes(stream)?,
-            }
+impl FromBytes for PString {
+    fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<PString> {
+        let len = u8::from_bytes(stream)? as u64;
+        let data = if len > 0 {
+            stream.read(len)?
         } else {
-            EditListEntry {
-                segment_duration:   u64::from_bytes(stream)?,
-                media_time:         i64::from_bytes(stream)?,
-                media_rate:         u16::from_bytes(stream)?,
-            }
+            b""
         };
-        stream.skip(2)?;
-        Ok(entry)
+        if let Ok(s) = std::str::from_utf8(data) {
+            return Ok(PString(s.to_string()));
+        }
+        // If it's not utf-8, mutilate the data.
+        let mut s = String::new();
+        for d in data {
+            s.push(std::cmp::min(*d, 127) as char);
+        }
+        Ok(PString(s))
     }
-
-    fn min_size() -> usize {
-        12
-    }
+    fn min_size() -> usize { 0 }
 }
 
-impl ToBytes for EditListEntry {
+impl ToBytes for PString {
     fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
-        if stream.version() == 0 {
-            (self.segment_duration as u32).to_bytes(stream)?;
-            (self.media_time as i32).to_bytes(stream)?;
-        } else {
-            self.segment_duration.to_bytes(stream)?;
-            self.media_time.to_bytes(stream)?;
-        }
-        self.media_rate.to_bytes(stream)?;
-        0u16.to_bytes(stream)?;
-        Ok(())
+        let len = std::cmp::min(self.0.len(), 254);
+        (len as u8).to_bytes(stream)?;
+        stream.write(self.0[..len].as_bytes())
     }
 }
 
-impl FullBox for EditListEntry {
-    fn version(&self) -> Option<u8> {
-        if self.segment_duration > 0xffffffff ||
-           self.media_time < -0x7fffffff ||
-           self.media_time > 0x7fffffff {
-            Some(1)
-        } else {
-            Some(0)
-        }
+/// Pascal16 string. 2 bytes of length followed by string itself.
+///
+/// Note that the length does not include the length byte itself.
+#[derive(Debug, Default)]
+pub struct P16String(String);
+
+impl P16String {
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
     }
 }
 
-def_struct! {
-    #[derive(Default, Clone)]
-    TimeToSampleEntry,
-        count:  u32,
-        delta:  u32,
+impl std::ops::Deref for P16String {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_str()
+    }
 }
 
-def_struct! { SampleToChunkEntry,
-    first_chunk:                u32,
-    samples_per_chunk:          u32,
-    sample_description_index:   u32,
+impl FromBytes for P16String {
+    fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<P16String> {
+        let len = u16::from_bytes(stream)? as u64;
+        let data = if len > 0 {
+            stream.read(len)?
+        } else {
+            b""
+        };
+        if let Ok(s) = std::str::from_utf8(data) {
+            return Ok(P16String(s.to_string()));
+        }
+        // If it's not utf-8, mutilate the data.
+        let mut s = String::new();
+        for d in data {
+            s.push(std::cmp::min(*d, 127) as char);
+        }
+        Ok(P16String(s))
+    }
+    fn min_size() -> usize { 0 }
 }
 
-def_struct! { SampleToGroupEntry,
-    sample_count:               u32,
-    group_description_index:    u32,
+impl ToBytes for P16String {
+    fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
+        let len = std::cmp::min(self.0.len(), 254);
+        (len as u8).to_bytes(stream)?;
+        stream.write(self.0[..len].as_bytes())
+    }
 }
 

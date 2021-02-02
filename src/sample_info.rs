@@ -1,19 +1,26 @@
+//! Iterate over all samples in a track.
 use crate::boxes::*;
+
+use crate::boxes::stsz::SampleSizeIterator;
+use crate::boxes::stts::TimeToSampleIterator;
+use crate::boxes::stsc::SampleToChunkIterator;
+use crate::boxes::ctts::CompositionOffsetIterator;
+use crate::boxes::stss::SyncSampleIterator;
 
 /// Information about one sample.
 #[derive(Default, Debug)]
 pub struct SampleInfo {
-    // File position.
+    /// File position.
     pub fpos:    u64,
-    // Size.
+    /// Size.
     pub size:   u32,
-    // Decode time.
+    /// Decode time.
     pub dtime:  u64,
-    // Composition time delta.
+    /// Composition time delta.
     pub ctime_d:  i32,
-    // is it a sync sample
+    /// is it a sync sample
     pub is_sync:    bool,
-    // what chunkno is it in.
+    /// what chunkno is it in.
     pub chunkno:  u32,
 }
 

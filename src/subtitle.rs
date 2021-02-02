@@ -7,8 +7,11 @@ use std::str::FromStr;
 use crate::boxes::*;
 use crate::mp4box::MP4;
 use crate::serialize::FromBytes;
+use crate::track::SampleInfo;
 use crate::mp4box::BoxInfo;
+use crate::boxes::sbtl::Tx3GTextSample;
 
+/// Subtitle format.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
     Vtt,
@@ -29,6 +32,7 @@ impl FromStr for Format {
     }
 }
 
+/// Find the first subtitle track with a certain language.
 pub fn subtitle_track_bylang<'a>(mp4: &'a MP4, language: &str) -> Option<&'a TrackBox> {
     let movie = mp4.movie();
 
@@ -59,6 +63,7 @@ pub fn subtitle_track_bylang<'a>(mp4: &'a MP4, language: &str) -> Option<&'a Tra
     None
 }
 
+#[doc(hidden)]
 pub fn subtitle_dump(mp4: &MP4, track: &TrackBox) {
     let mut count = 0;
     for sample in track.sample_info_iter() {
@@ -106,6 +111,7 @@ fn cue(format: Format, _sample: SampleInfo, subt: Tx3GTextSample, count: u32, st
     cue
 }
 
+/// Extract a subtitle track into VTT / SRT or 3GPP.
 pub fn subtitle_extract(mp4: &MP4, track: &TrackBox, format: Format, mut output: impl Write) -> io::Result<()> {
     let iter = track.sample_info_iter();
     let timescale = iter.timescale();

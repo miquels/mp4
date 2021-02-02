@@ -25,6 +25,14 @@ impl TimeToSampleBox {
     }
 }
 
+def_struct! {
+    /// Entry in TimeToSampleBox.
+    #[derive(Default, Clone)]
+    TimeToSampleEntry,
+        count:  u32,
+        delta:  u32,
+}
+
 pub struct TimeToSampleIterator<'a> {
     entries:    &'a [TimeToSampleEntry],
     entry:      TimeToSampleEntry,

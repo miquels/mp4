@@ -1,5 +1,7 @@
+//! Debug helpers.
+//!
 use crate::mp4box::MP4;
-use crate::boxes::SampleInfo;
+use crate::track::SampleInfo;
 
 /// Dump sample information.
 pub fn dump_track(mp4: &MP4, track_id: u32) {

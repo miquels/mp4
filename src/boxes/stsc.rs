@@ -34,6 +34,14 @@ impl SampleToChunkBox {
     }
 }
 
+def_struct! {
+    /// Entry in SampleToChunkBox.
+    SampleToChunkEntry,
+        first_chunk:                u32,
+        samples_per_chunk:          u32,
+        sample_description_index:   u32,
+}
+
 /// Iterator over the SampleToChunk table.
 pub struct SampleToChunkIterator<'a> {
     entries:    &'a [SampleToChunkEntry],
@@ -45,7 +53,7 @@ pub struct SampleToChunkIterator<'a> {
 
 /// Value returned by SampleToChunkIterator.
 ///
-/// Note that the `chunk' and `sample_description_index' values
+/// Note that the `chunk` and `sample_description_index` values
 /// here are 0-based, *not* 1-based as in the ISO/IEC 14496-12 spec.
 pub struct SampleToChunkIterEntry {
     pub chunk:  u32,

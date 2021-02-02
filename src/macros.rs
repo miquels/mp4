@@ -16,7 +16,7 @@ macro_rules! def_boxes {
         $(
             $(
                 pub(crate) mod $mod;
-                pub(crate) use self::$mod::*;
+                pub use self::$mod::*;
             )?
         )+
 

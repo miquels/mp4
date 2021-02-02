@@ -1,3 +1,5 @@
+//! File read/write.
+//!
 use std::fs;
 use std::io::{self, ErrorKind};
 use std::sync::Arc;
@@ -7,6 +9,9 @@ use memmap::{Mmap, MmapOptions};
 use crate::serialize::{BoxBytes, ReadBytes, WriteBytes, ToBytes};
 use crate::types::FourCC;
 
+/// Reads a MP4 file.
+///
+/// Implements `ReadBytes`, so can be passed to `MP4::read`.
 pub struct Mp4File {
     mmap:  Arc<Mmap>,
     file:  fs::File,
@@ -15,29 +20,8 @@ pub struct Mp4File {
     input_filename: Option<String>,
 }
 
-/*
-pub enum ByteData {
-    Mmap {
-        Arc<Mmap>),
-        offset: u64,
-        len:    u64,
-    },
-    Vec(Arc<Vec<u8>>),
-}
-
-pub struct Chunk {
-    data:       ByteData,
-    is_mdat:    bool,
-}
-
-pub struct MdatSource {
-    file:   fs::File,
-    offset: u64,
-    len:    u64,
-}
-*/
-
 impl Mp4File {
+    /// Open an mp4 file.
     pub fn open(path: impl AsRef<str>) -> io::Result<Mp4File> {
         let path = path.as_ref();
         let file = fs::File::open(path)?;
@@ -52,6 +36,7 @@ impl Mp4File {
         })
     }
 
+    /// Get the `File` out again.
     pub fn into_inner(self) -> fs::File {
         self.file
     }

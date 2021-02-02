@@ -59,3 +59,10 @@ impl FullBox for SampleToGroupBox {
     }
 }
 
+def_struct! {
+    /// Entry in SampleToGroupBox.
+    SampleToGroupEntry,
+        sample_count:               u32,
+        group_description_index:    u32,
+}
+

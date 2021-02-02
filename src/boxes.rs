@@ -1,3 +1,8 @@
+//! All the boxes we known.
+//!
+//! This module does not only contain boxes, but also the types
+//! that are used in the boxes, and helper types like iterators.
+//!
 use std::fmt::Debug;
 use std::io;
 
@@ -12,12 +17,6 @@ use crate::mp4box::{BoxHeader, GenericBox};
 def_boxes! {
     BaseMediaInformationHeaderBox, b"gmhd";
     CleanApertureBox, b"clap";
-    DataEntryUrlBox, b"url ";
-    DataEntryUrnBox, b"urn ";
-    DataInformationBox, b"dinf";
-    DataReferenceBox, b"dref";
-    EditBox, b"edts";
-    EditListBox, b"elst";
     ExtendedLanguageBox, b"elng";
     FileTypeBox, b"ftyp";
     HandlerBox, b"hdlr";
@@ -38,10 +37,8 @@ def_boxes! {
     TrackExtendsBox, b"trex";
     TrackFragmentBaseMediaDecodeTimeBox, b"tfdt";
     TrackFragmentBox, b"traf";
-    TrackHeaderBox, b"tkhd";
     TrackSelectionBox, b"tsel";
     UserDataBox, b"udta";
-    VideoMediaInformationBox, b"vmhd";
 
     // Below are boxes that are defined manually in boxes/ *.rs
     AvcSampleEntry, b"avc1" => avc1;
@@ -58,6 +55,14 @@ def_boxes! {
     ChunkOffsetBox, b"stco" => stco;
     ChunkLargeOffsetBox, b"co64";
     CompositionOffsetBox, b"ctts" => ctts;
+
+    DataInformationBox, b"dinf" => dinf;
+    DataEntryUrlBox, b"url ";
+    DataEntryUrnBox, b"urn ";
+    DataReferenceBox, b"dref";
+
+    EditBox, b"edts" => edts;
+    EditListBox, b"elst";
 
     MediaBox, b"mdia" => mdia;
     MediaDataBox, b"mdat" => mdat;
@@ -78,11 +83,12 @@ def_boxes! {
     SegmentIndexBox, b"sidx" => sidx;
     SyncSampleBox, b"stss" => stss;
     TrackBox, b"trak" => trak;
+    TrackHeaderBox, b"tkhd" => tkhd;
     TrackFragmentHeaderBox, b"tfhd" => tfhd;
     TrackRunBox, b"trun" => trun;
     TimeToSampleBox, b"stts" => stts;
 
-    Tx3gTextSampleEntry, b"tx3g";
+    Tx3gTextSampleEntry, b"tx3g" => sbtl;
     Tx3gFontTableBox, b"ftab";
     Tx3gTextStyleBox, b"styl";
     Tx3gTextHighlightBox, b"hlit";
@@ -90,6 +96,8 @@ def_boxes! {
     Tx3gTextKaraokeBox, b"krok";
     Tx3gTextScrollDelayBox, b"dlay";
     Tx3gTextHyperTextBox, b"href";
-    TextSubtitleSampleEntry, b"sbtt" => sbtl;
+    TextSubtitleSampleEntry, b"sbtt";
     XMLSubtitleSampleEntry, b"stpp";
+
+    VideoMediaInformationBox, b"vmhd" => vmhd;
 }
