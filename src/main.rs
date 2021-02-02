@@ -262,7 +262,7 @@ fn dump(opts: DumpOpts) -> Result<()> {
     let mut fpos = 0;
     let mut this_chunk = 0xffffffff;
 
-    for size in &stbl.sample_size().entries {
+    for size in stbl.sample_size().iter() {
 
         if let Some(chunk) = stsc_iter.next() {
             if this_chunk != chunk.chunk {
@@ -272,11 +272,11 @@ fn dump(opts: DumpOpts) -> Result<()> {
         }
 
         infh.seek(io::SeekFrom::Start(fpos))?;
-        let mut sm = infh.take(*size as u64);
+        let mut sm = infh.take(size as u64);
         io::copy(&mut sm, &mut handle)?;
         infh = sm.into_inner();
 
-        fpos += *size as u64;
+        fpos += size as u64;
     }
 
     Ok(())

@@ -1,12 +1,15 @@
+use std::convert::TryInto;
 use std::io;
+
 use crate::boxes::prelude::*;
+use crate::io::DataRef;
 
 def_box! {
     /// 8.7.3.2 Sample Size Box (ISO/IEC 14496-12:2015(E))
     SampleSizeBox {
         size:    u32,
         count:   u32,
-        entries: [u32, unsized],
+        entries: DataRef,
     },
     fourcc => "stsz",
     version => [0],
@@ -18,7 +21,7 @@ impl SampleSizeBox {
         SampleSizeIterator {
             size:   self.size,
             count:  self.count,
-            entries: &self.entries,
+            entries: &self.entries[..],
             index: 0,
         }
     }
@@ -27,7 +30,7 @@ impl SampleSizeBox {
 pub struct SampleSizeIterator<'a> {
     size:       u32,
     count:      u32,
-    entries:    &'a [u32],
+    entries:    &'a [u8],
     index:      usize,
 }
 
@@ -42,7 +45,8 @@ impl<'a> Iterator for SampleSizeIterator<'a> {
         if self.entries.len() == 0 {
             Some(self.size)
         } else {
-            let size = self.entries[self.index];
+            let idx = self.index * 4;
+            let size = u32::from_be_bytes(self.entries[idx..idx+4].try_into().unwrap());
             self.index += 1;
             Some(size)
         }
@@ -56,14 +60,11 @@ impl FromBytes for SampleSizeBox {
 
         let size = u32::from_bytes(stream)?;
         let count = u32::from_bytes(stream)?;
-        let mut entries = ArrayUnsized::new();
 
         log::trace!("SampleSizeBox: size {} count {}", size, count);
-        if size == 0 {
-            while entries.len() < count as usize  && stream.left() >= 4 {
-                entries.push(u32::from_bytes(stream)?);
-            }
-        }
+        let entries_count = if size == 0 { count * 4 } else { 0 };
+        let entries = DataRef::from_bytes(stream, entries_count as u64)?;
+
         Ok(SampleSizeBox {
             size,
             count,
@@ -83,10 +84,8 @@ impl ToBytes for SampleSizeBox {
         if self.size != 0 {
             self.count.to_bytes(stream)?;
         } else {
-            (self.entries.len() as u32).to_bytes(stream)?;
-            for e in &self.entries {
-                e.to_bytes(stream)?;
-            }
+            ((self.entries.len() / 4) as u32).to_bytes(stream)?;
+            self.entries.to_bytes(stream)?;
         }
 
         stream.finalize()
