@@ -95,7 +95,7 @@ def_struct! {
 
 def_struct! {
     /// 5.17. TextSample (ETSI TS 126 245 V10.0.0)
-    Tx3GTextSamp,
+    Tx3GTextSample,
         text:   P16String,
         // modifier boxes, the Text*Box boxes below.
         boxes:  [MP4Box],
@@ -180,6 +180,20 @@ def_box! {
 /// Note that the length does not include the length byte itself.
 #[derive(Debug, Default)]
 pub struct P16String(String);
+
+impl P16String {
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl std::ops::Deref for P16String {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_str()
+    }
+}
 
 impl FromBytes for P16String {
     fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<P16String> {

@@ -70,7 +70,10 @@ pub trait BoxBytes {
     /// Get a reference to the mdat source data.
     fn data_ref(&self, _size: u64) -> io::Result<DataRef> {
         panic!("data reference unavailable");
-        //Err(io::Error::new(ErrorKind::NotConnected, "data reference unavailable"))
+    }
+    /// Name of the input file.
+    fn input_filename(&self) -> Option<&str> {
+        None
     }
 }
 

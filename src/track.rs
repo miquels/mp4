@@ -1,12 +1,14 @@
-use std::fmt::Debug;
+use std::fmt::{self, Debug, Display};
 use std::time::Duration;
+
+use serde::Serialize;
 
 use crate::boxes::*;
 use crate::mp4box::{BoxInfo, MP4};
 use crate::types::*;
 
 /// General track information.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize)]
 pub struct TrackInfo {
     pub id:             u32,
     pub track_type:     String,
@@ -15,6 +17,8 @@ pub struct TrackInfo {
     pub specific_info:  SpecificTrackInfo,
 }
 
+#[derive(Serialize)]
+#[serde(untagged)]
 pub enum SpecificTrackInfo {
     AudioTrackInfo(AudioTrackInfo),
     VideoTrackInfo(VideoTrackInfo),
@@ -42,7 +46,17 @@ impl Debug for SpecificTrackInfo {
     }
 }
 
-#[derive(Debug, Default)]
+impl Display for SpecificTrackInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            &SpecificTrackInfo::AudioTrackInfo(ref i) => Display::fmt(i, f),
+            &SpecificTrackInfo::VideoTrackInfo(ref i) => Display::fmt(i, f),
+            &SpecificTrackInfo::SubtitleTrackInfo(ref i) => Display::fmt(i, f),
+            &SpecificTrackInfo::UnknownTrackInfo(ref i) => Display::fmt(i, f),
+        }
+    }
+}
+#[derive(Debug, Default, Serialize)]
 pub struct AudioTrackInfo {
     pub codec_id:   String,
     pub codec_name: Option<String>,
@@ -55,22 +69,54 @@ pub struct AudioTrackInfo {
     pub max_bitrate:   Option<u32>,
 }
 
-#[derive(Debug, Default)]
+impl Display for AudioTrackInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} ({}.{})", self.codec_id, self.channel_count, self.lfe_channel as u8)
+    }
+}
+
+#[derive(Debug, Default, Serialize)]
 pub struct VideoTrackInfo {
     pub codec_id:   String,
     pub codec_name: Option<String>,
 }
 
-#[derive(Debug, Default)]
+impl Display for VideoTrackInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.codec_id)?;
+        if let Some(name) = self.codec_name.as_ref() {
+            write!(f, " ({})", name)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default, Serialize)]
 pub struct SubtitleTrackInfo {
     pub codec_id:   String,
     pub codec_name: Option<String>,
 }
 
-#[derive(Debug, Default)]
+impl Display for SubtitleTrackInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.codec_id)?;
+        if let Some(name) = self.codec_name.as_ref() {
+            write!(f, " ({})", name)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default, Serialize)]
 pub struct UnknownTrackInfo {
     pub codec_id:   String,
     pub codec_name: Option<String>,
+}
+
+impl Display for UnknownTrackInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "unknown")
+    }
 }
 
 /// Extract general track information for all tracks in the movie.

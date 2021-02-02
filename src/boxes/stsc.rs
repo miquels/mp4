@@ -18,9 +18,9 @@ impl SampleToChunkBox {
             SampleToChunkIterator {
                 entries: &self.entries,
                 index: 0,
-                count: 0,
+                count: 1,
                 chunk: 0,
-                sdi: 0,
+                sdi: 1,
             }
         } else {
             SampleToChunkIterator {
@@ -65,13 +65,17 @@ impl<'a> Iterator for SampleToChunkIterator<'a> {
                     sample_description_index: self.sdi,
                 });
             }
+            self.chunk += 1;
+            self.count = self.entries[self.index].samples_per_chunk;
 
             let next_index = self.index + 1;
             if next_index >= self.entries.len() {
-                return None;
+                // should not happen, but prevent loop.
+                if self.count == 0 {
+                    self.count = 1;
+                }
+                continue;
             }
-            self.chunk += 1;
-            self.count = self.entries[self.index].samples_per_chunk;
 
             if self.entries[next_index].first_chunk == self.chunk + 1 {
                 self.index += 1;

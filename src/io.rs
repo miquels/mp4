@@ -12,6 +12,7 @@ pub struct Mp4File {
     file:  fs::File,
     pos:   u64,
     size:  u64,
+    input_filename: Option<String>,
 }
 
 /*
@@ -47,6 +48,7 @@ impl Mp4File {
             file,
             pos: 0,
             size,
+            input_filename: Some(path.to_string()),
         })
     }
 
@@ -127,6 +129,10 @@ impl BoxBytes for Mp4File
             start: self.pos as usize,
             end: (self.pos + size) as usize,
         })
+    }
+
+    fn input_filename(&self) -> Option<&str> {
+        self.input_filename.as_ref().map(|s| s.as_str())
     }
 }
 
@@ -266,6 +272,9 @@ impl<'a, B: ?Sized + BoxBytes + 'a> BoxBytes for Box<B> {
     }
     fn data_ref(&self, size: u64) -> io::Result<DataRef> {
         B::data_ref(&*self, size)
+    }
+    fn input_filename(&self) -> Option<&str> {
+        B::input_filename(&*self)
     }
 }
 

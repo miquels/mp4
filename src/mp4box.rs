@@ -317,6 +317,7 @@ impl<'a> BoxBytes for BoxWriter<'a> {
 pub struct MP4 {
     pub(crate) data_ref:   DataRef,
     pub(crate) boxes:  Vec<MP4Box>,
+    pub(crate) input_file: Option<String>,
 }
 
 impl Debug for MP4 {
@@ -331,8 +332,9 @@ impl MP4 {
     /// Read a ISOBMFF box structure into memory.
     pub fn read<R: ReadBytes>(file: R) -> io::Result<MP4> {
         let data_ref = file.data_ref(file.size())?;
+        let input_file = file.input_filename().map(|s| s.to_string());
         let boxes = read_boxes(file)?;
-        let mut mp4 = MP4{ boxes, data_ref };
+        let mut mp4 = MP4{ boxes, data_ref, input_file };
         mp4.insert_file_type_box();
         Ok(mp4)
     }

@@ -26,13 +26,20 @@ pub enum Command {
     #[structopt(display_order = 1)]
     /// Media information.
     Mediainfo(MediainfoOpts),
+
     #[structopt(display_order = 2)]
     /// Rewrite the mp4 file.
     Rewrite(RewriteOpts),
+
     #[structopt(display_order = 3)]
+    /// extract subtitles.
+    Subtitles(SubtitlesOpts),
+
+    #[structopt(display_order = 4)]
     /// Dump the mp4 file
     Dump(DumpOpts),
-    #[structopt(display_order = 4)]
+
+    #[structopt(display_order = 5)]
     /// Debugging.
     Debug(DebugOpts),
 }
@@ -58,6 +65,28 @@ pub struct MediainfoOpts {
     /// Select track.
     pub track: Option<u32>,
 
+    #[structopt(short, long)]
+    /// Short output, 1 line per track.
+    pub short: bool,
+
+    #[structopt(short, long)]
+    /// Output in JSON
+    pub json: bool,
+
+    /// Input filename.
+    pub input: String,
+}
+
+#[derive(StructOpt, Debug)]
+pub struct SubtitlesOpts {
+    #[structopt(short, long)]
+    /// Select track.
+    pub track: u32,
+
+    #[structopt(short, long)]
+    /// Format (vtt, srt, tx3g)
+    pub format: mp4::subtitle::Format,
+
     /// Input filename.
     pub input: String,
 }
@@ -79,20 +108,12 @@ pub struct DebugOpts {
     pub track: Option<u32>,
 
     #[structopt(short, long)]
-    /// Select a language.
-    pub language: Option<String>,
-
-    #[structopt(short, long)]
     /// Show all the boxes.
     pub boxes: bool,
 
     #[structopt(short, long)]
     /// Debug a track.
     pub debugtrack: bool,
-
-    #[structopt(short, long)]
-    /// Dump track subtitle data.
-    pub subtitle: bool,
 
     /// Input filename.
     pub input: String,
@@ -118,6 +139,7 @@ fn main() -> Result<()> {
     match opts.cmd {
         Command::Dump(opts) => return dump(opts),
         Command::Rewrite(opts) => return rewrite(opts),
+        Command::Subtitles(opts) => return subtitles(opts),
         Command::Mediainfo(opts) => return mediainfo(opts),
         Command::Debug(opts) => return debug(opts),
     }
@@ -135,6 +157,30 @@ fn rewrite(opts: RewriteOpts) -> Result<()> {
     Ok(())
 }
 
+fn subtitles(opts: SubtitlesOpts) -> Result<()> {
+    let mut reader = Mp4File::open(&opts.input)?;
+    let mp4 = MP4::read(&mut reader)?;
+
+    let movie = mp4.movie();
+    let tracks = movie.tracks();
+    let track = match movie.track_idx_by_id(opts.track) {
+        Some(idx) => &tracks[idx],
+        None => return Err(anyhow!("dump: track id {} not found", opts.track)),
+    };
+
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
+    subtitle::subtitle_extract(&mp4, track, opts.format, &mut handle)?;
+
+    Ok(())
+}
+
+
+fn short(track: &mp4::track::TrackInfo) {
+    println!("{}. type [{}], length {:?}, lang {}, codec {}",
+        track.id, track.track_type, track.duration, track.language, track.specific_info);
+}
+
 fn mediainfo(opts: MediainfoOpts) -> Result<()> {
     let mut reader = Mp4File::open(&opts.input)?;
     let mp4 = MP4::read(&mut reader)?;
@@ -143,11 +189,41 @@ fn mediainfo(opts: MediainfoOpts) -> Result<()> {
     if let Some(track) = opts.track {
         for t in &res {
             if t.id == track {
-                println!("{:#?}", t);
+                if opts.short {
+                    if opts.json {
+                        let json = serde_json::to_string(t)?;
+                        println!("{}", json);
+                    } else {
+                        short(t);
+                    }
+                } else {
+                    if opts.json {
+                        let json = serde_json::to_string_pretty(t)?;
+                        println!("{}", json);
+                    } else {
+                        println!("{:#?}", t);
+                    }
+                }
             }
         }
     } else {
-        println!("{:#?}", res);
+        if opts.short {
+            for t in &res {
+                if opts.json {
+                    let json = serde_json::to_string(t)?;
+                    println!("{}", json);
+                } else {
+                    short(t);
+                }
+            }
+        } else {
+            if opts.json {
+                let json = serde_json::to_string_pretty(&res)?;
+                println!("{}", json);
+            } else {
+                println!("{:#?}", res);
+            }
+        }
     }
 
     Ok(())
@@ -216,15 +292,6 @@ fn debug(opts: DebugOpts) -> Result<()> {
             None => return Err(anyhow!("debug: debugtrack: need --track")),
         };
         debug::dump_track(&mp4, track);
-        return Ok(());
-    }
-
-    if opts.subtitle {
-        let lang = match opts.language {
-            Some(lang) => lang,
-            None => return Err(anyhow!("debug: subtitle: need --lang")),
-        };
-        subtitle::dump_subtitle(&mp4, lang.as_str());
         return Ok(());
     }
 

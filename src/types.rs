@@ -12,6 +12,7 @@ use chrono::{
     self,
     offset::{Local, TimeZone},
 };
+use serde::Serialize;
 
 use crate::mp4box::FullBox;
 use crate::serialize::{FromBytes, ReadBytes, ToBytes, WriteBytes};
@@ -318,7 +319,7 @@ impl From<&[u8]> for FourCC {
 
 /// A 16-bit value containing 3 5-bit values that are interpreted as letters,
 /// so that we get a 3-character county code. Such as "eng", "ger", "dut" etc.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize)]
 pub struct IsoLanguageCode(u16);
 def_from_to_bytes_newtype!(IsoLanguageCode, u16);
 

@@ -5,11 +5,35 @@ use crate::boxes::{SampleDescriptionBox, SampleSizeBox, TimeToSampleBox, SampleT
 use crate::boxes::{ChunkOffsetBox, ChunkLargeOffsetBox};
 use crate::boxes::{CompositionOffsetBox, SyncSampleBox};
 
-// stsd, stts, stsc, stco, co64
-// ctts, cslg, stsz, stz2, stss, stsh, padb, stdp, sbgp, sgpd, subs, saiz, saio
-
 def_box! {
     /// 8.1.1 Sample Table Box (ISO/IEC 14496-12:2015(E))
+    ///
+    /// It usually contains:
+    ///
+    /// - TimeToSampleBox, stts
+    /// - CompositionOffsetBox. ctts
+    /// - SampleDescriptionBox, stsd
+    /// - SampleSizeBox, stsz, or CompactSampleSizeBox, stz2
+    /// - SampleToChunkBox, stsc
+    /// - ChunkOffsetBox, stco, or ChunkLargeOffsetBox, co64
+    /// 
+    /// Optionally:
+    ///
+    /// - SyncSampleBox, stss
+    /// - SampleToGroupBox, sbgp
+    /// - SampleGroupDescriptionBox, sgpd (minimal support)
+    ///
+    /// We don't implement:
+    ///
+    /// - CompositionToDecodeBox, cslg
+    /// - ShadowSyncBox, stsh
+    /// - DegrationPriorityBox, stdp
+    /// - SamplePaddingBitsBox, padb
+    /// - SampleDependencyTypeBox, sdtp
+    /// - SubSampleInformationBox, subs
+    /// - SampleAuxiliaryInformationSizesBox, saiz
+    /// - SampleAuxiliaryInformationOffsetsBox, saio
+    ///
     SampleTableBox {
         boxes:      [MP4Box],
     },
