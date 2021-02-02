@@ -13,6 +13,7 @@ pub struct TrackInfo {
     pub id:             u32,
     pub track_type:     String,
     pub duration:       Duration,
+    pub size:           u64,
     pub language:       IsoLanguageCode,
     pub specific_info:  SpecificTrackInfo,
 }
@@ -142,8 +143,10 @@ pub fn track_info(mp4: &MP4) -> Vec<TrackInfo> {
         let hdlr = mdia.handler();
         info.track_type = hdlr.handler_type.to_string();
 
-        let stsd = mdia.media_info().sample_table().sample_description();
+        let stbl = mdia.media_info().sample_table();
+        info.size = stbl.sample_size().iter().fold(0, |acc: u64, sz| acc + sz as u64);
 
+        let stsd = stbl.sample_description();
         if let Some(avc1) = first_box!(stsd.entries, AvcSampleEntry) {
             info.specific_info = SpecificTrackInfo::VideoTrackInfo(avc1.track_info());
         } else if let Some(ac3) = first_box!(stsd.entries, Ac3SampleEntry) {
