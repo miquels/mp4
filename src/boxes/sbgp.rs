@@ -6,7 +6,7 @@ def_box! {
     SampleToGroupBox {
         grouping_type:  FourCC,
         grouping_type_parameter: {Option<u32>},
-        entries:        [SampleToGroupEntry, sized],
+        entries:        ArraySized32<SampleToGroupEntry>,
     },
     fourcc => "sbgp",
     version => [1],

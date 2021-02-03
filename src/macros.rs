@@ -151,7 +151,7 @@ macro_rules! impl_boxinfo {
 
 // Implement the Debug trait for this struct.
 macro_rules! impl_debug {
-    ($name:ident, { $( $field:tt: $type:tt $(as $as:tt)? ),* $(,)? }) => {
+    ($name:ident, { $( $field:tt: $type:tt $(<$gen:tt>)? ),* $(,)? }) => {
         // Debug implementation that adds fourcc field.
         impl std::fmt::Debug for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -170,7 +170,7 @@ macro_rules! impl_debug {
 
 // Implement the FromBytes and ToBytes traits for this struct.
 macro_rules! impl_fromtobytes {
-    ($name:ident, { $( $field:tt: $type:tt $(as $as:tt)? ),* $(,)? }) => {
+    ($name:ident, { $( $field:tt: $type:tt $(<$gen:tt>)? ),* $(,)? }) => {
         impl FromBytes for $name {
             #[allow(unused_variables)]
             fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<$name> {
@@ -194,7 +194,7 @@ macro_rules! impl_fromtobytes {
 
                 let r: io::Result<$name> = {
                     def_struct!(@from_bytes $name, [], reader, $(
-                        $field: $type $(as $as)?,
+                        $field: $type $(<$gen>)?,
                     )*)
                 };
 
@@ -205,7 +205,7 @@ macro_rules! impl_fromtobytes {
 
             fn min_size() -> usize {
                 $(
-                    def_struct!(@min_size $type) +
+                    def_struct!(@min_size $type $(<$gen>)?) +
                 )* 0
             }
         }
@@ -220,7 +220,7 @@ macro_rules! impl_fromtobytes {
 
                 // Serialize.
                 def_struct!(@to_bytes self, stream, $(
-                    $field: $type $(as $as)?,
+                    $field: $type $(<$gen>)?,
                 )*)
             }
         }

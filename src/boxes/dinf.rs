@@ -4,7 +4,7 @@ use crate::boxes::prelude::*;
 
 def_box! {
     DataInformationBox {
-        boxes:      [MP4Box],
+        boxes:      Vec<MP4Box>,
     },
     fourcc => "dinf",
     version => [],
@@ -15,7 +15,7 @@ def_box! {
     // XXX TODO something with version inheritance.
     DataReferenceBox {
         flags:          DataEntryFlags,
-        entries:        [MP4Box, sized],
+        entries:        ArraySized32<MP4Box>,
     },
     fourcc => "dref",
     version => [0, flags],

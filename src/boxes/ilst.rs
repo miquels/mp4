@@ -8,7 +8,7 @@ use crate::mp4box::{BoxHeader, GenericBox};
 def_box! {
     /// Apple Item List.
     AppleItemListBox {
-        items:  [AppleItem],
+        items:  Vec<AppleItem>,
     },
     fourcc => "ilst",
     version => [],

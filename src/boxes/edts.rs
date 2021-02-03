@@ -4,7 +4,7 @@ use crate::boxes::prelude::*;
 
 def_box! {
     EditBox {
-        boxes:  [EditListBox],
+        boxes:  Vec<EditListBox>,
     },
     fourcc => "edts",
     version => [],
@@ -13,7 +13,7 @@ def_box! {
 
 def_box! {
     EditListBox {
-        entries:    [EditListEntry, sized],
+        entries:    ArraySized32<EditListEntry>,
     },
     fourcc => "elst",
     version => [1, entries ],

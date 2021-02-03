@@ -5,7 +5,7 @@ def_box! {
     FileTypeBox {
         major_brand:        FourCC,
         minor_version:      u32,
-        compatible_brands:  [FourCC],
+        compatible_brands:  Vec<FourCC>,
     },
     fourcc => "ftyp",
     version => [],
@@ -24,7 +24,7 @@ def_box! {
 
 def_box! {
     BaseMediaInformationHeaderBox {
-        boxes:      [MP4Box],
+        boxes:      Vec<MP4Box>,
     },
     fourcc => "gmhd",
     version => [],
@@ -50,7 +50,7 @@ def_box! {
 
 def_box! {
     UserDataBox {
-        boxes:      [MP4Box],
+        boxes:      Vec<MP4Box>,
     },
     fourcc => "udta",
     version => [],
@@ -60,7 +60,7 @@ def_box! {
 def_box! {
     TrackSelectionBox {
         switch_group:   u32,
-        attribute_list: [FourCC],
+        attribute_list: Vec<FourCC>,
     },
     fourcc => "tsel",
     version => [0],
@@ -130,7 +130,7 @@ def_box! {
 
 def_box! {
     MetaBox {
-        boxes:  [MP4Box],
+        boxes:  Vec<MP4Box>,
     },
     fourcc => "meta",
     version => [0],
@@ -182,7 +182,7 @@ def_box! {
 
 def_box! {
     MovieExtendsBox {
-        boxes:      [MP4Box],
+        boxes:      Vec<MP4Box>,
     },
     fourcc => "mvex",
     version => [],
@@ -206,7 +206,7 @@ def_box! {
     SegmentTypeBox {
         major_brand:        FourCC,
         minor_version:      u32,
-        compatible_brands:  [FourCC],
+        compatible_brands:  Vec<FourCC>,
     },
     fourcc => "styp",
     version => [],
@@ -215,7 +215,7 @@ def_box! {
 
 def_box! {
     MovieFragmentBox {
-        boxes:      [MP4Box],
+        boxes:      Vec<MP4Box>,
     },
     fourcc => "moof",
     version => [],
@@ -242,7 +242,7 @@ def_box! {
 
 def_box! {
     TrackFragmentBox {
-        boxes:      [MP4Box],
+        boxes:      Vec<MP4Box>,
     },
     fourcc => "traf",
     version => [],

@@ -3,7 +3,7 @@ use crate::boxes::prelude::*;
 
 def_box! {
     CompositionOffsetBox {
-        entries:        [CompositionOffsetEntry, sized],
+        entries:        ArraySized32<CompositionOffsetEntry>,
     },
     fourcc => "ctts",
     version => [1, entries],

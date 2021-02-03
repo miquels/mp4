@@ -15,7 +15,7 @@ def_box! {
         namespace:              ZString,
         schema_location:        ZString,
         auxiliary_mime_types:   ZString,
-        boxes:                  [MP4Box],
+        boxes:                  Vec<MP4Box>,
     },
     fourcc => "stpp",
     version => [], 
@@ -29,7 +29,7 @@ def_box! {
         data_reference_index:   u16,
         content_encoding:       ZString,
         mime_format:            ZString,
-        boxes:                  [MP4Box],
+        boxes:                  Vec<MP4Box>,
     },
     fourcc => "sbtt",
     version => [], 
@@ -47,7 +47,7 @@ def_box! {
         background_color_rgba:  u32,
         default_text_box:       Tx3gBoxRecord,
         default_style:          Tx3gStyleRecord,
-        fonts:                  [Tx3gFontTableBox, unsized],
+        fonts:                  ArrayUnsized<Tx3gFontTableBox>,
     },
     fourcc => "tx3g",
     version => [], 
@@ -77,7 +77,7 @@ def_struct! {
 def_box! {
     /// 5.16. Font Table Box (ETSI TS 126 245 V10.0.0)
     Tx3gFontTableBox {
-        fonts:  [Tx3gFontRecord, sized16],
+        fonts:  ArraySized16<Tx3gFontRecord>,
     },
     fourcc => "ftab",
     version => [],
@@ -96,13 +96,13 @@ def_struct! {
     Tx3GTextSample,
         text:   P16String,
         // modifier boxes, the Text*Box boxes below.
-        boxes:  [MP4Box],
+        boxes:  Vec<MP4Box>,
 }
 
 def_box! {
     /// 5.17.1.1 Text Style (ETSI TS 126 245 V10.0.0)
     Tx3gTextStyleBox {
-        entries:    [Tx3gStyleRecord, sized16],
+        entries:    ArraySized16<Tx3gStyleRecord>,
     },
     fourcc => "styl",
     version => [],
@@ -135,7 +135,7 @@ def_box! {
     /// 5.17.1.3 Dynamic Highlight (ETSI TS 126 245 V10.0.0)
     Tx3gTextKaraokeBox {
         highlight_start_time:   u32,
-        entries:    [Tx3gTextKaraokeEntry, sized16],
+        entries:    ArraySized16<Tx3gTextKaraokeEntry>,
     },
     fourcc => "krok",
     version => [],

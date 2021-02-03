@@ -3,7 +3,7 @@ use crate::boxes::prelude::*;
 
 def_box! {
     SyncSampleBox {
-        entries:        [u32, sized],
+        entries:        ArraySized32<u32>,
     },
     fourcc => "stss",
     version => [0],

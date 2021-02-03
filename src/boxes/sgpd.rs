@@ -14,7 +14,7 @@ def_box! {
         grouping_type:              FourCC,
         default_length:             {Option<u32>},
         default_sample_description_index: {Option<u32>},
-        entries:                    [SampleGroupDescriptionItem, unsized],
+        entries:                    ArrayUnsized<SampleGroupDescriptionItem>,
     },
     fourcc => "sgpd",
     version => [2],

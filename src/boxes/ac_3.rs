@@ -23,7 +23,7 @@ def_box! {
         sample_rate_hi:         u16,
         sample_rate_lo:         u16,
         // sub boxes, probably only dac3.
-        boxes: [MP4Box],
+        boxes: Vec<MP4Box>,
     },
     fourcc => "ac-3",
     version => [],

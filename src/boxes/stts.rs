@@ -3,7 +3,7 @@ use crate::boxes::prelude::*;
 
 def_box! {
     TimeToSampleBox {
-        entries:        [TimeToSampleEntry, sized],
+        entries:        ArraySized32<TimeToSampleEntry>,
     },
     fourcc => "stts",
     version => [0],

@@ -6,7 +6,7 @@ use crate::boxes::{MediaHeaderBox, HandlerBox, MediaInformationBox, ExtendedLang
 def_box! {
     /// 8.4.1 Media Box (ISO/IEC 14496-12:2015(E))
     MediaBox {
-        boxes:      [MP4Box],
+        boxes:      Vec<MP4Box>,
     },
     fourcc => "mdia",
     version => [],

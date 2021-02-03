@@ -30,7 +30,7 @@ def_box! {
         sample_count:               u32,
         data_offset:                {Option<i32>},
         first_sample_flags:         {Option<SampleFlags>},
-        entries:                    [TrackRunEntry, unsized],
+        entries:                    ArrayUnsized<TrackRunEntry>,
     },
     fourcc => "trun",
     version => [1],

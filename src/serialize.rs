@@ -288,23 +288,25 @@ where
 //#[macro_export]
 macro_rules! def_struct {
     // minimum size for a certain type. we hard-code u* here.
+    (@min_size [ $($tt:tt)* ]) => { $($tt)* };
     (@min_size u8) => { 1 };
     (@min_size u16) => { 2 };
     (@min_size u32) => { 4 };
     (@min_size i32) => { 4 };
     (@min_size u64) => { 8 };
     (@min_size u128) => { 16 };
-    (@min_size [ $type:ty, sized ]) => { 4 };
-    (@min_size [ $type:ty, sized16 ]) => { 2 };
-    (@min_size [ $type:ty, sized32 ]) => { 4 };
-    (@min_size [ $type:ty, unsized ]) => { 0 };
+    (@min_size Vec<$tt:tt>) => { 0 };
+    (@min_size ArraySized32<$gen:tt>) => { 4 };
+    (@min_size ArraySized16<$gen:tt>) => { 2 };
+    (@min_size ArrayUnsized<$gen:tt>) => { 0 };
     (@min_size [ $_type:ty ]) => { 0 };
     (@min_size ( $_type:ty )) => { 0 };
     (@min_size { $_type:ty }) => { 0 };
-    (@min_size $type:ident) => {
-        $type::min_size()
+    (@min_size $type:ty) => {
+        <$type>::min_size()
     };
     (@min_size $amount:expr) => { $amount };
+    (@min_size $($tt:tt)*) => { compile_error!(stringify!($($tt)*)); };
 
     // Extract a box from the boxes array.
     (@EXTRACT $name:ident, $type:ident) => {
@@ -325,35 +327,15 @@ macro_rules! def_struct {
     };
 
     // @def_struct: Define a struct line by line using accumulation and recursion.
-    (@def_struct $(#[$outer:meta])* $name:ident, $( $field:tt: $type:tt $(as $as:tt)? ),* $(,)?) => {
-        def_struct!(@def_struct_ [$(#[$outer])* $name], [ $( $field: $type $(as $as)?, )* ] -> []);
+    (@def_struct $(#[$outer:meta])* $name:ident, $( $field:tt: $type:tt $(<$gen:tt>)? ),* $(,)?) => {
+        def_struct!(@def_struct_ [$(#[$outer])* $name], [ $( $field: $type $(<$gen>)?, )* ] -> []);
     };
     // During definition of the struct, we skip all the "skip" defitions.
     (@def_struct_ $info:tt, [ skip: $amount:tt, $($tt:tt)*] -> [ $($res:tt)* ]) => {
         def_struct!(@def_struct_ $info, [$($tt)*] -> [ $($res)* ]);
     };
-    // Add normal field (type in curlies)
-    (@def_struct_ $info:tt, [ $field:ident: {$type:ty}, $($tt:tt)*] -> [ $($res:tt)* ]) => {
-        def_struct!(@def_struct_ $info, [$($tt)*] -> [ $($res)* pub $field: $type, ]);
-    };
-    // Add normal field (ArraySized16)
-    (@def_struct_ $info:tt, [ $field:ident: [ $type:ty, sized16 ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
-        def_struct!(@def_struct_ $info, [$($tt)*] -> [ $($res)* pub $field: ArraySized16<$type>, ]);
-    };
-    // Add normal field (ArraySized32)
-    (@def_struct_ $info:tt, [ $field:ident: [ $type:ty, sized ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
-        def_struct!(@def_struct_ $info, [$($tt)*] -> [ $($res)* pub $field: ArraySized32<$type>, ]);
-    };
-    // Add normal field (ArrayUnsized)
-    (@def_struct_ $info:tt, [ $field:ident: [ $type:ty, unsized ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
-        def_struct!(@def_struct_ $info, [$($tt)*] -> [ $($res)* pub $field: ArrayUnsized<$type>, ]);
-    };
-    // Add normal field (Vec)
-    (@def_struct_ $info:tt, [ $field:ident: [ $type:ty ], $($tt:tt)*] -> [ $($res:tt)* ]) => {
-        def_struct!(@def_struct_ $info, [$($tt)*] -> [ $($res)* pub $field: Vec<$type>, ]);
-    };
-    // Add normal field (as).
-    (@def_struct_ $info:tt, [ $field:ident: $_type:ty as $type:ty, $($tt:tt)*] -> [ $($res:tt)* ]) => {
+    // Add field with type in curlies.
+    (@def_struct_ $info:tt, [ $field:ident: { $type:ty }, $($tt:tt)*] -> [ $($res:tt)* ]) => {
         def_struct!(@def_struct_ $info, [$($tt)*] -> [ $($res)* pub $field: $type, ]);
     };
     // Add normal field.
@@ -369,8 +351,8 @@ macro_rules! def_struct {
     };
 
     // @from_bytes: Generate the from_bytes details for a struct.
-    (@from_bytes $name:ident, $base:tt, $stream:tt, $( $field:tt: $type:tt $(as $as:tt)? ),* $(,)?) => {
-        def_struct!(@from_bytes_ $name, $base, $stream, [ $( $field: $type $(as $as)?, )* ] -> [] [] []);
+    (@from_bytes $name:ident, $base:tt, $stream:tt, $( $field:tt: $type:tt $(<$gen:tt>)? ),* $(,)?) => {
+        def_struct!(@from_bytes_ $name, $base, $stream, [ $( $field: $type $(<$gen>)?, )* ] -> [] [] []);
     };
     // Insert a skip instruction.
     (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ skip: $amount:tt, $($tt:tt)*]
@@ -378,48 +360,17 @@ macro_rules! def_struct {
         def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
             [ $($set)* [ $stream.skip($amount).unwrap(); ] ] $set2 [$($fields)*]);
     };
-    // Set a field (in curlies, non-optional, from .boxes)
-    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: { $type:ident }, $($tt:tt)*]
-        -> $set:tt [ $($set2:tt)* ] [ $($fields:tt)* ]) => {
-        def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            //$set [ $($set2)* ] [$($fields)*]);
-            $set [ $($set2)* [ let $field = def_struct!{@EXTRACT $name, $type} ] ] [ $($fields)* $field ]);
-    };
-    // Set a field (ArraySized16)
-    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: [ $type:ty, sized16 ], $($tt:tt)*]
-        -> [ $($set:tt)* ] $set2:tt [ $($fields:tt)* ]) => {
-        def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [ let $field = ArraySized16::<$type>::from_bytes($stream)?; ] ] $set2 [ $($fields)* $field ]);
-    };
-    // Set a field (ArraySized32)
-    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: [ $type:ty, sized ], $($tt:tt)*]
-        -> [ $($set:tt)* ] $set2:tt [ $($fields:tt)* ]) => {
-        def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [ let $field = ArraySized32::<$type>::from_bytes($stream)?; ] ] $set2 [ $($fields)* $field ]);
-    };
-    // Set a field (ArrayUnsized)
-    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: [ $type:ty, unsized ], $($tt:tt)*]
-        -> [ $($set:tt)* ] $set2:tt [ $($fields:tt)* ]) => {
-        def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [ let $field = ArrayUnsized::<$type>::from_bytes($stream)?; ] ] $set2 [ $($fields)* $field ]);
-    };
-    // Set a field (Vec)
-    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: [ $type:ty ], $($tt:tt)*]
-        -> [ $($set:tt)* ] $set2:tt [ $($fields:tt)* ]) => {
-        def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [ let $field = Vec::<$type>::from_bytes($stream)?; ] ] $set2 [ $($fields)* $field ]);
-    };
-    // Set a field (as)
-    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: $in:ty as $out:ty, $($tt:tt)*]
-        -> [ $($set:tt)* ] $set2:tt [ $($fields:tt)* ]) => {
-        def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [ let $field: $out = <$in>::from_bytes($stream)?.into(); ] ] $set2 [ $($fields)* $field ]);
-    };
-    // Set a field.
-    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: $type:ty, $($tt:tt)*]
+    // Set a field with type in curlies.
+    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: { $type:ty } $(<$gen:tt>)?, $($tt:tt)*]
         -> [ $($set:tt)* ] $set2:tt [ $($fields:tt)* ]) => {
         def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
             [ $($set)* [ let $field = <$type>::from_bytes($stream)?; ] ] $set2 [ $($fields)* $field ]);
+    };
+    // Set a field.
+    (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: $type:tt $(<$gen:tt>)?, $($tt:tt)*]
+        -> [ $($set:tt)* ] $set2:tt [ $($fields:tt)* ]) => {
+        def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
+            [ $($set)* [ let $field = <$type $(<$gen>)?>::from_bytes($stream)?; ] ] $set2 [ $($fields)* $field ]);
     };
     // Final.
     (@from_bytes_ $name:ident, [ $($base:tt)* ], $_stream:tt, [] -> [ $([$($set:tt)*])* ] [ $([$($set2:tt)*])* ] [ $($field:tt)* ]) => {
@@ -438,10 +389,10 @@ macro_rules! def_struct {
     };
 
     // @to_bytes: Generate the to_bytes details for a struct.
-    (@to_bytes $struct:expr, $stream:ident, $( $field:tt: $type:tt $(as $as:tt)? ),* $(,)?) => {
+    (@to_bytes $struct:expr, $stream:ident, $( $field:tt: $type:tt $(<$gen:tt>)? ),* $(,)?) => {
         {
             $(
-                def_struct!(@to_bytes_ $struct, $stream, $field: $type $(as $as)?);
+                def_struct!(@to_bytes_ $struct, $stream, $field: $type $(<$gen>)?);
             )*
             Ok(())
         }
@@ -450,32 +401,20 @@ macro_rules! def_struct {
     (@to_bytes_ $struct:expr, $stream:ident, skip: $amount:tt) => {
         $stream.skip($amount)?;
     };
-    // Write a field value (type in curlies)
-    (@to_bytes_ $struct:expr, $stream:ident, $field:tt: { $type:ty }) => {
-        $struct.$field.to_bytes($stream)?;
-    };
-    // Write a field value (Array or Vec)
-    (@to_bytes_ $struct:expr, $stream:ident, $field:tt: [ $type:ty $(, $_tt:tt)?]) => {
-        $struct.$field.to_bytes($stream)?;
-    };
-    // Write a field value (as)
-    (@to_bytes_ $struct:expr, $stream:ident, $field:tt: $type:ty as $_type:ty) => {
-        <$type>::from($struct.$field).to_bytes($stream)?;
-    };
     // Write a field value.
-    (@to_bytes_ $struct:expr, $stream:ident, $field:tt: $type:ty) => {
+    (@to_bytes_ $struct:expr, $stream:ident, $field:tt: $type:tt $(<$gen:tt>)?) => {
         $struct.$field.to_bytes($stream)?;
     };
 
-    // Helper.
+    // Helpers for skip
     (@filter_skip skip, $($tt:tt)*) => {};
     (@filter_skip $field:ident, $($tt:tt)*) => { $($tt)* };
 
     // Main entry point to define just one struct.
-    ($(#[$outer:meta])* $name:ident, $($field:tt: $type:tt $(as $as:tt)?),* $(,)?) => {
+    ($(#[$outer:meta])* $name:ident, $($field:tt: $type:tt $(<$gen:tt>)?),* $(,)?) => {
         def_struct!(@def_struct $(#[$outer])* $name,
             $(
-                $field: $type $(as $as)?,
+                $field: $type $(<$gen>)?,
             )*
         );
 
@@ -493,22 +432,28 @@ macro_rules! def_struct {
         impl FromBytes for $name {
             fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<Self> {
                 def_struct!(@from_bytes $name, [], stream, $(
-                    $field: $type $(as $as)?,
+                    $field: $type $(<$gen>)?,
                 )*)
             }
 
             fn min_size() -> usize {
-                $( def_struct!(@min_size $type) +)* 0
+                $( def_struct!(@min_size $type $(<$gen>)?) + )* 0
             }
         }
 
         impl ToBytes for $name {
             fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
                 def_struct!(@to_bytes self, stream, $(
-                    $field: $type $(as $as)?,
+                    $field: $type $(<$gen>)?,
                 )*)
             }
 
         }
+
+    };
+
+    // Alternative entry point.
+    ($(#[$outer:meta])* $name:ident { $($tt:tt)* }) => {
+        def_struct!($(#[$outer])* $name, $($tt)*);
     }
 }

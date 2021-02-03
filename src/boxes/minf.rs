@@ -6,7 +6,7 @@ use crate::boxes::{DataInformationBox, SampleTableBox};
 def_box! {
     /// 8.4.4 Media Information Box (ISO/IEC 14496-12:2015(E))
     MediaInformationBox {
-        boxes:      [MP4Box],
+        boxes:      Vec<MP4Box>,
     },
     fourcc => "minf",
     version => [],

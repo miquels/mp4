@@ -30,7 +30,7 @@ def_box! {
         // always -1
         _pre_defined:           u16,
         // avcC and other boxes (pasp?)
-        boxes:              [MP4Box],
+        boxes:              Vec<MP4Box>,
     },
     fourcc => "avc1",
     version => [], 

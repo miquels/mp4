@@ -3,7 +3,7 @@ use crate::boxes::prelude::*;
 
 def_box! {
     SampleToChunkBox {
-        entries:        [SampleToChunkEntry, sized],
+        entries:        ArraySized32<SampleToChunkEntry>,
     },
     fourcc => "stsc",
     version => [0],

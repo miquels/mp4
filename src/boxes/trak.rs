@@ -10,7 +10,7 @@ pub use crate::sample_info::{SampleInfo, SampleInfoIterator};
 def_box! {
     /// 8.3.1 Track Box (ISO/IEC 14496-12:2015(E))
     TrackBox {
-        boxes:      [MP4Box],
+        boxes:      Vec<MP4Box>,
     },
     fourcc =>"trak",
     version => [],

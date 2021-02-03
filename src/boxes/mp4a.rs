@@ -24,7 +24,7 @@ def_box! {
         sample_rate_hi: u16,
         sample_rate_lo: u16,
         // sub boxes, probably only esds.
-        boxes: [MP4Box],
+        boxes: Vec<MP4Box>,
     },
     fourcc => "mp4a",
     version => [],

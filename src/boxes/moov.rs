@@ -6,7 +6,7 @@ use crate::boxes::{MovieHeaderBox, TrackBox};
 def_box! {
     /// 8.2.1 Movie Box (ISO/IEC 14496-12:2015(E))
     MovieBox {
-        boxes:      [MP4Box],
+        boxes:      Vec<MP4Box>,
     },
     fourcc => "moov",
     version => [],

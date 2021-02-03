@@ -14,7 +14,7 @@ def_box! {
         earliest_presentation_time: VersionSizedUint,
         first_offset:               VersionSizedUint,
         skip:                       2,
-        references:                 [SegmentReference, sized16],
+        references:                 ArraySized16<SegmentReference>,
     },
     fourcc => "sidx",
     version => [1, earliest_presentation_time, first_offset],

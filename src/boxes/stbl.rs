@@ -35,7 +35,7 @@ def_box! {
     /// - SampleAuxiliaryInformationOffsetsBox, saio
     ///
     SampleTableBox {
-        boxes:      [MP4Box],
+        boxes:      Vec<MP4Box>,
     },
     fourcc => "stbl",
     version => [],
