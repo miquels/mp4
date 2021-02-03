@@ -47,7 +47,7 @@ def_box! {
         background_color_rgba:  u32,
         default_text_box:       Tx3gBoxRecord,
         default_style:          Tx3gStyleRecord,
-        fonts:                  ArrayUnsized<Tx3gFontTableBox>,
+        fonts:                  Vec<Tx3gFontTableBox>,
     },
     fourcc => "tx3g",
     version => [], 
