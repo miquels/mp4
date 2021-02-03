@@ -214,17 +214,20 @@ macro_rules set_vec! {
 macro_rules! def_from_to_bytes {
     ($type:ident) => {
         impl FromBytes for $type {
+            #[inline]
             fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> {
                 let sz = std::mem::size_of::<$type>();
                 let data = bytes.read(sz as u64)?;
                 let data = data.try_into().map_err(|_| UnexpectedEof)?;
                 Ok($type::from_be_bytes(data))
             }
+            #[inline]
             fn min_size() -> usize {
                 std::mem::size_of::<$type>()
             }
         }
         impl ToBytes for $type {
+            #[inline]
             fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) -> io::Result<()> {
                 bytes.write(&self.to_be_bytes()[..])
             }

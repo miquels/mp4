@@ -54,12 +54,12 @@ pub(crate) struct BoxHeader {
 }
 
 impl BoxHeader {
-    pub(crate) fn read(mut stream: &mut impl ReadBytes) -> io::Result<BoxHeader> {
-        let size1 = u32::from_bytes(&mut stream)?;
-        let fourcc = FourCC::from_bytes(&mut stream)?;
+    pub(crate) fn read(stream: &mut impl ReadBytes) -> io::Result<BoxHeader> {
+        let size1 = u32::from_bytes(stream)?;
+        let fourcc = FourCC::from_bytes(stream)?;
         let mut size = match size1 {
             0 => stream.size() - stream.pos(),
-            1 => u64::from_bytes(&mut stream)?.saturating_sub(16),
+            1 => u64::from_bytes(stream)?.saturating_sub(16),
             x => x.saturating_sub(8) as u64,
         };
 
@@ -67,7 +67,7 @@ impl BoxHeader {
         let mut version = None;
         let mut flags = 0;
         if max_version.is_some() {
-            version = Some(u8::from_bytes(&mut stream)?);
+            version = Some(u8::from_bytes(stream)?);
             let data = stream.read(3)?;
             let mut buf = [0u8; 4];
             (&mut buf[1..]).copy_from_slice(&data);
@@ -91,12 +91,12 @@ impl BoxHeader {
         BoxHeader::read(&mut data)
     }
 
-    pub(crate) fn read_base(mut stream: &mut impl ReadBytes) -> io::Result<BoxHeader> {
-        let size1 = u32::from_bytes(&mut stream)?;
-        let fourcc = FourCC::from_bytes(&mut stream)?;
+    pub(crate) fn read_base(stream: &mut impl ReadBytes) -> io::Result<BoxHeader> {
+        let size1 = u32::from_bytes(stream)?;
+        let fourcc = FourCC::from_bytes(stream)?;
         let size = match size1 {
             0 => stream.size() - stream.pos(),
-            1 => u64::from_bytes(&mut stream)?.saturating_sub(16),
+            1 => u64::from_bytes(stream)?.saturating_sub(16),
             x => x.saturating_sub(8) as u64,
         };
 
@@ -124,14 +124,14 @@ impl BoxHeader {
 pub(crate) struct BoxReader<'a> {
     pub(crate) header: BoxHeader,
     maxsize:           u64,
-    // We box it, since a BoxReader might contain a BoxReader.
-    inner:             Box<dyn ReadBytes + 'a>,
+    pos:               u64,
+    inner:             &'a mut dyn ReadBytes,
 }
 
 impl<'a> BoxReader<'a> {
     /// Read the box header, then return a size-limited reader.
-    pub fn new<R: ReadBytes>(mut stream: &'a mut R) -> io::Result<BoxReader<'a>> {
-        let header = BoxHeader::read(&mut stream)?;
+    pub fn new(stream: &'a mut impl ReadBytes) -> io::Result<BoxReader<'a>> {
+        let header = BoxHeader::read(stream)?;
         let maxsize = std::cmp::min(stream.size(), stream.pos() + header.size);
         log::trace!(
             "XXX header {:?} maxsize {} left {}",
@@ -142,71 +142,76 @@ impl<'a> BoxReader<'a> {
         Ok(BoxReader {
             header,
             maxsize,
-            inner: Box::new(stream),
+            pos: stream.pos(),
+            inner: stream,
         })
     }
 }
 
-impl<'a> Drop for BoxReader<'a> {
+impl Drop for BoxReader<'_> {
     fn drop(&mut self) {
-        let pos = self.pos();
-        if pos < self.maxsize {
+        if self.pos < self.maxsize {
             log::trace!(
                 "XXX BoxReader {} drop: skipping {}",
                 self.header.fourcc,
-                self.maxsize - pos
+                self.maxsize - self.pos
             );
-            let _ = self.skip(self.maxsize - pos);
+            let _ = self.skip(self.maxsize - self.pos);
         }
     }
 }
 
 // Delegate ReadBytes to the inner reader.
-impl<'a> ReadBytes for BoxReader<'a> {
+impl ReadBytes for BoxReader<'_> {
     #[inline]
     fn read(&mut self, amount: u64) -> io::Result<&[u8]> {
-        if self.inner.pos() + amount > self.maxsize {
+        if self.pos + amount > self.maxsize {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
-        self.inner.read(amount)
+        let res = self.inner.read(amount)?;
+        self.pos += amount;
+        Ok(res)
     }
     #[inline]
     fn peek(&mut self, amount: u64) -> io::Result<&[u8]> {
-        if self.inner.pos() + amount > self.maxsize {
+        if self.pos + amount > self.maxsize {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
         self.inner.peek(amount)
     }
     #[inline]
     fn skip(&mut self, amount: u64) -> io::Result<()> {
-        if self.inner.pos() + amount > self.maxsize {
+        if self.pos + amount > self.maxsize {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
-        self.inner.skip(amount)
+        self.inner.skip(amount)?;
+        self.pos += amount;
+        Ok(())
     }
     #[inline]
     fn left(&mut self) -> u64 {
-        let pos = self.inner.pos();
-        if pos > self.maxsize {
+        if self.pos > self.maxsize {
             0
         } else {
-            self.maxsize - pos
+            self.maxsize - self.pos
         }
     }
 }
 
 // Delegate BoxBytes to the inner reader.
-impl<'a> BoxBytes for BoxReader<'a> {
+impl BoxBytes for BoxReader<'_> {
     #[inline]
     fn pos(&mut self) -> u64 {
-        self.inner.pos()
+        self.pos
     }
     #[inline]
     fn seek(&mut self, pos: u64) -> io::Result<()> {
         if pos > self.maxsize {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
-        self.inner.seek(pos)
+        self.inner.seek(pos)?;
+        self.pos = pos;
+        Ok(())
     }
     #[inline]
     fn size(&self) -> u64 {
@@ -230,31 +235,31 @@ impl<'a> BoxBytes for BoxReader<'a> {
 pub(crate) struct BoxWriter<'a> {
     offset:    u64,
     vflags:    u32,
-    inner:     Box<dyn WriteBytes + 'a>,
     finalized: bool,
+    inner:     Box<dyn WriteBytes + 'a>,
 }
 
 impl<'a> BoxWriter<'a> {
     /// Write a provisional box header, then return a new stream. When
     /// the stream is dropped, the box header is updated.
-    pub fn new<B>(mut stream: impl WriteBytes + 'a, boxinfo: &B) -> io::Result<BoxWriter<'a>>
+    pub fn new<B>(stream: &'a mut impl WriteBytes, boxinfo: &B) -> io::Result<BoxWriter<'a>>
     where
         B: BoxInfo + FullBox,
     {
         let offset = stream.pos();
-        0u32.to_bytes(&mut stream)?;
-        boxinfo.fourcc().to_bytes(&mut stream)?;
+        0u32.to_bytes(stream)?;
+        boxinfo.fourcc().to_bytes(stream)?;
         let mut vflags = 0;
         if B::max_version().is_some() {
             let version = boxinfo.version().unwrap_or(0) as u32;
             vflags = version << 24 | boxinfo.flags();
-            vflags.to_bytes(&mut stream)?;
+            vflags.to_bytes(stream)?;
         }
         Ok(BoxWriter {
             offset,
             vflags,
-            inner: Box::new(stream),
             finalized: false,
+            inner: Box::new(stream),
         })
     }
 
