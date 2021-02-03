@@ -214,15 +214,6 @@ def_box! {
 }
 
 def_box! {
-    MovieFragmentBox {
-        boxes:      Vec<MP4Box>,
-    },
-    fourcc => "moof",
-    version => [],
-    impls => [ basebox, boxinfo, debug, fromtobytes ],
-}
-
-def_box! {
     MovieExtendsHeaderBox {
         fragment_duration:  VersionSizedUint,
     },
@@ -238,15 +229,6 @@ def_box! {
     fourcc => "mfhd",
     version => [0],
     impls => [ boxinfo, debug, fromtobytes, fullbox ],
-}
-
-def_box! {
-    TrackFragmentBox {
-        boxes:      Vec<MP4Box>,
-    },
-    fourcc => "traf",
-    version => [],
-    impls => [ basebox, boxinfo, debug, fromtobytes ],
 }
 
 def_box! {

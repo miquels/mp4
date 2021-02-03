@@ -25,7 +25,6 @@ def_boxes! {
     MetaBox, b"meta";
     MovieExtendsBox, b"mvex";
     MovieExtendsHeaderBox, b"mehd";
-    MovieFragmentBox, b"moof";
     MovieFragmentHeaderBox, b"mfhd";
     MovieHeaderBox, b"mvhd";
     NameBox, b"name";
@@ -36,7 +35,6 @@ def_boxes! {
     SubtitleMediaHeaderBox, b"sthd";
     TrackExtendsBox, b"trex";
     TrackFragmentBaseMediaDecodeTimeBox, b"tfdt";
-    TrackFragmentBox, b"traf";
     TrackSelectionBox, b"tsel";
     UserDataBox, b"udta";
 
@@ -68,6 +66,7 @@ def_boxes! {
     MediaDataBox, b"mdat" => mdat;
     MediaInformationBox, b"minf" => minf;
     MovieBox, b"moov" => moov;
+    MovieFragmentBox, b"moof" => moof;
 
     Free, b"free" => free;
     Skip, b"skip";
@@ -84,6 +83,7 @@ def_boxes! {
     SyncSampleBox, b"stss" => stss;
     TrackBox, b"trak" => trak;
     TrackHeaderBox, b"tkhd" => tkhd;
+    TrackFragmentBox, b"traf" => traf;
     TrackFragmentHeaderBox, b"tfhd" => tfhd;
     TrackRunBox, b"trun" => trun;
     TimeToSampleBox, b"stts" => stts;

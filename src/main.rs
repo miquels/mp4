@@ -112,8 +112,12 @@ pub struct DebugOpts {
     pub boxes: bool,
 
     #[structopt(short, long)]
-    /// Debug a track.
-    pub debugtrack: bool,
+    /// Show the samples for a track.
+    pub samples: bool,
+
+    #[structopt(long)]
+    /// Dump timestamps of all Track Fragments.
+    pub traf: bool,
 
     /// Input filename.
     pub input: String,
@@ -284,18 +288,72 @@ fn dump(opts: DumpOpts) -> Result<()> {
 
 fn debug(opts: DebugOpts) -> Result<()> {
     let mut reader = Mp4File::open(&opts.input)?;
-    let mp4 = MP4::read(&mut reader)?;
+    let mut mp4 = MP4::read(&mut reader)?;
 
-    if opts.debugtrack {
+    if opts.samples {
         let track = match opts.track {
             Some(track) => track,
             None => return Err(anyhow!("debug: debugtrack: need --track")),
         };
-        debug::dump_track(&mp4, track);
+        debug::dump_track_samples(&mp4, track);
+        return Ok(());
+    }
+
+    if opts.traf {
+        debug::dump_traf_timestamps(&mp4);
         return Ok(());
     }
 
     if opts.boxes {
+        if let Some(opt_track) = opts.track {
+
+            // filter out tracks we don't want.
+            let mut boxes = Vec::new();
+            let mut movie = mp4.movie_mut();
+            let mut trak_id = 0;
+            for box_ in movie.boxes.drain(..) {
+                match &box_ {
+                    MP4Box::TrackBox(_) => {
+                        trak_id += 1;
+                        if opt_track == trak_id {
+                            boxes.push(box_);
+                        }
+                    },
+                    _ => boxes.push(box_),
+                }
+            }
+            movie.boxes = boxes;
+
+            // now do the same at the top level for moof/mdat.
+            let mut boxes = Vec::new();
+            let mut t_found = false;
+            for box_ in mp4.boxes.drain(..) {
+                match &box_ {
+                    MP4Box::MovieFragmentBox(ref moof) => {
+                        t_found = moof
+                            .track_fragments()
+                            .iter()
+                            .any(|frag| {
+                                if let Some(hdr) = frag.track_fragment_header() {
+                                    hdr.track_id == opt_track
+                                } else {
+                                    false
+                                }
+                            });
+                        if t_found {
+                            boxes.push(box_);
+                        }
+                    },
+                    MP4Box::MediaDataBox(_) => {
+                        if t_found {
+                            boxes.push(box_);
+                        }
+                    }
+                    _ => boxes.push(box_),
+                }
+            }
+            mp4.boxes = boxes;
+        }
         let stdout = io::stdout();
         let mut handle = BufWriter::with_capacity(128000, stdout.lock());
         let _ = writeln!(handle, "{:#?}", mp4);

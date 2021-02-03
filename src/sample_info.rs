@@ -121,8 +121,8 @@ impl<'a> Iterator for SampleInfoIterator<'a> {
         if let Some(stss_iter) = self.stss_iter.as_mut() {
             if self.index == self.next_sync {
                 sample.is_sync = true;
+                self.next_sync = stss_iter.next().unwrap_or(0xffffffff);
             }
-            self.next_sync = stss_iter.next().unwrap_or(0xffffffff);
         }
         self.index += 1;
 

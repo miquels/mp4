@@ -321,8 +321,9 @@ impl<'a> BoxBytes for BoxWriter<'a> {
 
 /// Main entry point for ISOBMFF box structure.
 pub struct MP4 {
+    /// The boxes at the top level.
+    pub boxes:  Vec<MP4Box>,
     pub(crate) data_ref:   DataRef,
-    pub(crate) boxes:  Vec<MP4Box>,
     pub(crate) input_file: Option<String>,
 }
 

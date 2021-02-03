@@ -11,7 +11,12 @@ def_box! {
 }
 
 impl SyncSampleBox {
-    /// Return an iterator that iterates over every sample.
+    /// Return an iterator that iterates over the sync sample table.
+    /// It does not iterate over every sample.
+    ///
+    /// Note that, unlike in the ISO/IRC 14496-12 spec,
+    /// the sample index is 0 (zero) based, not 1 based.
+    ///
     pub fn iter(&self) -> SyncSampleIterator<'_> {
         SyncSampleIterator {
             entries: &self.entries,
@@ -33,7 +38,7 @@ impl<'a> Iterator for SyncSampleIterator<'a> {
         if self.index == self.entries.len() {
             return None;
         }
-        let val = self.entries[self.index];
+        let val = self.entries[self.index].saturating_sub(1);
         self.index += 1;
         Some(val)
     }

@@ -1,10 +1,10 @@
 //! Debug helpers.
 //!
-use crate::mp4box::MP4;
+use crate::mp4box::{MP4, MP4Box};
 use crate::track::SampleInfo;
 
 /// Dump sample information.
-pub fn dump_track(mp4: &MP4, track_id: u32) {
+pub fn dump_track_samples(mp4: &MP4, track_id: u32) {
 
     let movie = mp4.movie();
 
@@ -36,5 +36,61 @@ pub fn dump_track(mp4: &MP4, track_id: u32) {
                  jump, idx, sample.fpos, sample.size, dtime, ctime_d, is_sync, sample.chunkno);
     }
     println!("Sample vector size: {} bytes", count * std::mem::size_of::<SampleInfo>());
+}
+
+/// Dump timestamps of all the Track Fragments.
+pub fn dump_traf_timestamps(mp4: &MP4) {
+
+    let ts: Vec<_> = mp4.movie().tracks().iter().map(|t| t.media().media_header().timescale).collect();
+    let mut count = Vec::new();
+    count.resize(ts.len(), 0u32);
+
+    let mut time = Vec::new();
+    time.resize(ts.len(), 0);
+
+    for box_ in &mp4.boxes {
+        let moof = match box_ {
+            MP4Box::MovieFragmentBox(moof) => moof,
+            _ => continue,
+        };
+        for traf in moof.track_fragments().iter() {
+            let tfhd = match traf.track_fragment_header() {
+                Some(tfhd) => tfhd,
+                None => continue,
+            };
+            let dfl_dur = tfhd.default_sample_duration.unwrap_or(0);
+            let id = tfhd.track_id as usize;
+
+            let mut is_leading = None;
+            let mut delta = 0;
+            for trun in traf.track_run_boxes() {
+                if delta == 0 {
+                    if let Some(isl) = trun.first_sample_flags.as_ref().map(|f| f.is_leading) {
+                        is_leading.replace(isl);
+                    }
+                }
+                for entry in &trun.entries {
+                    count[id - 1] += 1;
+                    delta += entry.sample_duration.unwrap_or(dfl_dur);
+                }
+            }
+            time[id - 1] += delta;
+
+            let start = if let Some(tfdt) = traf.track_fragment_decode_time() {
+                tfdt.base_media_decode_time.0 as f64 / (ts[id - 1] as f64)
+            } else {
+                time[id - 1] as f64 / (ts[id - 1] as f64)
+            };
+            let end = start + delta as f64 / (ts[id - 1] as f64);
+
+            println!("{}. start: {:.05}, end: {:.05}, leading: {:?}", id, start, end, is_leading);
+            if id == ts.len() {
+                println!("");
+            }
+        }
+    }
+    for (c, idx) in count.iter().enumerate() {
+        println!("{}: sample_count: {}", c, idx);
+    }
 }
 
