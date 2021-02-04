@@ -18,7 +18,7 @@ def_box! {
 macro_rules! apple_name_item {
     ($box_type:ident, $box_name:ident, $box_fourcc:expr) => {
         /// Apple item $box_name tag.
-        #[derive(Debug)]
+        #[derive(Clone, Debug)]
         pub struct $box_type {
             pub $box_name:   String,
         }
@@ -83,7 +83,7 @@ apple_name_item!(IMeanBox, mean, b"mean");
 apple_name_item!(INameBox, name, b"name");
 
 /// Apple item.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct AppleItem {
     tag:    FourCC,
     name:   Option<INameBox>,
@@ -156,13 +156,13 @@ impl BoxInfo for AppleItem {
 impl FullBox for AppleItem {}
 
 /// Apple item data.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct IDataBox {
     pub flags:  u32,
     pub data:   AppleData,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum AppleData {
     Text(String),
     Binary(Data),

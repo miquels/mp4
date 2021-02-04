@@ -415,7 +415,7 @@ macro_rules! def_struct {
 
     // Main entry point to define just one struct.
     ($(#[$outer:meta])* $name:ident, $($field:tt: $type:tt $(<$gen:tt>)?),* $(,)?) => {
-        def_struct!(@def_struct $(#[$outer])* $name,
+        def_struct!(@def_struct $(#[$outer])* #[derive(Clone)] $name,
             $(
                 $field: $type $(<$gen>)?,
             )*

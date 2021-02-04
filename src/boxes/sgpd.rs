@@ -95,7 +95,7 @@ impl FullBox for SampleGroupDescriptionBox {
 }
 
 /// 8.9.3 Item in a Sample Group Description Box.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct SampleGroupDescriptionItem {
     pub description_length: Option<u32>,
     pub entry: SampleGroupDescriptionEntry,
@@ -127,7 +127,7 @@ impl SampleGroupDescriptionItem {
 }
 
 /// Generic (i.e. unreckognized) sample group entry.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct GenericSampleGroupEntry {
     pub data: Data,
 }
@@ -150,7 +150,7 @@ impl ToBytes for GenericSampleGroupEntry {
 macro_rules! sample_group_description_entries {
     ($($fourcc:expr => $name:ident,)*) => {
 
-        #[derive(Debug)]
+        #[derive(Clone, Debug)]
         pub enum SampleGroupDescriptionEntry {
             $(
                 $name($name),

@@ -122,6 +122,7 @@ impl BoxBytes for Mp4File
 }
 
 /// reference to a chunk of data somewhere in the source file.
+#[derive(Clone)]
 pub struct DataRef {
     mmap:  Arc<Mmap>,
     start: usize,

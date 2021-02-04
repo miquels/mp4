@@ -22,7 +22,7 @@ def_box! {
 }
 
 /// 8.16.3 Segment Index Box, Segment Reference struct. (ISO/IEC 14496-12:2015(E))
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct SegmentReference {
     pub reference_type: u8,
     pub referenced_size: u32,

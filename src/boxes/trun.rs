@@ -133,7 +133,7 @@ impl FullBox for TrackRunBox {
 }
 
 /// 8.8.8 Track Fragment Run Sample Entry (ISO/IEC 14496-12:2015(E))
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct TrackRunEntry {
     pub sample_duration: Option<u32>,
     pub sample_size: Option<u32>,

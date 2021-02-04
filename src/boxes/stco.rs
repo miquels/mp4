@@ -4,7 +4,7 @@ use crate::boxes::prelude::*;
 /// 8.7.5 Chunk Offset Box  (ISO/IEC 14496-12:2015(E))
 ///
 /// Implements both "stco" and "co64".
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ChunkOffsetBox {
     fourcc:      FourCC,
     pub count:   u32,

@@ -149,7 +149,7 @@ impl ESDescriptorBox {
 //
 
 // Every descriptor starts with a length and a tag.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct BaseDescriptor {
     size: u32,
     tag:    u8,
@@ -216,7 +216,7 @@ const SLCONFIG_DESCRIPTOR_TAG: u8 = 0x06;
 /// Elementary Stream Descriptor, tag 0x03.
 ///
 /// In a MP4 file, depends_on_es_id, url, and ocr_es_id are always None.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ESDescriptor {
     // lower 16 bits of Track Id, or 0.
     pub es_id:                      u16,
@@ -320,7 +320,7 @@ impl ToBytes for ESDescriptor {
 ///   0x68 Audio ISO/IEC 13818-7 Scaleable Sampling Rate Profile
 ///   0x69 Audio ISO/IEC 13818-3
 ///   0x6B Audio ISO/IEC 11172-3
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct DecoderConfigDescriptor {
     pub object_type:    u8,
     pub stream_type:    u8,
@@ -380,7 +380,7 @@ impl ToBytes for DecoderConfigDescriptor {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct DecoderSpecificInfo {
     pub data:   Data,
     pub audio:  Option<AudioSpecificConfig>,
@@ -392,7 +392,7 @@ pub struct DecoderSpecificInfo {
 /// 2:  AAC-LC
 /// 5:  HE-AAC   (AAC-LC + SBR)
 /// 29: HE-AACv2 (AAC-LC + SBR + PS)
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct AudioSpecificConfig {
     pub profile:    u8,
     pub sampling_frequency_index:    u8,
@@ -447,7 +447,7 @@ impl ToBytes for DecoderSpecificInfo {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct SLConfigDescriptor {
     pub config_type:    u8,
     pub data:           Data,
@@ -488,7 +488,7 @@ impl ToBytes for SLConfigDescriptor {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct UnknownDescriptor {
     pub tag:        u8,
     pub data:       Data,

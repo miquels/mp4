@@ -27,7 +27,7 @@ impl TimeToSampleBox {
 
 def_struct! {
     /// Entry in TimeToSampleBox.
-    #[derive(Default, Clone)]
+    #[derive(Default)]
     TimeToSampleEntry,
         count:  u32,
         delta:  u32,

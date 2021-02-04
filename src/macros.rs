@@ -74,7 +74,7 @@ macro_rules! def_box {
      version => $version:tt, impls => [ $($impl:ident),* ] $(,)?)  => {
 
         // Define the struct itself.
-        def_box!(@IMPL def_struct $(#[$outer])* $name, $block);
+        def_box!(@IMPL def_struct $(#[$outer])* #[derive(Clone)] $name, $block);
 
         // And the impl's we want for it.
         $(
@@ -235,6 +235,7 @@ macro_rules! impl_enum {
         //
 
         /// All the boxes we know.
+        #[derive(Clone)]
         pub enum $enum {
             $(
                 $name($name),

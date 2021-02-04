@@ -188,6 +188,7 @@ fn short(track: &mp4::track::TrackInfo) {
 fn mediainfo(opts: MediainfoOpts) -> Result<()> {
     let mut reader = Mp4File::open(&opts.input)?;
     let mp4 = MP4::read(&mut reader)?;
+    let mp4 = mp4.clone();
 
     let res = mp4::track::track_info(&mp4);
     if let Some(track) = opts.track {

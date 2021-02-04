@@ -21,7 +21,7 @@ def_box! {
 }
 
 /// Entry in an edit list.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct EditListEntry {
     pub segment_duration:   u64,
     pub media_time:     i64,

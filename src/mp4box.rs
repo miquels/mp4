@@ -320,6 +320,7 @@ impl<'a> BoxBytes for BoxWriter<'a> {
 }
 
 /// Main entry point for ISOBMFF box structure.
+#[derive(Clone)]
 pub struct MP4 {
     /// The boxes at the top level.
     pub boxes:  Vec<MP4Box>,
@@ -431,6 +432,7 @@ pub fn write_boxes<W: WriteBytes>(mut file: W, boxes: &[MP4Box]) -> io::Result<(
 //
 
 /// Any unknown boxes we encounter are put into a GenericBox.
+#[derive(Clone)]
 pub struct GenericBox {
     fourcc: FourCC,
     data:   Option<Vec<u8>>,

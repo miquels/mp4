@@ -85,7 +85,7 @@ macro_rules! def_from_to_bytes_versioned {
 }
 
 /// The optional "usertype" is a uuid.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Uuid(pub [u8; 16]);
 
 impl FromBytes for Uuid {
@@ -131,7 +131,7 @@ impl Debug for Uuid {
 }
 
 /// Basically a blob of data.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Data(pub Vec<u8>);
 
 impl Data {
@@ -191,7 +191,7 @@ impl Debug for Data {
 }
 
 /// 32 bits in boxes with version 0, and 64 bits in boxes with version >= 1.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct VersionSizedUint(pub u64);
 def_from_to_bytes_versioned!(VersionSizedUint);
 
@@ -202,7 +202,7 @@ impl Debug for VersionSizedUint {
 }
 
 /// Duration_ is a 32/64 bit value where "all ones" means "unknown".
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct Duration_(pub u64);
 def_from_to_bytes_versioned!(Duration_, 0x7fffffff);
 
@@ -213,7 +213,7 @@ impl Debug for Duration_ {
 }
 
 /// Time is a 32/64 bit value, measured in seconds since 01-01-1904 00:00:00
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct Time(u64);
 def_from_to_bytes_versioned!(Time);
 
@@ -351,6 +351,7 @@ impl Default for IsoLanguageCode {
 }
 
 /// Zero terminated ASCII string.
+#[derive(Clone, Default)]
 pub struct ZString(pub String);
 
 impl ZString {
@@ -421,6 +422,7 @@ impl Debug for ZString {
 }
 
 /// Matrix.
+#[derive(Clone, Default)]
 pub struct Matrix([(FixedFloat16_16, FixedFloat16_16, FixedFloat2_30); 3]);
 
 impl FromBytes for Matrix {
@@ -535,7 +537,7 @@ impl_flags!(
 ///
 /// For the first four fields, see 8.6.4.3 (Semantics).
 /// The sample_is_non_sync_sample field  provides the same information as the sync sample table [8.6.2].
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct SampleFlags {
     pub is_leading:                  u8,
     pub sample_depends_on:           u8,
@@ -673,6 +675,15 @@ macro_rules! define_array {
             }
         }
 
+        impl<T> Clone for $name<T> where T: Clone {
+            fn clone(&self) -> Self {
+                $name {
+                    vec: self.vec.clone(),
+                    nosize: self.nosize,
+                }
+            }
+        }
+
         // Debug implementation that delegates to the inner Vec.
         impl<T> Debug for $name<T> where T: Debug {
             fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -759,7 +770,7 @@ define_array!(
 
 macro_rules! fixed_float {
     ($(#[$outer:meta])* $name:ident, $type:tt, $frac_bits:expr) => {
-        #[derive(Clone, Copy)]
+        #[derive(Clone, Copy, Default)]
         $(#[$outer])*
         pub struct $name($type);
         def_from_to_bytes_newtype!($name, $type);
@@ -834,7 +845,7 @@ fixed_float!(
 /// Pascal string. 1 byte of length followed by string itself.
 ///
 /// Note that the length does not include the length byte itself.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct PString(String);
 
 impl PString {
@@ -883,7 +894,7 @@ impl ToBytes for PString {
 /// Pascal16 string. 2 bytes of length followed by string itself.
 ///
 /// Note that the length does not include the length byte itself.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct P16String(String);
 
 impl P16String {

@@ -42,6 +42,7 @@ pub mod types;
 mod bitreader;
 //mod global;
 pub mod debug;
+//pub mod fragment;
 pub mod io;
 pub mod mp4box;
 pub mod boxes;
