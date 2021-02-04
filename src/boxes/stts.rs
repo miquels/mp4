@@ -2,6 +2,7 @@ use std::io;
 use crate::boxes::prelude::*;
 
 def_box! {
+    #[derive(Default)]
     TimeToSampleBox {
         entries:        ArraySized32<TimeToSampleEntry>,
     },

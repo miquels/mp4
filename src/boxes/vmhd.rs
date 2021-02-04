@@ -3,7 +3,7 @@ use std::io;
 use crate::boxes::prelude::*;
 
 def_box! {
-    VideoMediaInformationBox {
+    VideoMediaHeaderBox {
         flags:          VideoMediaHeaderFlags,
         graphics_mode:  u16,
         opcolor:        OpColor,

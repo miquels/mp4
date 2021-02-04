@@ -2,6 +2,7 @@ use std::io;
 use crate::boxes::prelude::*;
 
 def_box! {
+    #[derive(Default)]
     SyncSampleBox {
         entries:        ArraySized32<u32>,
     },

@@ -34,6 +34,7 @@ def_box! {
     /// - SampleAuxiliaryInformationSizesBox, saiz
     /// - SampleAuxiliaryInformationOffsetsBox, saio
     ///
+    #[derive(Default)]
     SampleTableBox {
         boxes:      Vec<MP4Box>,
     },

@@ -41,6 +41,7 @@ def_box! {
     impls => [ boxinfo, debug, fromtobytes, fullbox ],
 }
 def_box! {
+    #[derive(Default)]
     NullMediaHeaderBox {
     },
     fourcc => "nmhd",
@@ -173,6 +174,7 @@ def_box! {
 }
 
 def_box! {
+    #[derive(Default)]
     SubtitleMediaHeaderBox {
     },
     fourcc => "sthd",
@@ -202,6 +204,19 @@ def_box! {
     impls => [ boxinfo, debug, fromtobytes, fullbox ],
 }
 
+// Default needs to set ample_description_index to 1.
+impl Default for TrackExtendsBox {
+    fn default() -> TrackExtendsBox {
+        TrackExtendsBox {
+            track_id:   0,
+            default_sample_description_index: 1,
+            default_sample_duration: 0,
+            default_sample_size: 0,
+            default_sample_flags: SampleFlags::default(),
+        }
+    }
+}
+
 def_box! {
     SegmentTypeBox {
         major_brand:        FourCC,
@@ -215,7 +230,7 @@ def_box! {
 
 def_box! {
     MovieExtendsHeaderBox {
-        fragment_duration:  VersionSizedUint,
+        fragment_duration:  Duration_,
     },
     fourcc => "mehd",
     version => [0, fragment_duration],

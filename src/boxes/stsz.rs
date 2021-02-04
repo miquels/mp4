@@ -6,6 +6,7 @@ use crate::io::DataRef;
 
 def_box! {
     /// 8.7.3.2 Sample Size Box (ISO/IEC 14496-12:2015(E))
+    #[derive(Default)]
     SampleSizeBox {
         size:    u32,
         count:   u32,

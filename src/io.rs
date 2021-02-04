@@ -153,6 +153,18 @@ impl ToBytes for DataRef {
     }
 }
 
+impl Default for DataRef {
+    fn default() -> DataRef {
+        let devzero = fs::File::open("/dev/zero").unwrap();
+        let mmap = unsafe { MmapOptions::new().len(4).map(&devzero).unwrap() };
+        DataRef {
+            mmap: Arc::new(mmap),
+            start: 0,
+            end: 0,
+        }
+    }
+}
+
 // deref to &[u8]
 impl std::ops::Deref for DataRef {
     type Target = [u8];

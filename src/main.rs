@@ -36,10 +36,14 @@ pub enum Command {
     Subtitles(SubtitlesOpts),
 
     #[structopt(display_order = 4)]
+    /// fragment an mp4 file.
+    Fragment(FragmentOpts),
+
+    #[structopt(display_order = 5)]
     /// Dump the mp4 file
     Dump(DumpOpts),
 
-    #[structopt(display_order = 5)]
+    #[structopt(display_order = 6)]
     /// Debugging.
     Debug(DebugOpts),
 }
@@ -89,6 +93,19 @@ pub struct SubtitlesOpts {
 
     /// Input filename.
     pub input: String,
+}
+
+#[derive(StructOpt, Debug)]
+pub struct FragmentOpts {
+    #[structopt(short, long, use_delimiter = true)]
+    /// Select tracks.
+    pub tracks: Vec<u32>,
+
+    /// Input filename.
+    pub input: String,
+
+    /// Output filename.
+    pub output: String,
 }
 
 #[derive(StructOpt, Debug)]
@@ -144,6 +161,7 @@ fn main() -> Result<()> {
         Command::Dump(opts) => return dump(opts),
         Command::Rewrite(opts) => return rewrite(opts),
         Command::Subtitles(opts) => return subtitles(opts),
+        Command::Fragment(opts) => return fragment(opts),
         Command::Mediainfo(opts) => return mediainfo(opts),
         Command::Debug(opts) => return debug(opts),
     }
@@ -175,6 +193,18 @@ fn subtitles(opts: SubtitlesOpts) -> Result<()> {
     let stdout = io::stdout();
     let mut handle = stdout.lock();
     subtitle::subtitle_extract(&mp4, track, opts.format, &mut handle)?;
+
+    Ok(())
+}
+
+fn fragment(opts: FragmentOpts) -> Result<()> {
+    let mut reader = Mp4File::open(&opts.input)?;
+    let mp4 = MP4::read(&mut reader)?;
+
+    let media_init_section = mp4::fragment::media_init_section(&mp4, &opts.tracks);
+
+    let writer = File::create(&opts.output)?;
+    media_init_section.write(writer)?;
 
     Ok(())
 }

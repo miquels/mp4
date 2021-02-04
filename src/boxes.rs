@@ -99,5 +99,5 @@ def_boxes! {
     TextSubtitleSampleEntry, b"sbtt";
     XMLSubtitleSampleEntry, b"stpp";
 
-    VideoMediaInformationBox, b"vmhd" => vmhd;
+    VideoMediaHeaderBox, b"vmhd" => vmhd;
 }
