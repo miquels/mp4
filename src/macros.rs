@@ -175,8 +175,18 @@ macro_rules! impl_fromtobytes {
             #[allow(unused_variables)]
             fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<$name> {
 
-                log::trace!("XXX frombyting {} min_size is {} stream.left is {}",
-                       stringify!($name), <$name>::min_size(), stream.left());
+                fn alignment(pos: u64) -> u32 {
+                    match pos % 8 {
+                        0 => 8,
+                        2 => 2,
+                        4 => 4,
+                        6 => 2,
+                        _ => 1,
+                    }
+                }
+                log::trace!("{}::from_bytes: min_size {}, position {}, alignment {}",
+                       stringify!($name), <$name>::min_size(), stream.pos(),
+                       alignment(stream.pos()));
 
                 // Deserialize.
                 let mut reader = $crate::mp4box::BoxReader::new(stream)?;
@@ -198,7 +208,7 @@ macro_rules! impl_fromtobytes {
                     )*)
                 };
 
-                log::trace!("XXX -- done frombyting {}", stringify!($name));
+                //log::trace!("XXX -- done frombyting {}", stringify!($name));
 
                 r
             }
@@ -278,7 +288,7 @@ macro_rules! impl_enum {
 
                 // Peek at the header.
                 let header = BoxHeader::peek(stream)?;
-                log::debug!("header {:?}", header);
+                log::trace!("MP4Box::from_bytes: header: {:?}", header);
 
                 // If the version is too high, read it as a GenericBox.
                 match (header.version, header.max_version) {

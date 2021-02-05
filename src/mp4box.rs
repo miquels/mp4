@@ -133,12 +133,13 @@ impl<'a> BoxReader<'a> {
     pub fn new(stream: &'a mut impl ReadBytes) -> io::Result<BoxReader<'a>> {
         let header = BoxHeader::read(stream)?;
         let maxsize = std::cmp::min(stream.size(), stream.pos() + header.size);
+        /*
         log::trace!(
-            "XXX header {:?} maxsize {} left {}",
+            "BoxReader::new(): header {:?}, maxsize {}, left {}",
             header,
             maxsize,
             stream.left()
-        );
+        );*/
         Ok(BoxReader {
             header,
             maxsize,
@@ -152,7 +153,7 @@ impl Drop for BoxReader<'_> {
     fn drop(&mut self) {
         if self.pos < self.maxsize {
             log::trace!(
-                "XXX BoxReader {} drop: skipping {}",
+                "BoxReader::drop {}: skipping {} bytes padding",
                 self.header.fourcc,
                 self.maxsize - self.pos
             );
