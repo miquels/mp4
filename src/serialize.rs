@@ -302,6 +302,12 @@ macro_rules! def_struct {
     (@min_size ArraySized32<$gen:tt>) => { 4 };
     (@min_size ArraySized16<$gen:tt>) => { 2 };
     (@min_size ArrayUnsized<$gen:tt>) => { 0 };
+    (@min_size DataRefSized32<$gen:tt>) => { 4 };
+    (@min_size DataRefSized16<$gen:tt>) => { 2 };
+    (@min_size DataRefUnsized<$gen:tt>) => { 0 };
+    (@min_size ListSized32<$gen:tt>) => { 4 };
+    (@min_size ListSized16<$gen:tt>) => { 2 };
+    (@min_size ListUnsized<$gen:tt>) => { 0 };
     (@min_size [ $_type:ty ]) => { 0 };
     (@min_size ( $_type:ty )) => { 0 };
     (@min_size { $_type:ty }) => { 0 };

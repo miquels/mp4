@@ -454,7 +454,7 @@ impl FromBytes for GenericBox {
         } else if size < 65536 {
             data = Some(stream.read(size)?.to_vec());
         } else {
-            data_ref = Some(DataRef::from_bytes(stream, size)?);
+            data_ref = Some(DataRef::from_bytes_limit(stream, size)?);
         }
         Ok(GenericBox {
             fourcc: stream.fourcc(),

@@ -180,7 +180,7 @@ impl FromBytes for IDataBox {
 
         // If it's too big, don't read it into memory.
         if size > 32768 {
-            let data = DataRef::from_bytes(stream, size)?;
+            let data = DataRef::from_bytes_limit(stream, size)?;
             return Ok(IDataBox {
                 flags,
                 data: AppleData::Extern(data),

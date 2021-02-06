@@ -1,8 +1,6 @@
-use std::convert::TryInto;
 use std::io;
 
 use crate::boxes::prelude::*;
-use crate::io::DataRef;
 
 def_box! {
     /// 8.7.3.2 Sample Size Box (ISO/IEC 14496-12:2015(E))
@@ -10,46 +8,21 @@ def_box! {
     SampleSizeBox {
         size:    u32,
         count:   u32,
-        entries: DataRef,
+        entries: ListSized32<u32>,
     },
     fourcc => "stsz",
     version => [0],
     impls => [ boxinfo, debug, fullbox ],
 }
 
+pub type SampleSizeIterator<'a> = ListIteratorCloned<'a, u32>;
+
 impl SampleSizeBox {
     pub fn iter(&self) -> SampleSizeIterator<'_> {
-        SampleSizeIterator {
-            size:   self.size,
-            count:  self.count,
-            entries: &self.entries[..],
-            index: 0,
-        }
-    }
-}
-
-pub struct SampleSizeIterator<'a> {
-    size:       u32,
-    count:      u32,
-    entries:    &'a [u8],
-    index:      usize,
-}
-
-impl<'a> Iterator for SampleSizeIterator<'a> {
-    type Item = u32;
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index == self.count as usize {
-            return None;
-        }
         if self.entries.len() == 0 {
-            Some(self.size)
+            self.entries.iter_repeat(self.size, self.count as usize)
         } else {
-            let idx = self.index * 4;
-            let size = u32::from_be_bytes(self.entries[idx..idx+4].try_into().unwrap());
-            self.index += 1;
-            Some(size)
+            self.entries.iter_cloned()
         }
     }
 }
@@ -60,11 +33,17 @@ impl FromBytes for SampleSizeBox {
         let stream = &mut reader;
 
         let size = u32::from_bytes(stream)?;
-        let count = u32::from_bytes(stream)?;
 
+        let entries;
+        let count;
+        if size == 0 {
+            entries = ListSized32::from_bytes(stream)?;
+            count = entries.len() as u32;
+        } else {
+            entries = ListSized32::default();
+            count = u32::from_bytes(stream)?;
+        }
         log::trace!("SampleSizeBox: size {} count {}", size, count);
-        let entries_count = if size == 0 { count * 4 } else { 0 };
-        let entries = DataRef::from_bytes(stream, entries_count as u64)?;
 
         Ok(SampleSizeBox {
             size,

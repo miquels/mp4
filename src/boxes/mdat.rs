@@ -17,7 +17,7 @@ impl FromBytes for MediaDataBox {
     fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<MediaDataBox> {
         let mut reader = BoxReader::new(stream)?;
         let size = reader.left();
-        let data = DataRef::from_bytes(&mut reader, size)?;
+        let data = DataRef::from_bytes_limit(&mut reader, size)?;
         Ok(MediaDataBox{ data })
     }
     fn min_size() -> usize { 8 }

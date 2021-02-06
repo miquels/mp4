@@ -6,6 +6,7 @@
 use std::convert::TryInto;
 use std::fmt::{Debug, Display, Write};
 use std::io;
+use std::mem;
 use std::time::{Duration, SystemTime};
 
 use chrono::{
@@ -14,6 +15,7 @@ use chrono::{
 };
 use serde::Serialize;
 
+use crate::io::DataRef;
 use crate::mp4box::FullBox;
 use crate::serialize::{FromBytes, ReadBytes, ToBytes, WriteBytes};
 
@@ -582,191 +584,440 @@ impl ToBytes for SampleFlags {
     }
 }
 
-macro_rules! define_array {
-    ($(#[$outer:meta])* $name:ident, $sizetype:ty, $nosize:expr) => {
+mod doc_hidden {
+    pub trait FromPrimitive: Sized {
+        fn from_usize(n: usize) -> Self;
+    }
+    impl FromPrimitive for () {
+        fn from_usize(_n: usize) -> () { () }
+    }
+    impl FromPrimitive for u16 {
+        fn from_usize(n: usize) -> u16 { n as u16 }
+    }
+    impl FromPrimitive for u32 {
+        fn from_usize(n: usize) -> u32 { n as u32 }
+    }
 
-        $(#[$outer])*
-        pub struct $name<T> {
-            pub vec: Vec<T>,
-            nosize: bool,
+    pub trait ToPrimitive {
+        fn to_usize(self) -> usize;
+    }
+    impl ToPrimitive for ()
+    {
+        fn to_usize(self) -> usize { unimplemented!() }
+    }
+    impl ToPrimitive for u16
+    {
+        fn to_usize(self) -> usize { self as usize }
+    }
+    impl ToPrimitive for u32
+    {
+        fn to_usize(self) -> usize { self as usize }
+    }
+}
+
+#[doc(hidden)]
+pub use doc_hidden::*;
+
+/// A mutable list of items.
+///
+/// When reading from a source file or writing to a destination file,
+/// the `N` type indicates whether there is an integer in front of
+/// the array's elements stating its size.
+///
+/// - `()`: no size, elements go on to the end of the box
+/// - `u16`: 2 bytes size
+/// - `u32`: 4 bytes size.
+///
+pub struct Array<N, T> {
+    vec: Vec<T>,
+    num_entries_type: std::marker::PhantomData<N>,
+}
+
+impl<N, T> Array<N, T> {
+    /// Constructs a new, empty `Array`.
+    pub fn new() -> Self {
+        Self {
+            vec: Vec::<T>::new(),
+            num_entries_type: std::marker::PhantomData,
         }
+    }
 
-        impl<T> $name<T> {
-            /// See Vec::new()
-            pub fn new() -> $name<T> {
-                $name {
-                    vec: Vec::<T>::new(),
-                    nosize: $nosize,
-                }
-            }
+    /// Appends an element to the back.
+    pub fn push(&mut self, value: T) {
+        self.vec.push(value)
+    }
 
-            /// See Vec::push()
-            pub fn push(&mut self, value: T) {
-                self.vec.push(value)
-            }
+    /// Returns the number of elements in the array.
+    pub fn len(&self) -> usize {
+        self.vec.len()
+    }
 
-            /// See Vec::len()
-            pub fn len(&self) -> usize {
-                self.vec.len()
-            }
+    /// Returns an iterator over the elements in this array.
+    pub fn iter(&self) -> ArrayIterator<'_, T> {
+        ArrayIterator(self.vec.iter())
+    }
+
+    /// Returns an iterator that clones.
+    pub fn iter_cloned(&self) -> ArrayIteratorCloned<'_, T>
+    where
+        T: Clone,
+    {
+        ArrayIteratorCloned::<'_, T> {
+            count:      self.len(),
+            default:    None,
+            entries:    &self.vec[..],
+            index:      0,
         }
+    }
 
-        impl<T> Default for $name<T> {
-            fn default() -> $name<T> {
-                $name::<T>::new()
-            }
-        }
-
-        impl<T> FromBytes for $name<T> where T: FromBytes {
-
-            fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<Self> {
-                let (mut v, count) = if $nosize {
-                    (Vec::new(), std::u32::MAX as usize)
-                } else {
-                    let sz = <$sizetype>::from_bytes(stream)? as usize;
-                    (Vec::with_capacity(sz), sz)
-                };
-                let min_size = T::min_size() as u64;
-                while ($nosize || v.len() < count) && stream.left() >= min_size && stream.left() > 0 {
-                    v.push(T::from_bytes(stream)?);
-                }
-                Ok($name {
-                    vec: v,
-                    nosize: $nosize,
-                })
-            }
-            fn min_size() -> usize {
-                if $nosize {
-                    T::min_size()
-                } else {
-                    <$sizetype>::min_size()
-                }
-            }
-        }
-
-        impl<T> ToBytes for $name<T> where T: ToBytes {
-            fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
-                if !self.nosize {
-                    (self.vec.len() as $sizetype).to_bytes(stream)?;
-                }
-                for elem in &self.vec {
-                    elem.to_bytes(stream)?;
-                }
-                Ok(())
-            }
-        }
-
-        impl<T> FullBox for $name<T> where T: FullBox {
-            fn version(&self) -> Option<u8> {
-                // Find the highest version of any entry.
-                let mut r = None;
-                for e in &self.vec {
-                    if let Some(ver) = e.version() {
-                        if let Some(r_ver) = r {
-                            if ver > r_ver {
-                                r = Some(ver);
-                            }
-                        } else {
-                            r = Some(ver);
-                        }
-                    }
-                }
-                r
-            }
-        }
-
-        impl<T> Clone for $name<T> where T: Clone {
-            fn clone(&self) -> Self {
-                $name {
-                    vec: self.vec.clone(),
-                    nosize: self.nosize,
-                }
-            }
-        }
-
-        // Debug implementation that delegates to the inner Vec.
-        impl<T> Debug for $name<T> where T: Debug {
-            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                if f.alternate() {
-                    if self.vec.len() > 4 {
-                        writeln!(f, "\n// Array length: {}", self.vec.len())?;
-                    }
-                    if self.vec.len() > 20 {
-                        writeln!(f, "// (only showing first and last entry)")?;
-                        let v = vec![&self.vec[0], &self.vec[self.vec.len() - 1]];
-                        return f.debug_list().entries(v.into_iter()).finish();
-                    }
-                }
-                Debug::fmt(&self.vec, f)
-            }
-        }
-
-        impl<T> std::ops::Deref for $name<T> {
-            type Target = [T];
-
-            fn deref(&self) -> &[T] {
-                std::ops::Deref::deref(&self.vec)
-            }
-        }
-
-        impl<T> std::ops::DerefMut for $name<T> {
-            fn deref_mut(&mut self) -> &mut[T] {
-                std::ops::DerefMut::deref_mut(&mut self.vec)
-            }
-        }
-
-        impl<'a, T> IntoIterator for &'a $name<T> {
-            type Item = &'a T;
-            type IntoIter = std::slice::Iter<'a, T>;
-
-            fn into_iter(self) -> std::slice::Iter<'a, T> {
-                self.iter()
-            }
-        }
-
-        impl<T> std::iter::FromIterator<T> for $name<T> {
-            fn from_iter<I>(iter: I) -> Self where I: IntoIterator<Item = T> {
-                let mut v = Vec::new();
-                for i in iter {
-                    v.push(i);
-                }
-                $name {
-                    vec: v,
-                    nosize: $nosize,
-                }
-            }
+    /// Returns an iterator that repeats the same item `count` times.
+    pub fn iter_repeat(&self, item: T, count: usize) -> ArrayIteratorCloned<'_, T>
+    where
+        T: Clone,
+    {
+        ArrayIteratorCloned::<'_, T> {
+            count,
+            default:    Some(item),
+            entries:    &[],
+            index:      0,
         }
     }
 }
 
-define_array!(
-    /// Array with 16 bits length-prefix.
-    ///
-    /// In serialized form the array starts with a 16 bit field that
-    /// indicates the number of elements, followed by the elements itself.
-    ArraySized16,
-    u16,
-    false
-);
+impl<N, T> Default for Array<N, T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
-define_array!(
-    /// Array with 32 bits length-prefix.
-    ///
-    /// In serialized form the array starts with a 32 bit field that
-    /// indicates the number of elements, followed by the elements itself.
-    ArraySized32,
-    u32,
-    false
-);
+impl<N, T> FromBytes for Array<N, T> where N: FromBytes + ToPrimitive, T: FromBytes {
 
-define_array!(
-    /// Array with no length prefix.
-    ///
-    /// It simply stretches to the end of the containing box.
-    ArrayUnsized,
-    u32,
-    true
-);
+    fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<Self> {
+        let (mut v, count) = if mem::size_of::<N>() == 0 {
+            (Vec::new(), std::u32::MAX as usize)
+        } else {
+            let sz = N::from_bytes(stream)?.to_usize();
+            (Vec::with_capacity(sz), sz)
+        };
+        let min_size = T::min_size() as u64;
+        while v.len() < count && stream.left() >= min_size && stream.left() > 0 {
+            v.push(T::from_bytes(stream)?);
+        }
+        Ok(Self {
+            vec: v,
+            num_entries_type: std::marker::PhantomData,
+        })
+    }
+
+    fn min_size() -> usize {
+        if mem::size_of::<N>() > 0 {
+            N::min_size()
+        } else {
+            0           
+        }
+    }
+}
+
+impl<N, T> ToBytes for Array<N, T> where N: ToBytes + FromPrimitive, T: ToBytes {
+    fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
+        if mem::size_of::<N>() > 0 {
+            N::from_usize(self.vec.len()).to_bytes(stream)?;
+        }
+        for elem in &self.vec {
+            elem.to_bytes(stream)?;
+        }
+        Ok(())
+    }
+}
+
+impl<N, T> FullBox for Array<N, T> where T: FullBox {
+    fn version(&self) -> Option<u8> {
+        // Find the highest version of any entry.
+        let mut r = None;
+        for e in &self.vec {
+            if let Some(ver) = e.version() {
+                if let Some(r_ver) = r {
+                    if ver > r_ver {
+                        r = Some(ver);
+                    }
+                } else {
+                    r = Some(ver);
+                }
+            }
+        }
+        r
+    }
+}
+
+impl<N, T> Clone for Array<N, T> where T: Clone {
+    fn clone(&self) -> Self {
+        Self {
+            vec: self.vec.clone(),
+            num_entries_type: std::marker::PhantomData,
+        }
+    }
+}
+
+// Debug implementation that delegates to the inner Vec.
+impl<N, T> Debug for Array<N, T> where T: Debug {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        if f.alternate() {
+            if self.vec.len() > 4 {
+                writeln!(f, "\n// Array length: {}", self.vec.len())?;
+            }
+            if self.vec.len() > 20 {
+                writeln!(f, "// (only showing first and last entry)")?;
+                let v = vec![&self.vec[0], &self.vec[self.vec.len() - 1]];
+                return f.debug_list().entries(v.into_iter()).finish();
+            }
+        }
+        Debug::fmt(&self.vec, f)
+    }
+}
+
+impl<N, T> std::ops::Deref for Array<N, T> {
+    type Target = [T];
+
+    fn deref(&self) -> &[T] {
+        std::ops::Deref::deref(&self.vec)
+    }
+}
+
+impl<N, T> std::ops::DerefMut for Array<N, T> {
+    fn deref_mut(&mut self) -> &mut[T] {
+        std::ops::DerefMut::deref_mut(&mut self.vec)
+    }
+}
+
+impl<'a, N, T> IntoIterator for &'a Array<N, T> {
+    type Item = &'a T;
+    type IntoIter = ArrayIterator<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<N, T> std::iter::FromIterator<T> for Array<N, T> {
+    fn from_iter<I>(iter: I) -> Self where I: IntoIterator<Item = T> {
+        let mut v = Vec::new();
+        for i in iter {
+            v.push(i);
+        }
+        Self {
+            vec: v,
+            num_entries_type: std::marker::PhantomData,
+        }
+    }
+}
+
+pub type ArraySized16<T> = Array<u16, T>;
+pub type ArraySized32<T> = Array<u32, T>;
+pub type ArrayUnsized<T> = Array<(), T>;
+
+/// Iterator over borrowed elements.
+pub struct ArrayIterator<'a, T>(std::slice::Iter<'a, T>);
+
+impl<'a, T> Iterator for ArrayIterator<'a, T>
+{
+    type Item = &'a T;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
+}
+
+pub struct ArrayIteratorCloned<'a, T> {
+    count:      usize,
+    default:    Option<T>,
+    entries:    &'a [T],
+    index:      usize,
+}
+
+/// Iterator over cloned elements.
+impl<'a, T> Iterator for ArrayIteratorCloned<'a, T>
+where
+    T: Clone,
+{
+    type Item = T;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index == self.count as usize {
+            return None;
+        }
+        if let Some(entry) = self.default.as_ref() {
+            self.index += 1;
+            return Some(entry.clone());
+        }
+        let entry = &self.entries[self.index];
+        self.index += 1;
+        Some(entry.clone())
+    }
+}
+
+/// Storage backed by an data reference or an array (vector, really).
+///
+/// N: If sized, means that the slice begins with a 'count'
+///    that indicates the number of elements in the slice.
+///
+/// T: Type of elements in the slice, used with 'push' and 'iter'.
+pub enum List<N=(), T=u8> {
+    DataRef(DataRef<N, T>),
+    Array(Array<N, T>),
+}
+
+pub type ListUnsized<T> = List<(), T>;
+pub type ListSized16<T> = List<u16, T>;
+pub type ListSized32<T> = List<u32, T>;
+
+impl<N, T> List<N, T> {
+    /// Number of elements.
+    pub fn len(&self) -> u64 {
+        match self {
+            List::DataRef(this) => this.len(),
+            List::Array(this) => this.len() as u64,
+        }
+    }
+
+    /// Does it need a large box.
+    pub fn is_large(&self) -> bool {
+        self.len() > u32::MAX as u64 - 16
+    }
+
+    /// return an iterator over all items.
+    pub fn iter(&self) -> ListIterator<'_, T>
+    where
+        T: FromBytes + ToPrimitive,
+    {
+        match self {
+            List::DataRef(this) => ListIterator::DataRef(this.iter()),
+            List::Array(this) => ListIterator::Array(this.iter()),
+        }
+    }
+
+    /// return an iterator over all items.
+    pub fn iter_cloned(&self) -> ListIteratorCloned<'_, T>
+    where
+        T: FromBytes + ToPrimitive + Clone,
+    {
+        match self {
+            List::DataRef(this) => ListIteratorCloned::DataRef(this.iter_cloned()),
+            List::Array(this) => ListIteratorCloned::Array(this.iter_cloned()),
+        }
+    }
+
+    /// Return an iterator that repeats the same item `count` times.
+    pub fn iter_repeat(&self, item: T, count: usize) -> ListIteratorCloned<'_, T>
+    where
+        T: FromBytes + ToPrimitive + Clone,
+    {
+        match self {
+            List::DataRef(this) => ListIteratorCloned::DataRef(this.iter_repeat(item, count)),
+            List::Array(this) => ListIteratorCloned::Array(this.iter_repeat(item, count)),
+        }
+    }
+}
+
+impl<N, T> FromBytes for List<N, T>
+where
+    N: FromBytes + ToPrimitive,
+    T: FromBytes,
+{
+    fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<Self> {
+        let data_ref = DataRef::<N, T>::from_bytes(stream)?;
+        Ok(List::DataRef(data_ref))
+    }
+
+    fn min_size() -> usize {
+        DataRef::<N, T>::min_size()
+    }
+}
+
+impl<N, T> ToBytes for List<N, T>
+where
+    N: ToBytes + FromPrimitive,
+    T: ToBytes,
+{
+    fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
+        match self {
+            List::DataRef(this) => this.to_bytes(stream),
+            List::Array(this) => this.to_bytes(stream),
+        }
+    }
+}
+
+impl<N, T> Default for List<N, T> {
+    /// The default is an empty Array.
+    fn default() -> Self {
+        let array = Array::<N, T>::new();
+        List::Array(array)
+    }
+}
+
+impl<N, T> Clone for List<N, T> where N: Clone, T: Clone {
+    fn clone(&self) -> Self {
+        match self {
+            List::DataRef(this) => List::DataRef(this.clone()),
+            List::Array(this) => List::Array(this.clone()),
+        }
+    }
+}
+
+impl<N, T> std::fmt::Debug for List<N, T>
+where
+    T: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            List::DataRef(this) => this.fmt(f),
+            List::Array(this) => this.fmt(f),
+        }
+    }
+}
+
+/// Iterator over the elements of the underlying DataRef or Array.
+pub enum ListIterator<'a, T> {
+    DataRef(crate::io::DataRefIterator<'a, T>),
+    Array(ArrayIterator<'a, T>),
+}
+
+impl<'a, T> Iterator for ListIterator<'a, T>
+where
+    T: FromBytes + ToPrimitive,
+{
+    type Item = &'a T;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            ListIterator::DataRef(this) => this.next(),
+            ListIterator::Array(this) => this.next(),
+        }
+    }
+}
+
+/// Iterator over the elements of the underlying DataRef or Array.
+pub enum ListIteratorCloned<'a, T> {
+    DataRef(crate::io::DataRefIteratorCloned<'a, T>),
+    Array(ArrayIteratorCloned<'a, T>),
+}
+
+impl<'a, T> Iterator for ListIteratorCloned<'a, T>
+where
+    T: FromBytes + ToPrimitive + Clone,
+{
+    type Item = T;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            ListIteratorCloned::DataRef(this) => this.next(),
+            ListIteratorCloned::Array(this) => this.next(),
+        }
+    }
+}
 
 macro_rules! fixed_float {
     ($(#[$outer:meta])* $name:ident, $type:tt, $frac_bits:expr) => {
