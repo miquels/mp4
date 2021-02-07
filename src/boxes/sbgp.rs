@@ -5,7 +5,7 @@ use crate::boxes::prelude::*;
 def_box! {
     SampleToGroupBox {
         grouping_type:  FourCC,
-        grouping_type_parameter: {Option<u32>},
+        grouping_type_parameter: Option<u32>,
         entries:        ArraySized32<SampleToGroupEntry>,
     },
     fourcc => "sbgp",

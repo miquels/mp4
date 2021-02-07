@@ -18,15 +18,16 @@ use crate::boxes::prelude::*;
 
 def_box! {
     /// 8.8.7 Track Fragment Header Box (ISO/IEC 14496-12:2015(E))
+    #[derive(Default)]
     TrackFragmentHeaderBox {
         track_id:                   u32,
         duration_is_empty:          bool,
         default_base_is_moof:       bool,
-        base_data_offset:           {Option<u64>},
-        sample_description_index:   {Option<u32>},
-        default_sample_duration:    {Option<u32>},
-        default_sample_size:        {Option<u32>},
-        default_sample_flags:       {Option<SampleFlags>},
+        base_data_offset:           Option<u64>,
+        sample_description_index:   Option<u32>,
+        default_sample_duration:    Option<u32>,
+        default_sample_size:        Option<u32>,
+        default_sample_flags:       Option<SampleFlags>,
     },
     fourcc => "tfhd",
     version => [0],

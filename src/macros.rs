@@ -375,6 +375,31 @@ macro_rules! impl_enum {
                 }
             }
         }
+
+        $(
+            impl_from!($name, $enum);
+        )*
+        impl_from!(GenericBox, $enum);
+    };
+}
+
+macro_rules! impl_from {
+    (ChunkLargeOffsetBox, $enum:ident) => {
+        // skip.
+    };
+    ($name:ident, $enum:ident) => {
+        /*
+        impl From<$name> for $enum {
+            fn from(value: $name) -> Self {
+                $enum::$name(value)
+            }
+        }
+        */
+        impl $name {
+            pub fn to_mp4box(self) -> $enum {
+                $enum::$name(self)
+            }
+        }
     };
 }
 

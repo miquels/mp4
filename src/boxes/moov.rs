@@ -51,6 +51,17 @@ impl MovieBox {
         })
     }
 
+    /// Get the track by id.
+    pub fn track_by_id(&self, track_id: u32) -> Option<&TrackBox> {
+        self.tracks().iter().find_map(|&t| {
+            if t.track_id() == track_id {
+                Some(t)
+            } else {
+                None
+            }
+        })
+    }
+
     /// Get the index of the first track with this handler.
     pub fn track_idx_by_handler(&self, handler: FourCC) -> Option<usize> {
         self.tracks().iter().enumerate().find_map(|(idx, t)| {

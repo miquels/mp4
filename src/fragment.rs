@@ -181,14 +181,14 @@ fn fmp4_track(trak: &TrackBox, track_id: u32) -> TrackBox {
 
     // Conditionally present empty boxes.
     if minf.sample_table().sync_samples().is_some() {
-        sample_boxes.push(MP4Box::SyncSampleBox(SyncSampleBox::default()));
+        sample_boxes.push(SyncSampleBox::default().to_mp4box());
     }
 
     // add the sample boxes to MediaInfo.
-    media_info_boxes.push(MP4Box::SampleTableBox(SampleTableBox{ boxes: sample_boxes }));
+    media_info_boxes.push(SampleTableBox{ boxes: sample_boxes }.to_mp4box());
 
     // now add the MediaInformationBox to the MediaBox.
-    media_boxes.push(MP4Box::MediaInformationBox(MediaInformationBox{ boxes: media_info_boxes }));
+    media_boxes.push(MediaInformationBox{ boxes: media_info_boxes }.to_mp4box());
 
     // And add media to the track.
     boxes.push(MP4Box::MediaBox(MediaBox{ boxes: media_boxes }));
