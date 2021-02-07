@@ -12,7 +12,7 @@ def_box! {
 }
 
 impl CompositionOffsetBox {
-    /// Return an iterator that iterates over every sample.
+    /// Returns an iterator that iterates over every sample.
     pub fn iter(&self) -> CompositionOffsetIterator {
         let mut iter = CompositionOffsetIterator {
             entries: &self.entries,
@@ -23,6 +23,39 @@ impl CompositionOffsetBox {
             iter.entry = iter.entries[0].clone();
         }
         iter
+    }
+
+    /// Returns an iterator starting at sample `from`.
+    pub fn iter_from(&self, from: u32) -> CompositionOffsetIterator {
+        let mut tot = 0;
+        let entries = &self.entries;
+
+        // walk over all entries, and find the entry that 'fits' the 'from' sample count.
+        for index in 0 .. entries.len() {
+            let offset = entries[index].offset;
+            let count = entries[index].count;
+
+            // If 'from' fits here, we have a match.
+            if from >= tot && from < tot + count {
+                // build a 'current entry' with the correct 'count' for this sample offset.
+                let entry = CompositionOffsetEntry {
+                    count: tot + count - from,
+                    offset,
+                };
+                return CompositionOffsetIterator {
+                    entries,
+                    entry,
+                    index,
+                }
+            }
+            tot += count;
+        }
+        // No match, so return an iterator that is exhausted.
+        CompositionOffsetIterator {
+            entries: &self.entries,
+            entry: CompositionOffsetEntry::default(),
+            index: entries.len(),
+        }
     }
 }
 
