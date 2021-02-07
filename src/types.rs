@@ -684,6 +684,16 @@ impl<N, T> Array<N, T> {
     }
 }
 
+impl<N, T> Array<N, T>
+where
+    T: Clone,
+{
+    /// Get a clone of the value at index `index`.
+    pub fn get(&self, index: usize) -> T {
+        self.vec[index].clone()
+    }
+}
+
 impl<N, T> Default for Array<N, T> {
     fn default() -> Self {
         Self::new()
@@ -835,6 +845,22 @@ pub struct ArrayIteratorCloned<'a, T> {
     index:      usize,
 }
 
+impl<'a, T> ArrayIteratorCloned<'a, T> {
+    /// Check if all items fall in the range.
+    ///
+    /// We assume that the items are ordered, and check only
+    /// the first and last item.
+    pub fn in_range(&self, range: std::ops::Range<T>) -> bool where T: std::cmp::PartialOrd<T> {
+        if self.count == 0 {
+            return true;
+        }
+        if let Some(dfl) = self.default.as_ref() {
+            return dfl.ge(&range.start) && dfl.lt(&range.end);
+        }
+        self.entries[0].ge(&range.start) && self.entries[self.entries.len() - 1].lt(&range.end)
+    }
+}
+
 /// Iterator over cloned elements.
 impl<'a, T> Iterator for ArrayIteratorCloned<'a, T>
 where
@@ -889,7 +915,7 @@ impl<N, T> List<N, T> {
     /// return an iterator over all items.
     pub fn iter(&self) -> ListIterator<'_, T>
     where
-        T: FromBytes + ToPrimitive,
+        T: FromBytes,
     {
         match self {
             List::DataRef(this) => ListIterator::DataRef(this.iter()),
@@ -900,7 +926,7 @@ impl<N, T> List<N, T> {
     /// return an iterator over all items.
     pub fn iter_cloned(&self) -> ListIteratorCloned<'_, T>
     where
-        T: FromBytes + ToPrimitive + Clone,
+        T: FromBytes + Clone,
     {
         match self {
             List::DataRef(this) => ListIteratorCloned::DataRef(this.iter_cloned()),
@@ -911,11 +937,24 @@ impl<N, T> List<N, T> {
     /// Return an iterator that repeats the same item `count` times.
     pub fn iter_repeat(&self, item: T, count: usize) -> ListIteratorCloned<'_, T>
     where
-        T: FromBytes + ToPrimitive + Clone,
+        T: FromBytes + Clone,
     {
         match self {
             List::DataRef(this) => ListIteratorCloned::DataRef(this.iter_repeat(item, count)),
             List::Array(this) => ListIteratorCloned::Array(this.iter_repeat(item, count)),
+        }
+    }
+}
+
+impl<N, T> List<N, T>
+where
+    T: FromBytes + Clone,
+{
+    /// Get a clone of the value at index `index`.
+    pub fn get(&self, index: usize) -> T {
+        match self {
+            List::DataRef(this) => this.get(index),
+            List::Array(this) => this.get(index),
         }
     }
 }
@@ -985,7 +1024,7 @@ pub enum ListIterator<'a, T> {
 
 impl<'a, T> Iterator for ListIterator<'a, T>
 where
-    T: FromBytes + ToPrimitive,
+    T: FromBytes,
 {
     type Item = &'a T;
 
@@ -1004,9 +1043,22 @@ pub enum ListIteratorCloned<'a, T> {
     Array(ArrayIteratorCloned<'a, T>),
 }
 
+impl<'a, T> ListIteratorCloned<'a, T>
+where
+    T: FromBytes + Clone,
+{
+    /// Check if all items fall in the range.
+    pub fn in_range(&self, range: std::ops::Range<T>) -> bool where T: std::cmp::PartialOrd<T> {
+        match self {
+            ListIteratorCloned::DataRef(this) => this.in_range(range),
+            ListIteratorCloned::Array(this) => this.in_range(range),
+        }
+    }
+}
+
 impl<'a, T> Iterator for ListIteratorCloned<'a, T>
 where
-    T: FromBytes + ToPrimitive + Clone,
+    T: FromBytes + Clone,
 {
     type Item = T;
 

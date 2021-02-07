@@ -82,13 +82,10 @@ pub fn movie_at_front(mp4: &mut MP4) {
     // Check if all tracks do indeed fall in the first mdat.
     for t in mp4.movie().tracks().iter() {
         let stbl = t.media().media_info().sample_table();
-        let co = stbl.chunk_offset();
-        let co_len = co.entries.len();
-        if co_len > 0 {
-            if co.entries[0] < mdat_offset || co.entries[co_len - 1] >= mdat_offset + mdat_size {
-                log::error!("movie_at_front: not all tracks in first MovieDataBox");
-                return;
-            }
+        let iter = stbl.chunk_offset_table().iter();
+        if !iter.in_range(mdat_offset .. mdat_offset + mdat_size) {
+            log::error!("movie_at_front: not all tracks in first MovieDataBox");
+            return;
         }
     }
 
@@ -100,7 +97,7 @@ pub fn movie_at_front(mp4: &mut MP4) {
     // Then move all the chunk offsets.
     for t in mp4.movie_mut().tracks_mut() {
         let stbl = t.media_mut().media_info_mut().sample_table_mut();
-        stbl.move_chunk_offsets_up(size);
+        stbl.chunk_offset_table_mut().add_offset(size as i64);
     }
 
     // Then move the MovieBox to the front of the MP4.

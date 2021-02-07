@@ -186,7 +186,7 @@ impl<N, T> DataRef<N, T> {
     /// lifetime issues. Use [`iter_cloned`](Self::iter_cloned).
     pub fn iter(&self) -> DataRefIterator<'_, T>
     where
-        T: FromBytes + ToPrimitive,
+        T: FromBytes,
     {
         unimplemented!()
     }
@@ -194,7 +194,7 @@ impl<N, T> DataRef<N, T> {
     /// return an iterator over all items.
     pub fn iter_cloned(&self) -> DataRefIteratorCloned<'_, T>
     where
-        T: FromBytes + ToPrimitive + Clone,
+        T: FromBytes + Clone,
     {
         DataRefIteratorCloned::<'_, T> {
             count:      self.len() as usize,
@@ -207,7 +207,7 @@ impl<N, T> DataRef<N, T> {
     /// Return an iterator that repeats the same item `count` times.
     pub fn iter_repeat(&self, item: T, count: usize) -> DataRefIteratorCloned<'_, T>
     where
-        T: FromBytes + ToPrimitive + Clone,
+        T: FromBytes + Clone,
     {
         DataRefIteratorCloned::<'_, T> {
             count,
@@ -215,6 +215,19 @@ impl<N, T> DataRef<N, T> {
             entries:    b"",
             index:      0,
         }
+    }
+}
+
+impl<N, T> DataRef<N, T>
+where
+    T: FromBytes + Clone,
+{
+    /// Get a clone of the value at index `index`.
+    pub fn get(&self, index: usize) -> T {
+        let start = index * mem::size_of::<T>();
+        let end = start + mem::size_of::<T>();
+        let mut data = &self.bytes()[start..end];
+        T::from_bytes(&mut data).unwrap()
     }
 }
 
@@ -296,7 +309,7 @@ pub struct DataRefIterator<'a, T> {
 
 impl<'a, T> Iterator for DataRefIterator<'a, T>
 where
-    T: FromBytes + ToPrimitive,
+    T: FromBytes,
 {
     type Item = &'a T;
 
@@ -317,9 +330,49 @@ pub struct DataRefIteratorCloned<'a, T> {
     index:      usize,
 }
 
+impl<'a, T> DataRefIteratorCloned<'a, T>
+where
+    T: FromBytes + Clone,
+{
+    /// Check if all items fall in the range.
+    ///
+    /// We assume that the items are ordered, and check only
+    /// the first and last item.
+    pub fn in_range(&self, range: std::ops::Range<T>) -> bool where T: std::cmp::PartialOrd<T> {
+        if self.count == 0 {
+            return true;
+        }
+        if let Some(dfl) = self.default.as_ref() {
+            return dfl.ge(&range.start) && dfl.lt(&range.end);
+        }
+        if let Some((first, last)) = self.first_last() {
+            return first >= range.start && last < range.end;
+        }
+        false
+    }
+
+    fn first_last(&self) -> Option<(T, T)> {
+        if self.count == 0 {
+            return None;
+        }
+        if let Some(entry) = self.default.as_ref() {
+            return Some((entry.clone(), entry.clone()));
+        }
+
+        let mut data = &self.entries[0 .. mem::size_of::<T>()];
+        let first = T::from_bytes(&mut data).ok()?;
+
+        let start = (self.count - 1) * mem::size_of::<T>();
+        let end = start + mem::size_of::<T>();
+        let mut data = &self.entries[start..end];
+        let last = T::from_bytes(&mut data).ok()?;
+        Some((first, last))
+    }
+}
+
 impl<'a, T> Iterator for DataRefIteratorCloned<'a, T>
 where
-    T: FromBytes + ToPrimitive + Clone,
+    T: FromBytes + Clone,
 {
     type Item = T;
 

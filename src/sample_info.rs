@@ -73,7 +73,7 @@ pub fn sample_info_iter<'a>(trak: &'a TrackBox) -> SampleInfoIterator<'a> {
         index: 0,
         media_timescale,
         comp_time_shift,
-        chunk_offset: stbl.chunk_offset(),
+        chunk_offset: stbl.chunk_offset_table(),
         fpos: 0,
         this_chunk: 0xffffffff,
         dtime: 0,
@@ -95,7 +95,7 @@ impl<'a> Iterator for SampleInfoIterator<'a> {
             if self.this_chunk != chunk.chunk {
                 self.this_chunk = chunk.chunk;
                 // XXX FIXME check chunk.chunk for index overflow
-                self.fpos = self.chunk_offset.entries[self.this_chunk as usize];
+                self.fpos = self.chunk_offset.entries.get(self.this_chunk as usize);
             }
         }
 

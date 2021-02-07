@@ -283,7 +283,7 @@ fn dump(opts: DumpOpts) -> Result<()> {
 
     let stbl = track.media().media_info().sample_table();
     let mut stsc_iter = stbl.sample_to_chunk().iter();
-    let chunk_offset = stbl.chunk_offset();
+    let chunk_offset = stbl.chunk_offset_table();
 
     // Can be empty.
     if stbl.sample_size().entries.len() == 0 {
@@ -302,7 +302,7 @@ fn dump(opts: DumpOpts) -> Result<()> {
         if let Some(chunk) = stsc_iter.next() {
             if this_chunk != chunk.chunk {
                 this_chunk = chunk.chunk;
-                fpos = chunk_offset.entries[this_chunk as usize];
+                fpos = chunk_offset.entries.get(this_chunk as usize);
             }
         }
 
