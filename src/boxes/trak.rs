@@ -1,7 +1,7 @@
 use std::io;
 
 use crate::boxes::prelude::*;
-use crate::boxes::{TrackHeaderBox, MediaBox, EditBox, EditListBox};
+use crate::boxes::{SampleTableBox, TrackHeaderBox, MediaBox, EditBox, EditListBox};
 use crate::sample_info::sample_info_iter;
 
 #[doc(inline)]
@@ -86,6 +86,7 @@ impl TrackBox {
                 return false;
             },
         };
+
         match first_box!(&self.boxes, MediaBox) {
             Some(m) => {
                 if !m.is_valid() {
@@ -97,6 +98,19 @@ impl TrackBox {
                 valid = false;
             },
         }
+
+        match first_box!(&self.boxes, SampleTableBox) {
+            Some(m) => {
+                if !m.is_valid() {
+                    valid = false;
+                }
+            },
+            None => {
+                log::error!("TrackBox(id {}): no SampleTableBox present", track_id);
+                valid = false;
+            },
+        }
+
         valid
     }
 

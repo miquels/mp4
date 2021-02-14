@@ -281,37 +281,11 @@ fn dump(opts: DumpOpts) -> Result<()> {
     let stdout = io::stdout();
     let mut handle = BufWriter::with_capacity(128000, stdout.lock());
 
-    let stbl = track.media().media_info().sample_table();
-    let mut stsc_iter = stbl.sample_to_chunk().iter();
-    let chunk_offset = stbl.chunk_offset_table();
-
-    // Can be empty.
-    if stbl.sample_size().entries.len() == 0 {
-        return Ok(());
-
-    }
-    if chunk_offset.entries.len() == 0 {
-        return Err(anyhow!("dump: chunk offset table empty"));
-    }
-
-    let mut fpos = 0;
-    let mut this_chunk = 0xffffffff;
-
-    for size in stbl.sample_size().iter() {
-
-        if let Some(chunk) = stsc_iter.next() {
-            if this_chunk != chunk.chunk {
-                this_chunk = chunk.chunk;
-                fpos = chunk_offset.entries.get(this_chunk as usize);
-            }
-        }
-
-        infh.seek(io::SeekFrom::Start(fpos))?;
-        let mut sm = infh.take(size as u64);
+    for sample_info in track.sample_info_iter() {
+        infh.seek(io::SeekFrom::Start(sample_info.fpos))?;
+        let mut sm = infh.take(sample_info.size as u64);
         io::copy(&mut sm, &mut handle)?;
         infh = sm.into_inner();
-
-        fpos += size as u64;
     }
 
     Ok(())
@@ -326,7 +300,7 @@ fn debug(opts: DebugOpts) -> Result<()> {
             Some(track) => track,
             None => return Err(anyhow!("debug: debugtrack: need --track")),
         };
-        debug::dump_track_samples(&mp4, track);
+        debug::dump_track_samples(&mp4, track, 1, 0);
         return Ok(());
     }
 

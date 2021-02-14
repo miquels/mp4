@@ -1,12 +1,12 @@
 //! Debug helpers.
 //!
 use crate::mp4box::{MP4, MP4Box};
-use crate::track::SampleInfo;
 
 /// Dump sample information.
-pub fn dump_track_samples(mp4: &MP4, track_id: u32) {
+pub fn dump_track_samples(mp4: &MP4, track_id: u32, first_sample: u32, count: u32) {
 
     let movie = mp4.movie();
+    let first_sample = std::cmp::max(1, first_sample);
 
     // Find the track by id.
     let track_idx = match movie.track_idx_by_id(track_id) {
@@ -19,23 +19,25 @@ pub fn dump_track_samples(mp4: &MP4, track_id: u32) {
 
     let trak = movie.tracks()[track_idx];
     let samples = trak.sample_info_iter();
-    let mut count = 0;
+    let mut idx = first_sample;
     let timescale = samples.timescale();
 
     let mut next_pos = 1;
     println!("{} {:>8}  {:>10}  {:>6}  {:>10}  {:>6}  {:>5}  {:>7}",
              " ", "#", "filepos", "size", "dtime", "cdelta", "sync", "chunkno");
-    for (idx, sample) in samples.enumerate() {
-        let dtime = sample.dtime as f64 / (timescale as f64);
-        let ctime_d = 1000f64 * sample.ctime_d as f64 / (timescale as f64);
+    for sample in samples {
+        let dtime = sample.decode_time as f64 / (timescale as f64);
+        let ctime_d = 1000f64 * sample.composition_delta as f64 / (timescale as f64);
         let is_sync = if sample.is_sync { "sync" } else { "" };
         let jump = if next_pos != sample.fpos { "+" } else { " " };
         next_pos = sample.fpos + sample.size as u64;
-        count += 1;
         println!("{} {:>8}  {:>10}  {:>6}  {:>10.1}  {:>6.0}  {:>5}  {:>7}",
-                 jump, idx, sample.fpos, sample.size, dtime, ctime_d, is_sync, sample.chunkno);
+                 jump, idx, sample.fpos, sample.size, dtime, ctime_d, is_sync, sample.chunk);
+        idx += 1;
+        if count > 0 && idx > first_sample + count {
+            break;
+        }
     }
-    println!("Sample vector size: {} bytes", count * std::mem::size_of::<SampleInfo>());
 }
 
 /// Dump timestamps of all the Track Fragments.

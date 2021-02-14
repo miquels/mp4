@@ -195,3 +195,22 @@ fn fmp4_track(trak: &TrackBox, track_id: u32) -> TrackBox {
 
     TrackBox{ boxes }
 }
+
+/// Generate a MovieFragmentBox + MediaDataBox for a range of samples.
+pub fn movie_fragment(mp4: &MP4, track_id: u32, seq_num: u32, samples: std::ops::Range<u32>) {
+    let mut boxes = Vec::new();
+    let movie = mp4.movie();
+    let mut mdat = Vec::<u8>::new();
+
+    // Header.
+    boxes.push(MovieFragmentHeaderBox{ sequence_number: seq_num }.to_mp4box());
+
+    let track = movie.track_by_id(track_id).unwrap();
+
+    let mut traf = TrackFragmentHeaderBox::default();
+    traf.track_id = track.track_id();
+    traf.base_data_offset = Some(0);
+
+
+}
+

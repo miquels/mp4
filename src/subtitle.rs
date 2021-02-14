@@ -144,12 +144,12 @@ pub fn subtitle_extract(mp4: &MP4, track: &TrackBox, format: Format, mut output:
             output.write(&data)?;
             continue;
         }
-        let endtime = sample.dtime as f64 / (timescale as f64);
+        let endtime = sample.decode_time as f64 / (timescale as f64);
         if let Some((subt, sample)) = prev_text.replace((subt, sample)) {
             if subt.text.as_str() == "" {
                 continue;
             }
-            let starttime = sample.dtime as f64 / (timescale as f64);
+            let starttime = sample.decode_time as f64 / (timescale as f64);
             let cue = cue(format, sample, subt, count, starttime, endtime);
             write!(output, "{}{}", cue, eol)?;
             count += 1;
@@ -157,7 +157,7 @@ pub fn subtitle_extract(mp4: &MP4, track: &TrackBox, format: Format, mut output:
     }
     if let Some((subt, sample)) = prev_text.take() {
         if subt.text.as_str() != "" {
-            let starttime = sample.dtime as f64 / (timescale as f64);
+            let starttime = sample.decode_time as f64 / (timescale as f64);
             let cue = cue(format, sample, subt, count, starttime, starttime + 5f64);
             writeln!(output, "{}{}", cue, eol)?;
         }

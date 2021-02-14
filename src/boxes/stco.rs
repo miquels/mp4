@@ -18,8 +18,8 @@ pub struct Entries(Entries_);
 
 #[derive(Debug, Clone)]
 enum Entries_ {
-    Normal(ListSized32<u32>),
-    Large(ListSized32<u64>),
+    Normal(ArraySized32<u32>),
+    Large(ArraySized32<u64>),
 }
 
 impl Entries {
@@ -34,8 +34,8 @@ impl Entries {
     /// Returns the number of elements.
     pub fn len(&self) -> u64 {
         match &self.0 {
-            Entries_::Normal(entries) => entries.len(),
-            Entries_::Large(entries) => entries.len(),
+            Entries_::Normal(entries) => entries.len() as u64,
+            Entries_::Large(entries) => entries.len() as u64,
         }
     }
 }
@@ -47,9 +47,9 @@ impl FromBytes for ChunkOffsetBox {
         let stream = &mut reader;
 
         let (entries, large) = if fourcc == b"stco" {
-            (Entries_::Normal(ListSized32::<u32>::from_bytes(stream)?), false)
+            (Entries_::Normal(ArraySized32::<u32>::from_bytes(stream)?), false)
         } else {
-            (Entries_::Large(ListSized32::<u64>::from_bytes(stream)?), true)
+            (Entries_::Large(ArraySized32::<u64>::from_bytes(stream)?), true)
         };
 
         Ok(ChunkOffsetBox {
@@ -95,9 +95,8 @@ impl ChunkOffsetBox {
         }
 
         match &mut self.entries.0 {
-            Entries_::Large(List::Array(e)) => e.push(offset),
+            Entries_::Large(e) => e.push(offset),
             Entries_::Normal(_) => unreachable!(),
-            _ => panic!("cannot push onto read-only list"),
         }
     }
 
@@ -123,7 +122,7 @@ impl Default for ChunkOffsetBox {
     fn default() -> Self {
         ChunkOffsetBox {
             fourcc:  FourCC::new("co64"),
-            entries: Entries(Entries_::Large(ListSized32::<u64>::default())),
+            entries: Entries(Entries_::Large(ArraySized32::<u64>::default())),
             offset: 0,
             large: true,
         }
@@ -150,8 +149,8 @@ impl FullBox for ChunkOffsetBox {
 }
 
 enum IteratorCloned<'a> {
-    Normal(ListIteratorCloned<'a, u32>),
-    Large(ListIteratorCloned<'a, u64>),
+    Normal(ArrayIteratorCloned<'a, u32>),
+    Large(ArrayIteratorCloned<'a, u64>),
 }
 
 /// Iterator over the contents of the ChunkOffsetBox.

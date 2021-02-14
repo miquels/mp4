@@ -2,7 +2,7 @@ use std::io;
 
 use crate::boxes::prelude::*;
 use crate::boxes::{SampleDescriptionBox, SampleSizeBox, TimeToSampleBox, SampleToChunkBox};
-use crate::boxes::ChunkOffsetBox;
+use crate::boxes::{ChunkOffsetBox, ChunkLargeOffsetBox};
 use crate::boxes::{CompositionOffsetBox, SyncSampleBox};
 
 def_box! {
@@ -49,9 +49,27 @@ impl SampleTableBox {
     declare_box_methods!(SampleSizeBox, sample_size, sample_size_mut);
     declare_box_methods!(TimeToSampleBox, time_to_sample, time_to_sample_mut);
     declare_box_methods!(SampleToChunkBox, sample_to_chunk, sample_to_chunk_mut);
-    declare_box_methods!(ChunkOffsetBox, chunk_offset_table, chunk_offset_table_mut);
     declare_box_methods_opt!(CompositionOffsetBox, composition_time_to_sample, composition_time_to_sample_mut);
     declare_box_methods_opt!(SyncSampleBox, sync_samples, sync_samples_mut);
+
+    /// Get a reference to the ChunkOffsetBox or ChunkLargeOffsetBox.
+    pub fn chunk_offset_table(&self) -> &ChunkOffsetBox {
+        if let Some(stco) = first_box!(&self.boxes, ChunkOffsetBox) {
+            return stco;
+        }
+        first_box!(&self.boxes, ChunkLargeOffsetBox).unwrap()
+    }
+    /// Get a mutable reference to the ChunkOffsetBox or ChunkLargeOffsetBox.
+    pub fn chunk_offset_table_mut(&mut self) -> &mut ChunkOffsetBox {
+        for box_ in &mut self.boxes {
+            match box_ {
+                &mut MP4Box::ChunkOffsetBox(ref mut stco) => return stco,
+                &mut MP4Box::ChunkLargeOffsetBox(ref mut co64) => return co64,
+                _ => {},
+            }
+        }
+        unreachable!()
+    }
 
     /// Check if this SampleTableBox is valid (has stsd, stts, stsc, stco boxes).
     pub fn is_valid(&self) -> bool {
@@ -69,7 +87,13 @@ impl SampleTableBox {
             valid = false;
         }
         if first_box!(&self.boxes, ChunkOffsetBox).is_none() {
-            log::error!("SampleTableBox: no ChunkOffsetBox present");
+            if first_box!(&self.boxes, ChunkLargeOffsetBox).is_none() {
+                log::error!("SampleTableBox: no ChunkOffsetBox present");
+                valid = false;
+            }
+        }
+        if first_box!(&self.boxes, SampleSizeBox).is_none() {
+            log::error!("SampleTableBox: no SampleSizeBox present");
             valid = false;
         }
         valid

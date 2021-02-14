@@ -16,11 +16,11 @@ impl CompositionOffsetBox {
     pub fn iter(&self) -> CompositionOffsetIterator {
         let mut iter = CompositionOffsetIterator {
             entries: &self.entries,
-            entry: CompositionOffsetEntry::default(),
             index: 0,
+            cur_entry: CompositionOffsetEntry::default(),
         };
         if iter.entries.len() > 0 {
-            iter.entry = iter.entries[0].clone();
+            iter.cur_entry = iter.entries[0].clone();
         }
         iter
     }
@@ -38,14 +38,14 @@ impl CompositionOffsetBox {
             // If 'from' fits here, we have a match.
             if from >= tot && from < tot + count {
                 // build a 'current entry' with the correct 'count' for this sample offset.
-                let entry = CompositionOffsetEntry {
+                let cur_entry = CompositionOffsetEntry {
                     count: tot + count - from,
                     offset,
                 };
                 return CompositionOffsetIterator {
                     entries,
-                    entry,
                     index,
+                    cur_entry,
                 }
             }
             tot += count;
@@ -53,8 +53,8 @@ impl CompositionOffsetBox {
         // No match, so return an iterator that is exhausted.
         CompositionOffsetIterator {
             entries: &self.entries,
-            entry: CompositionOffsetEntry::default(),
             index: entries.len(),
+            cur_entry: CompositionOffsetEntry::default(),
         }
     }
 }
@@ -103,10 +103,41 @@ impl FullBox for CompositionOffsetEntry {
     }
 }
 
+/// Iterator over the entries of a CompositionOffsetBox.
 pub struct CompositionOffsetIterator<'a> {
     entries:    &'a [CompositionOffsetEntry],
-    entry:      CompositionOffsetEntry,
     index:      usize,
+    cur_entry:  CompositionOffsetEntry,
+}
+
+impl <'a> CompositionOffsetIterator<'a> {
+    /// Seek to a sample.
+    ///
+    /// Sample indices start at `1`.
+    pub fn seek(&mut self, seek_to: u32) -> io::Result<()> {
+        let mut cur_sample = 0;
+        let entries = &self.entries;
+        let seek_to = seek_to.saturating_sub(1);
+
+        // walk over all entries, and find the entry where to 'seek_to' index fits.
+        for index in 0 .. entries.len() {
+            let offset = entries[index].offset;
+            let count = entries[index].count;
+
+            // If 'seek_to' fits here, we have a match.
+            if seek_to >= cur_sample && seek_to < cur_sample + count {
+                // build a 'current entry' with the correct 'count' for this sample offset.
+                self.cur_entry = CompositionOffsetEntry {
+                    count: cur_sample + count - seek_to,
+                    offset,
+                };
+                self.index = index;
+                return Ok(());
+            }
+            cur_sample += count;
+        }
+        Err(io::ErrorKind::UnexpectedEof.into())
+    }
 }
 
 impl<'a> Iterator for CompositionOffsetIterator<'a> {
@@ -115,15 +146,16 @@ impl<'a> Iterator for CompositionOffsetIterator<'a> {
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if self.entry.count > 0 {
-                self.entry.count -= 1;
-                return Some(self.entry.offset);
+            // each entry repeats 'count' times.
+            if self.cur_entry.count > 0 {
+                self.cur_entry.count -= 1;
+                return Some(self.cur_entry.offset);
             }
-            self.index += 1;
-            if self.index >= self.entries.len() {
+            if self.index + 1 >= self.entries.len() {
                 return None;
             }
-            self.entry = self.entries[self.index].clone();
+            self.index += 1;
+            self.cur_entry = self.entries[self.index].clone();
         }
     }
 }
