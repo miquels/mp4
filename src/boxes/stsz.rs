@@ -89,32 +89,26 @@ impl<'a> SampleSizeIterator<'a> {
 
     /// Seek to a sample.
     ///
-    /// Returns file offset of the sample.
-    ///
     /// Sample indices start at `1`.
-    pub fn seek(&mut self, seek_to: u32) -> io::Result<u64> {
+    pub fn seek(&mut self, seek_to: u32) -> io::Result<()> {
         if seek_to > self.sample_count {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
-        let index = seek_to.saturating_sub(1) as usize;
-        // FIXME: this is not efficient.
-        //
-        // Maybe store file offset instead of size. Size is then
-        // entries[index + 1] - entries[index], and entries.len() = count + 1
-        let fpos = self.add_sizes(0 .. index + 1);
-        self.index = index;
-        Ok(fpos)
+        self.index = seek_to.saturating_sub(1) as usize;
+        Ok(())
     }
 
     /// Add up the sizes of all the samples in the range.
-    fn add_sizes(&self, range: std::ops::Range<usize>) -> u64 {
-        let start = std::cmp::min(self.entries.len(), range.start.saturating_sub(1) as usize);
-        let end = std::cmp::min(self.entries.len(), range.end.saturating_sub(1) as usize);
+    ///
+    /// `from_sample` and `to_sample` are one-based, and the range is inclusive.
+    pub fn add_sizes(&self, from_sample: u32, to_sample: u32) -> u64 {
+        let start = std::cmp::min(self.entries.len(), from_sample.saturating_sub(1) as usize);
+        let end = std::cmp::min(self.entries.len(), to_sample.saturating_sub(1) as usize);
         if self.sample_size > 0 {
-            return (end - start) as u64 * (self.sample_size as u64);
+            return (end - start + 1) as u64 * (self.sample_size as u64);
         }
         let mut totsz = 0;
-        for index in start .. end {
+        for index in start .. end + 1 {
             totsz += self.entries[index] as u64;
         }
         totsz

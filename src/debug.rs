@@ -1,9 +1,10 @@
 //! Debug helpers.
 //!
+use std::io;
 use crate::mp4box::{MP4, MP4Box};
 
 /// Dump sample information.
-pub fn dump_track_samples(mp4: &MP4, track_id: u32, first_sample: u32, count: u32) {
+pub fn dump_track_samples(mp4: &MP4, track_id: u32, first_sample: u32, last_sample: u32) -> io::Result<()> {
 
     let movie = mp4.movie();
     let first_sample = std::cmp::max(1, first_sample);
@@ -12,13 +13,14 @@ pub fn dump_track_samples(mp4: &MP4, track_id: u32, first_sample: u32, count: u3
     let track_idx = match movie.track_idx_by_id(track_id) {
         Some(idx) => idx,
         None => {
-            log::debug!("track id {}: no such track", track_id);
-            return;
+            return Err(io::Error::new(io::ErrorKind::NotFound, format!("track id {}: no such track", track_id)));
         }
     };
 
     let trak = movie.tracks()[track_idx];
-    let samples = trak.sample_info_iter();
+    let mut samples = trak.sample_info_iter();
+    samples.seek(first_sample)?;
+
     let mut idx = first_sample;
     let timescale = samples.timescale();
 
@@ -34,10 +36,12 @@ pub fn dump_track_samples(mp4: &MP4, track_id: u32, first_sample: u32, count: u3
         println!("{} {:>8}  {:>10}  {:>6}  {:>10.1}  {:>6.0}  {:>5}  {:>7}",
                  jump, idx, sample.fpos, sample.size, dtime, ctime_d, is_sync, sample.chunk);
         idx += 1;
-        if count > 0 && idx > first_sample + count {
+        if last_sample > 0 && idx > last_sample {
             break;
         }
     }
+
+    Ok(())
 }
 
 /// Dump timestamps of all the Track Fragments.

@@ -37,7 +37,6 @@ pub struct SampleInfoIterator<'a> {
     media_timescale:  u32,
     comp_time_shift: i32,
     fpos:           u64,
-    first_sample:   u32,
     cur_sample:     u32,
     cur_chunk:      u32,
 }
@@ -71,7 +70,6 @@ pub fn sample_info_iter<'a>(trak: &'a TrackBox) -> SampleInfoIterator<'a> {
         media_timescale,
         comp_time_shift,
         fpos: 0,
-        first_sample:   1,
         cur_sample:     1,
         cur_chunk:      1,
     }
@@ -79,7 +77,7 @@ pub fn sample_info_iter<'a>(trak: &'a TrackBox) -> SampleInfoIterator<'a> {
 
 impl<'a> SampleInfoIterator<'a> {
     pub fn seek(&mut self, to_sample: u32) -> io::Result<()> {
-        self.fpos = self.stsz_iter.seek(to_sample)?;
+        self.stsz_iter.seek(to_sample)?;
         self.stts_iter.seek(to_sample)?;
         self.stsc_iter.seek(to_sample)?;
         if let Some(ctts) = self.ctts_iter.as_mut() {
@@ -94,7 +92,11 @@ impl<'a> SampleInfoIterator<'a> {
         // peek at chunk info.
         let chunk_info = self.stsc_iter.clone().next().unwrap();
         self.cur_chunk = chunk_info.cur_chunk;
-        self.first_sample = chunk_info.first_sample;
+
+        // calculate file position.
+        let idx = self.cur_chunk.saturating_sub(1) as usize;
+        self.fpos = self.chunk_offset.entries.get(idx);
+        self.fpos += self.stsz_iter.add_sizes(chunk_info.first_sample, to_sample);
 
         Ok(())
     }

@@ -20,7 +20,7 @@ impl SyncSampleBox {
         SyncSampleIterator {
             entries: &self.entries,
             index: 0,
-            cur_sample: 0,
+            cur_sample: 1,
         }
     }
 }

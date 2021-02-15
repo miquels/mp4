@@ -50,6 +50,20 @@ pub struct SampleToChunkIterator<'a> {
     cur_entry:  Option<&'a SampleToChunkEntry>,
 }
 
+impl std::fmt::Debug for SampleToChunkIterator<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let mut dbg = f.debug_struct("SampleToChunkIterator");
+        dbg.field("index", &self.index);
+        dbg.field("cur_chunk", &self.cur_chunk);
+        dbg.field("cur_sdi", &self.cur_sdi);
+        dbg.field("count", &self.count);
+        dbg.field("cur_sample", &self.cur_sample);
+        dbg.field("first_sample", &self.first_sample);
+        dbg.field("cur_entry", &self.cur_entry);
+        dbg.finish()
+    }
+}
+
 impl<'a> SampleToChunkIterator<'a> {
     fn new(entries: &[SampleToChunkEntry]) -> SampleToChunkIterator<'_> {
         if entries.len() == 0 {
@@ -119,24 +133,23 @@ impl<'a> SampleToChunkIterator<'a> {
     ///
     /// Sample indices start at `1`.
     pub fn seek(&mut self, to_sample: u32) -> io::Result<()> {
-        let mut cur_sample = 0;
-
         self.rewind();
         if to_sample <= 1 {
             return Ok(());
         }
-        let to_sample = to_sample - 1;
 
         // walk over all entries, and find the entry that 'fits'
         while let Some(chunk) = self.next_chunk() {
 
             // If 'seek_to' fits here, we have a match.
-            if to_sample >= cur_sample && to_sample < cur_sample + chunk.samples_per_chunk {
-                self.count = cur_sample + chunk.samples_per_chunk - to_sample;
+            let samples_per_chunk = chunk.samples_per_chunk;
+            if to_sample >= self.cur_sample && to_sample < self.cur_sample + samples_per_chunk {
+                self.count = self.cur_sample + samples_per_chunk - to_sample;
+                self.cur_sample = to_sample;
                 return Ok(())
             }
-            cur_sample += chunk.samples_per_chunk;
-            if cur_sample > to_sample {
+            self.cur_sample += samples_per_chunk;
+            if self.cur_sample > to_sample {
                 break;
             }
         }

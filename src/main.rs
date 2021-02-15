@@ -132,6 +132,14 @@ pub struct DebugOpts {
     /// Show the samples for a track.
     pub samples: bool,
 
+    #[structopt(long, default_value="1")]
+    /// First sample to dump.
+    pub from: u32,
+
+    #[structopt(long, default_value="0")]
+    /// Last sample to dump.
+    pub to: u32,
+
     #[structopt(long)]
     /// Dump timestamps of all Track Fragments.
     pub traf: bool,
@@ -300,7 +308,7 @@ fn debug(opts: DebugOpts) -> Result<()> {
             Some(track) => track,
             None => return Err(anyhow!("debug: debugtrack: need --track")),
         };
-        debug::dump_track_samples(&mp4, track, 1, 0);
+        debug::dump_track_samples(&mp4, track, opts.from, opts.to)?;
         return Ok(());
     }
 
