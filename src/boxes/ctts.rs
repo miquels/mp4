@@ -104,6 +104,7 @@ impl FullBox for CompositionOffsetEntry {
 }
 
 /// Iterator over the entries of a CompositionOffsetBox.
+#[derive(Clone)]
 pub struct CompositionOffsetIterator<'a> {
     entries:    &'a [CompositionOffsetEntry],
     index:      usize,

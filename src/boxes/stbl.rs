@@ -74,28 +74,69 @@ impl SampleTableBox {
     /// Check if this SampleTableBox is valid (has stsd, stts, stsc, stco boxes).
     pub fn is_valid(&self) -> bool {
         let mut valid = true;
-        if first_box!(&self.boxes, SampleDescriptionBox).is_none() {
+
+        if let Some(box_) = first_box!(&self.boxes, SampleDescriptionBox) {
+            if box_.entries.len() == 0 {
+                log::error!("SampleTableBox: SampleDescriptionBox: no entries");
+                valid = false;
+            }
+            // FIXME support more than one sample description per track.
+            if box_.entries.len() != 1 {
+                log::error!("SampleTableBox: SampleDescriptionBox: we only support one entry");
+                valid = false;
+            }
+        } else {
             log::error!("SampleTableBox: no SampleDescriptionBox present");
             valid = false;
         }
-        if first_box!(&self.boxes, TimeToSampleBox).is_none() {
+
+        if let Some(box_) = first_box!(&self.boxes, TimeToSampleBox) {
+            if box_.entries.len() == 0 {
+                log::error!("SampleTableBox: TimeToSampleBox: no entries");
+                valid = false;
+            }
+        } else {
             log::error!("SampleTableBox: no TimeToSampleBox present");
             valid = false;
         }
-        if first_box!(&self.boxes, SampleToChunkBox).is_none() {
+
+        if let Some(box_) = first_box!(&self.boxes, SampleToChunkBox) {
+            if box_.entries.len() == 0 {
+                log::error!("SampleTableBox: SampleToChunkBox: no entries");
+                valid = false;
+            }
+        } else {
             log::error!("SampleTableBox: no SampleDescriptionBox present");
             valid = false;
         }
-        if first_box!(&self.boxes, ChunkOffsetBox).is_none() {
-            if first_box!(&self.boxes, ChunkLargeOffsetBox).is_none() {
-                log::error!("SampleTableBox: no ChunkOffsetBox present");
+
+        if let Some(box_) = first_box!(&self.boxes, ChunkOffsetBox) {
+            if box_.entries.len() == 0 {
+                log::error!("SampleTableBox: ChunkOffsetBox: no entries");
                 valid = false;
             }
+        } else {
+            log::error!("SampleTableBox: no ChunkOffsetBox present");
+            valid = false;
         }
-        if first_box!(&self.boxes, SampleSizeBox).is_none() {
+
+        if let Some(box_) = first_box!(&self.boxes, SampleSizeBox) {
+            if box_.entries.len() == 0 {
+                log::error!("SampleTableBox: SampleSizeBox: no entries");
+                valid = false;
+            }
+        } else {
             log::error!("SampleTableBox: no SampleSizeBox present");
             valid = false;
         }
+
+        if let Some(box_) = first_box!(&self.boxes, SyncSampleBox) {
+            if box_.entries.len() == 0 {
+                log::error!("SampleTableBox: SyncSampleBox: no entries");
+                valid = false;
+            }
+        }
+
         valid
     }
 }

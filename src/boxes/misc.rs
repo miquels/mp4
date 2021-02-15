@@ -204,7 +204,7 @@ def_box! {
     impls => [ boxinfo, debug, fromtobytes, fullbox ],
 }
 
-// Default needs to set ample_description_index to 1.
+// Default needs to set sample_description_index to 1.
 impl Default for TrackExtendsBox {
     fn default() -> TrackExtendsBox {
         TrackExtendsBox {

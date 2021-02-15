@@ -70,6 +70,7 @@ impl ToBytes for SampleSizeBox {
 }
 
 /// Iterator over the sizes of the samples.
+#[derive(Clone)]
 pub struct SampleSizeIterator<'a> {
     entries:    &'a [u32],
     index:      usize,

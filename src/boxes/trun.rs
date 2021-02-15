@@ -26,6 +26,7 @@ use crate::boxes::prelude::*;
 
 def_box! {
     /// 8.8.8 Track Fragment Run Box (ISO/IEC 14496-12:2015(E))
+    #[derive(Default)]
     TrackRunBox {
         sample_count:               u32,
         data_offset:                {Option<i32>},

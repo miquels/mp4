@@ -11,6 +11,7 @@ def_box! {
     /// - `0-1` MetaBox
     /// - `0+ ` TrackFragmentBox
     ///
+    #[derive(Default)]
     MovieFragmentBox {
         boxes:      Vec<MP4Box>,
     },

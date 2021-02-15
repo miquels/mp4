@@ -34,6 +34,8 @@
 //! [`MovieBox`](crate::boxes::MovieBox) and from there you can inspect the tracks, etc.
 //!
 #[macro_use]
+mod ioerr;
+#[macro_use]
 mod macros;
 #[macro_use]
 pub mod serialize;

@@ -1,3 +1,5 @@
+use std::io;
+
 use crate::mp4box::{MP4, MP4Box};
 use crate::types::*;
 use crate::boxes::*;
@@ -196,21 +198,150 @@ fn fmp4_track(trak: &TrackBox, track_id: u32) -> TrackBox {
     TrackBox{ boxes }
 }
 
+// Some values are constant for the entire trackfragment, or even the
+// entire track. For now this is pretty coarse and we mostly check
+// the whole track for defaults.
+struct SampleDefaults {
+    sample_duration: Option<u32>,
+    sample_flags: Option<SampleFlags>,
+    sample_size: Option<u32>,
+    sample_composition_time_offset: Option<i32>,
+}
+
+impl SampleDefaults {
+    fn new(track: &TrackBox, from: u32, to: u32) -> SampleDefaults {
+        let tables = track.media().sample_table();
+
+        // If the TimeToSample box has just one entry, it covers all
+        // samples so that one entry is the default.
+        let entries = &tables.time_to_sample().entries;
+        let sample_duration = if entries.len() == 1 {
+            Some(entries[0].delta)
+        } else {
+            None
+        };
+
+        // We have a SyncSampleBox. Skip the first sample. Then if the rest is all
+        // sync or all non-sync, use that as the default.
+        let sample_flags;
+        if let Some(sync_table) = tables.sync_samples() {
+            let mut is_sync = 0_u32;
+            for entry in &sync_table.entries {
+                if *entry > from && *entry <= to {
+                    is_sync += 1;
+                }
+                if *entry > to {
+                    break;
+                }
+            }
+            if is_sync == 0 || is_sync == to - from {
+                sample_flags = Some(build_sample_flags(is_sync > 0));
+            } else {
+                sample_flags = None;
+            }
+        } else {
+            // No SyncSampleBox means all samples are sync.
+            sample_flags = Some(build_sample_flags(true));
+        }
+
+        // If there is no composition offset box, the default is 0.
+        let sample_composition_time_offset = if tables.composition_time_to_sample().is_some() {
+            None
+        } else {
+            Some(0)
+        };
+
+        SampleDefaults {
+            sample_duration,
+            sample_flags,
+            sample_size: None,
+            sample_composition_time_offset,
+        }
+    }
+}
+
+
+fn build_sample_flags(is_sync: bool) -> SampleFlags {
+    let mut flags = SampleFlags::default();
+    if is_sync {
+        flags.sample_depends_on = 2;
+    } else {
+        flags.sample_is_non_sync_sample = true;
+    }
+    flags
+}
+
+fn default_or<A, B>(dfl: &Option<A>, val: B) -> Option<B> {
+    if dfl.is_some() {
+        None
+    } else {
+        Some(val)
+    }
+}
+
 /// Generate a MovieFragmentBox + MediaDataBox for a range of samples.
-pub fn movie_fragment(mp4: &MP4, track_id: u32, seq_num: u32, samples: std::ops::Range<u32>) {
-    let mut boxes = Vec::new();
+pub fn movie_fragment(mp4: &MP4, track_id: u32, seq_num: u32, from: u32, to: u32) -> io::Result<Vec<MP4Box>> {
     let movie = mp4.movie();
-    let mut mdat = Vec::<u8>::new();
+    let mut mdat = MediaDataBox::default();
 
-    // Header.
-    boxes.push(MovieFragmentHeaderBox{ sequence_number: seq_num }.to_mp4box());
+    let track = movie.track_by_id(track_id).ok_or(ioerr!(NotFound, "{}: no such track", track_id))?;
+    let trex = movie.track_extends_by_id(track_id).ok_or(ioerr!(NotFound, "{}: no TrackExtendsBox", track_id))?;
 
-    let track = movie.track_by_id(track_id).unwrap();
+    // Track fragment.
+    let mut traf = TrackFragmentBox::default();
 
-    let mut traf = TrackFragmentHeaderBox::default();
-    traf.track_id = track.track_id();
-    traf.base_data_offset = Some(0);
+    // Track fragment header.
+    let mut tfhd = TrackFragmentHeaderBox::default();
+    tfhd.track_id = track.track_id();
+    tfhd.default_base_is_moof = true;
+    traf.boxes.push(tfhd.to_mp4box());
 
+    // Track run box.
+    let sample_count = to - from + 1;
+    let mut samples = track.sample_info_iter();
+    samples.seek(from)?;
+    let first_sample = samples.clone().next().ok_or(ioerr!(UnexpectedEof))?;
+    let flags = build_sample_flags(first_sample.is_sync);
+    let first_sample_flags = if trex.default_sample_flags != flags {
+        Some(flags)
+    } else {
+        None
+    };
+    let mut trun = TrackRunBox {
+        sample_count,
+        data_offset: Some(0),
+        first_sample_flags,
+        entries: ArrayUnsized::<TrackRunEntry>::new(),
+    };
 
+    let dfl = SampleDefaults::new(track, from, to);
+
+    for sample in samples.take(sample_count as usize) {
+        let entry = TrackRunEntry {
+            sample_duration: default_or(&dfl.sample_duration, sample.duration),
+            sample_flags: default_or(&dfl.sample_flags, build_sample_flags(sample.is_sync)),
+            sample_size: default_or(&dfl.sample_size, sample.size),
+            sample_composition_time_offset: default_or(&dfl.sample_composition_time_offset, sample.composition_delta),
+        };
+        trun.entries.push(entry);
+    }
+
+    traf.boxes.push(trun.to_mp4box());
+
+    // Now build moof.
+    let mut moof = MovieFragmentBox::default();
+
+    // Movie fragment header.
+    moof.boxes.push(MovieFragmentHeaderBox{ sequence_number: seq_num }.to_mp4box());
+
+    // Track fragment.
+    moof.boxes.push(traf.to_mp4box());
+
+    // moof + mdat.
+    let mut boxes = Vec::new();
+    boxes.push(moof.to_mp4box());
+    boxes.push(mdat.to_mp4box());
+
+    Ok(boxes)
 }
 

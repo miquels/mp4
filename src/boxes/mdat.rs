@@ -5,6 +5,7 @@ use crate::io::DataRef;
 
 def_box! {
     /// 8.1.1 Media Data Box (ISO/IEC 14496-12:2015(E))
+    #[derive(Default)]
     MediaDataBox {
         data:   DataRef,
     },

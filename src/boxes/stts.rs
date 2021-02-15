@@ -35,6 +35,7 @@ def_struct! {
         delta:  u32,
 }
 
+#[derive(Clone)]
 pub struct TimeToSampleIterator<'a> {
     entries:    &'a [TimeToSampleEntry],
     entry:      TimeToSampleEntry,

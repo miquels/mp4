@@ -1,7 +1,7 @@
 use std::io;
 
 use crate::boxes::prelude::*;
-use crate::boxes::{MovieHeaderBox, TrackBox};
+use crate::boxes::{MovieHeaderBox, TrackBox, TrackExtendsBox};
 
 def_box! {
     /// 8.2.1 Movie Box (ISO/IEC 14496-12:2015(E))
@@ -70,6 +70,21 @@ impl MovieBox {
             } else {
                 None
             }
+        })
+    }
+
+    /// Get the Track Extends box for this track.
+    pub fn track_extends_by_id(&self, track_id: u32) -> Option<&TrackExtendsBox> {
+        self.boxes.iter().find_map(|b| {
+            match b {
+                MP4Box::TrackExtendsBox(t) => {
+                    if t.track_id == track_id {
+                        return Some(t);
+                    }
+                }
+                _ => {},
+            }
+            None
         })
     }
 

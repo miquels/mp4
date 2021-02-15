@@ -539,7 +539,7 @@ impl_flags!(
 ///
 /// For the first four fields, see 8.6.4.3 (Semantics).
 /// The sample_is_non_sync_sample field  provides the same information as the sync sample table [8.6.2].
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct SampleFlags {
     pub is_leading:                  u8,
     pub sample_depends_on:           u8,

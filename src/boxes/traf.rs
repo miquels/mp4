@@ -4,6 +4,7 @@ use crate::boxes::prelude::*;
 use crate::boxes::{TrackFragmentHeaderBox, TrackFragmentBaseMediaDecodeTimeBox, TrackRunBox};
 
 def_box! {
+    #[derive(Default)]
     TrackFragmentBox {
         boxes:      Vec<MP4Box>,
     },

@@ -16,6 +16,8 @@ pub struct SampleInfo {
     pub fpos:    u64,
     /// Size.
     pub size:   u32,
+    /// Duration.
+    pub duration: u32,
     /// Decode time.
     pub decode_time:  u64,
     /// Composition time delta.
@@ -27,6 +29,7 @@ pub struct SampleInfo {
 }
 
 /// Iterator that yields SampleInfo.
+#[derive(Clone)]
 pub struct SampleInfoIterator<'a> {
     stsz_iter:  SampleSizeIterator<'a>,
     stts_iter:  TimeToSampleIterator<'a>,
@@ -128,7 +131,8 @@ impl<'a> Iterator for SampleInfoIterator<'a> {
         };
         self.fpos += size as u64;
 
-        if let Some((_duration, decode_time)) = self.stts_iter.next() {
+        if let Some((duration, decode_time)) = self.stts_iter.next() {
+            sample.duration = duration;
             sample.decode_time = decode_time;
         }
 

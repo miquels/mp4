@@ -25,6 +25,7 @@ impl SyncSampleBox {
     }
 }
 
+#[derive(Clone)]
 pub struct SyncSampleIterator<'a> {
     entries:    &'a [u32],
     index:      usize,
