@@ -68,24 +68,15 @@ fn track_extends(trak: &TrackBox, track_id: u32) -> TrackExtendsBox {
     let mut trex = TrackExtendsBox::default();
     trex.track_id = track_id;
 
-    let mdia = trak.media();
-    let minf = mdia.media_info();
-    let sample_table = minf.sample_table();
-
-    if first_box!(sample_table, SyncSampleBox).is_some() {
-        // has a SyncSampleBox, so most samples are not sync
-        trex.default_sample_flags.sample_depends_on = 1;
-        trex.default_sample_flags.sample_is_non_sync_sample = true;
-    } else {
-        // no SyncSampleBox, every sample is sync.
-        trex.default_sample_flags.sample_depends_on = 2;
+    // We only set the defaults for flags and duration, if we can.
+    // sample_size never has a default because it's always different,
+    // and description_index has already been set to '1'.
+    let dfl = SampleDefaults::new(trak, 1, u32::MAX);
+    if let Some(flags) = dfl.sample_flags.as_ref() {
+        trex.default_sample_flags = flags.clone();
     }
-
-    // For the default duration, simply take the duration of the first sample.
-    if let Some(stts) = first_box!(sample_table, TimeToSampleBox) {
-        if stts.entries.len() > 0 {
-            trex.default_sample_duration = stts.entries[0].delta;
-        }
+    if let Some(duration) = dfl.sample_duration {
+        trex.default_sample_duration = duration;
     }
 
     trex
@@ -210,6 +201,10 @@ struct SampleDefaults {
 }
 
 impl SampleDefaults {
+    //
+    // Analyze the tables in the SampleTableBox and see if there are any
+    // defaults for the samples in this track.
+    //
     fn new(track: &TrackBox, from: u32, to: u32) -> SampleDefaults {
         let tables = track.media().sample_table();
 
@@ -262,6 +257,8 @@ impl SampleDefaults {
 }
 
 
+// SampleFlags has a lot of bits, but really all we know is 'is this a key frame'.
+// So ttransform that boolean into a 'SampleFlags'.
 fn build_sample_flags(is_sync: bool) -> SampleFlags {
     let mut flags = SampleFlags::default();
     if is_sync {
@@ -272,6 +269,7 @@ fn build_sample_flags(is_sync: bool) -> SampleFlags {
     flags
 }
 
+// Helper.
 fn default_or<A, B>(dfl: &Option<A>, val: B) -> Option<B> {
     if dfl.is_some() {
         None

@@ -1,3 +1,4 @@
+use std::fmt;
 use std::io;
 
 use crate::boxes::prelude::*;
@@ -7,18 +8,23 @@ def_box! {
     /// 8.1.1 Media Data Box (ISO/IEC 14496-12:2015(E))
     #[derive(Default)]
     MediaDataBox {
-        data:   DataRef,
+        data:   MediaData,
     },
     fourcc => "mdat",
     version => [],
     impls => [ basebox, boxinfo, debug ],
 }
 
+/// Raw media data.
+#[derive(Clone)]
+pub struct MediaData(MediaData_);
+
 impl FromBytes for MediaDataBox {
     fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<MediaDataBox> {
         let mut reader = BoxReader::new(stream)?;
         let size = reader.left();
-        let data = DataRef::from_bytes_limit(&mut reader, size)?;
+        let data_ref = DataRef::from_bytes_limit(&mut reader, size)?;
+        let data = MediaData(MediaData_::DataRef(data_ref));
         Ok(MediaDataBox{ data })
     }
     fn min_size() -> usize { 8 }
@@ -45,3 +51,73 @@ impl ToBytes for MediaDataBox {
     }
 }
 
+#[derive(Clone)]
+enum MediaData_ {
+    DataRef(DataRef),
+    Data(Vec<u8>),
+}
+
+impl MediaData {
+    fn is_large(&self) -> bool {
+        match &self.0 {
+            MediaData_::DataRef(d) => d.is_large(),
+            MediaData_::Data(d) => d.len() > (u32::MAX - 20) as usize,
+        }
+    }
+
+    /// Length in bytes.
+    pub fn len(&self) -> u64 {
+        match &self.0 {
+            MediaData_::DataRef(d) => d.len(),
+            MediaData_::Data(d) => d.len() as u64,
+        }
+    }
+
+    /// Add data.
+    pub fn push(&mut self, data: &[u8]) {
+        match &mut self.0 {
+            &mut MediaData_::DataRef(_) => panic!("cannot push onto MediaData_::DataRef"),
+            &mut MediaData_::Data(ref mut d) => d.extend_from_slice(data),
+        }
+    }
+
+    /// Resize.
+    pub fn resize(&mut self, size: usize) {
+        match &mut self.0 {
+            &mut MediaData_::DataRef(_) => panic!("cannot push onto MediaData_::DataRef"),
+            &mut MediaData_::Data(ref mut d) => d.resize(size, 0),
+        }
+    }
+
+    /// Mutable reference as bytes.
+    pub fn bytes_mut(&mut self) -> &mut [u8] {
+        match &mut self.0 {
+            &mut MediaData_::DataRef(_) => panic!("cannot write to MediaData_::DataRef"),
+            &mut MediaData_::Data(ref mut d) => &mut d[..],
+        }
+    }
+}
+
+impl Default for MediaData {
+    fn default() -> MediaData {
+        MediaData(MediaData_::Data(Vec::new()))
+    }
+}
+
+impl fmt::Debug for MediaData {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self.0 {
+            MediaData_::DataRef(d) => d.fmt(f),
+            MediaData_::Data(d) => d.fmt(f),
+        }
+    }
+}
+
+impl ToBytes for MediaData {
+    fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
+        match &self.0 {
+            MediaData_::DataRef(d) => d.to_bytes(stream),
+            MediaData_::Data(d) => d.to_bytes(stream),
+        }
+    }
+}

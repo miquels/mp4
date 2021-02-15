@@ -1,5 +1,6 @@
 use std::fs::File;
-use std::io::{self, BufWriter, Read, Seek, Write};
+use std::io::{self, BufWriter, Write};
+use std::os::unix::fs::FileExt;
 
 use anyhow::{anyhow, Result};
 use clap;
@@ -278,8 +279,7 @@ fn dump(opts: DumpOpts) -> Result<()> {
     let mp4 = MP4::read(&mut reader)?;
     let movie = mp4.movie();
 
-    let mut infh = reader.into_inner();
-    infh.seek(io::SeekFrom::Start(0))?;
+    let infh = reader.file();
 
     let tracks = movie.tracks();
     let track = match movie.track_idx_by_id(opts.track) {
@@ -290,11 +290,14 @@ fn dump(opts: DumpOpts) -> Result<()> {
     let stdout = io::stdout();
     let mut handle = BufWriter::with_capacity(128000, stdout.lock());
 
+    let mut buffer = Vec::new();
     for sample_info in track.sample_info_iter() {
-        infh.seek(io::SeekFrom::Start(sample_info.fpos))?;
-        let mut sm = infh.take(sample_info.size as u64);
-        io::copy(&mut sm, &mut handle)?;
-        infh = sm.into_inner();
+        let sz = sample_info.size as usize;
+        if buffer.len() < sz {
+            buffer.resize(sz, 0);
+        }
+        infh.read_exact_at(&mut buffer[..sz], sample_info.fpos)?;
+        handle.write_all(&buffer[..sz])?;
     }
 
     Ok(())

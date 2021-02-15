@@ -15,7 +15,7 @@ use crate::types::{FourCC, ToPrimitive};
 /// Implements `ReadBytes`, so can be passed to `MP4::read`.
 pub struct Mp4File {
     mmap:           Arc<Mmap>,
-    file:           fs::File,
+    file:           Arc<fs::File>,
     pos:            u64,
     size:           u64,
     input_filename: Option<String>,
@@ -30,16 +30,16 @@ impl Mp4File {
         let mmap = unsafe { MmapOptions::new().map(&file)? };
         Ok(Mp4File {
             mmap: Arc::new(mmap),
-            file,
+            file: Arc::new(file),
             pos: 0,
             size,
             input_filename: Some(path.to_string()),
         })
     }
 
-    /// Get the `File` out again.
-    pub fn into_inner(self) -> fs::File {
-        self.file
+    /// Get a reference to the filehandle.
+    pub fn file(self) -> Arc<fs::File> {
+        self.file.clone()
     }
 }
 
@@ -110,6 +110,7 @@ impl BoxBytes for Mp4File {
         }
         Ok(DataRef {
             mmap:             self.mmap.clone(),
+            file:             self.file.clone(),
             start:            self.pos as usize,
             end:              (self.pos + size) as usize,
             num_entries_type: std::marker::PhantomData,
@@ -130,6 +131,7 @@ impl BoxBytes for Mp4File {
 /// read-only.
 pub struct DataRef<N = (), T = u8> {
     mmap:             Arc<Mmap>,
+    file:             Arc<fs::File>,
     start:            usize,
     end:              usize,
     num_entries_type: std::marker::PhantomData<N>,
@@ -159,6 +161,7 @@ impl<N, T> DataRef<N, T> {
     pub(crate) fn transmute<N2, T2>(self) -> DataRef<N2, T2> {
         DataRef {
             mmap:             self.mmap,
+            file:             self.file.clone(),
             start:            self.start,
             end:              self.end,
             num_entries_type: std::marker::PhantomData,
@@ -271,6 +274,7 @@ impl<N, T> Default for DataRef<N, T> {
         let mmap = unsafe { MmapOptions::new().len(4).map(&devzero).unwrap() };
         DataRef {
             mmap:             Arc::new(mmap),
+            file:             Arc::new(devzero),
             start:            0,
             end:              0,
             num_entries_type: std::marker::PhantomData,
@@ -287,6 +291,7 @@ where
     fn clone(&self) -> Self {
         DataRef {
             mmap:             self.mmap.clone(),
+            file:             self.file.clone(),
             start:            self.start,
             end:              self.end,
             num_entries_type: self.num_entries_type,
