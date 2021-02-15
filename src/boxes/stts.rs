@@ -62,7 +62,7 @@ impl TimeToSampleIterator<'_> {
             cur_sample += entry.count;
             cumulative += entry.count as u64 * (entry.delta as u64);
         }
-        Err(io::ErrorKind::UnexpectedEof.into())
+        Err(ioerr!(UnexpectedEof))
     }
 }
 

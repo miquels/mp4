@@ -195,8 +195,7 @@ macro_rules! impl_fromtobytes {
                 match (reader.header.version, reader.header.max_version) {
                     (Some(version), Some(max_version)) => {
                         if version > max_version {
-                            return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                format!("{}: no suppor for version {}", stringify!($name), version)));
+                            return Err(ioerr!(InvalidData, "{}: no support for version {}", stringify!($name), version));
                         }
                     },
                     _ => {},

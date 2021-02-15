@@ -154,7 +154,7 @@ impl<'a> SampleToChunkIterator<'a> {
             }
         }
 
-        Err(io::ErrorKind::UnexpectedEof.into())
+        Err(ioerr!(UnexpectedEof))
     }
 }
 

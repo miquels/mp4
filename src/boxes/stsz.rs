@@ -93,7 +93,7 @@ impl<'a> SampleSizeIterator<'a> {
     /// Sample indices start at `1`.
     pub fn seek(&mut self, seek_to: u32) -> io::Result<()> {
         if seek_to > self.sample_count {
-            return Err(io::ErrorKind::UnexpectedEof.into());
+            return Err(ioerr!(UnexpectedEof));
         }
         self.index = seek_to.saturating_sub(1) as usize;
         Ok(())

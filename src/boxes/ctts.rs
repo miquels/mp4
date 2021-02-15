@@ -137,7 +137,7 @@ impl <'a> CompositionOffsetIterator<'a> {
             }
             cur_sample += count;
         }
-        Err(io::ErrorKind::UnexpectedEof.into())
+        Err(ioerr!(UnexpectedEof))
     }
 }
 

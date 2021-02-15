@@ -168,7 +168,7 @@ impl FromBytes for BaseDescriptor {
             }
             if i == 4 {
                 log::warn!("ESDescriptorBox: length field > 4 bytes (@{})", stream.pos());
-                return Err(io::ErrorKind::InvalidData.into());
+                return Err(ioerr!(InvalidData));
             }
         }
         Ok(BaseDescriptor{
@@ -189,7 +189,7 @@ impl ToBytes for BaseDescriptor {
         if size >= 268435456 {
             // 28 bits max.
             log::warn!("ESDescriptorBox: tag {} length field does not find in 28 bits", self.tag);
-            return Err(io::ErrorKind::InvalidData.into());
+            return Err(ioerr!(InvalidData));
         }
 
         let mut buf = [0u8; 4];

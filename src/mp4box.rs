@@ -167,7 +167,7 @@ impl ReadBytes for BoxReader<'_> {
     #[inline]
     fn read(&mut self, amount: u64) -> io::Result<&[u8]> {
         if self.pos + amount > self.maxsize {
-            return Err(io::ErrorKind::UnexpectedEof.into());
+            return Err(ioerr!(UnexpectedEof));
         }
         let res = self.inner.read(amount)?;
         self.pos += amount;
@@ -176,14 +176,14 @@ impl ReadBytes for BoxReader<'_> {
     #[inline]
     fn peek(&mut self, amount: u64) -> io::Result<&[u8]> {
         if self.pos + amount > self.maxsize {
-            return Err(io::ErrorKind::UnexpectedEof.into());
+            return Err(ioerr!(UnexpectedEof));
         }
         self.inner.peek(amount)
     }
     #[inline]
     fn skip(&mut self, amount: u64) -> io::Result<()> {
         if self.pos + amount > self.maxsize {
-            return Err(io::ErrorKind::UnexpectedEof.into());
+            return Err(ioerr!(UnexpectedEof));
         }
         self.inner.skip(amount)?;
         self.pos += amount;
@@ -208,7 +208,7 @@ impl BoxBytes for BoxReader<'_> {
     #[inline]
     fn seek(&mut self, pos: u64) -> io::Result<()> {
         if pos > self.maxsize {
-            return Err(io::ErrorKind::UnexpectedEof.into());
+            return Err(ioerr!(UnexpectedEof));
         }
         self.inner.seek(pos)?;
         self.pos = pos;

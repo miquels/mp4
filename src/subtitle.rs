@@ -27,12 +27,7 @@ impl FromStr for Format {
             "srt" => Ok(Format::Srt),
             "tx3g" => Ok(Format::Tx3g),
             "3gpp" => Ok(Format::Tx3g),
-            _ => {
-                Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "Could not parse format",
-                ))
-            },
+            _ => Err(ioerr!(InvalidInput, "Could not parse format")),
         }
     }
 }

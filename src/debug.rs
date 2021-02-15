@@ -11,12 +11,7 @@ pub fn dump_track_samples(mp4: &MP4, track_id: u32, first_sample: u32, last_samp
     // Find the track by id.
     let track_idx = match movie.track_idx_by_id(track_id) {
         Some(idx) => idx,
-        None => {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("track id {}: no such track", track_id),
-            ));
-        },
+        None => return Err(ioerr!(NotFound, "track id {}: no such track", track_id)),
     };
 
     let trak = movie.tracks()[track_idx];
