@@ -43,16 +43,15 @@ pub mod serialize;
 pub mod types;
 mod bitreader;
 //mod global;
+pub mod boxes;
 pub mod debug;
 pub mod fragment;
 pub mod io;
 pub mod mp4box;
-pub mod boxes;
-pub mod track;
 pub mod rewrite;
 pub(crate) mod sample_info;
 pub mod subtitle;
+pub mod track;
 
 pub use crate::io::Mp4File;
 pub use crate::mp4box::MP4;
-

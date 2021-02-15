@@ -3,45 +3,45 @@ use std::io;
 
 use crate::boxes::*;
 
+use crate::boxes::ctts::CompositionOffsetIterator;
+use crate::boxes::stsc::SampleToChunkIterator;
+use crate::boxes::stss::SyncSampleIterator;
 use crate::boxes::stsz::SampleSizeIterator;
 use crate::boxes::stts::TimeToSampleIterator;
-use crate::boxes::stsc::SampleToChunkIterator;
-use crate::boxes::ctts::CompositionOffsetIterator;
-use crate::boxes::stss::SyncSampleIterator;
 
 /// Information about one sample.
 #[derive(Default, Debug)]
 pub struct SampleInfo {
     /// File position.
-    pub fpos:    u64,
+    pub fpos:              u64,
     /// Size.
-    pub size:   u32,
+    pub size:              u32,
     /// Duration.
-    pub duration: u32,
+    pub duration:          u32,
     /// Decode time.
-    pub decode_time:  u64,
+    pub decode_time:       u64,
     /// Composition time delta.
-    pub composition_delta:  i32,
+    pub composition_delta: i32,
     /// is it a sync sample
-    pub is_sync:    bool,
+    pub is_sync:           bool,
     /// what chunk is it in.
-    pub chunk:  u32,
+    pub chunk:             u32,
 }
 
 /// Iterator that yields SampleInfo.
 #[derive(Clone)]
 pub struct SampleInfoIterator<'a> {
-    stsz_iter:  SampleSizeIterator<'a>,
-    stts_iter:  TimeToSampleIterator<'a>,
-    stsc_iter:  SampleToChunkIterator<'a>,
-    ctts_iter:  Option<CompositionOffsetIterator<'a>>,
-    stss_iter:  Option<SyncSampleIterator<'a>>,
-    chunk_offset:   &'a ChunkOffsetBox,
-    media_timescale:  u32,
+    stsz_iter:       SampleSizeIterator<'a>,
+    stts_iter:       TimeToSampleIterator<'a>,
+    stsc_iter:       SampleToChunkIterator<'a>,
+    ctts_iter:       Option<CompositionOffsetIterator<'a>>,
+    stss_iter:       Option<SyncSampleIterator<'a>>,
+    chunk_offset:    &'a ChunkOffsetBox,
+    media_timescale: u32,
     comp_time_shift: i32,
-    fpos:           u64,
-    cur_sample:     u32,
-    cur_chunk:      u32,
+    fpos:            u64,
+    cur_sample:      u32,
+    cur_chunk:       u32,
 }
 
 impl SampleInfoIterator<'_> {
@@ -56,7 +56,6 @@ impl SampleInfoIterator<'_> {
 /// It iterates over multiple tables within the SampleTableBox, and
 /// for each sample returns a SampleInfo.
 pub fn sample_info_iter<'a>(trak: &'a TrackBox) -> SampleInfoIterator<'a> {
-
     let mdhd = trak.media().media_header();
     let stbl = trak.media().media_info().sample_table();
     let media_timescale = mdhd.timescale;
@@ -73,8 +72,8 @@ pub fn sample_info_iter<'a>(trak: &'a TrackBox) -> SampleInfoIterator<'a> {
         media_timescale,
         comp_time_shift,
         fpos: 0,
-        cur_sample:     1,
-        cur_chunk:      1,
+        cur_sample: 1,
+        cur_chunk: 1,
     }
 }
 
@@ -141,7 +140,7 @@ impl<'a> Iterator for SampleInfoIterator<'a> {
                 sample.composition_delta = delta - self.comp_time_shift;
             }
         }
-    
+
         if let Some(stss_iter) = self.stss_iter.as_mut() {
             sample.is_sync = stss_iter.next().unwrap();
         }

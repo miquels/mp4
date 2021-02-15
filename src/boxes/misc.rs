@@ -1,5 +1,5 @@
-use std::io;
 use crate::boxes::prelude::*;
+use std::io;
 
 def_box! {
     FileTypeBox {
@@ -208,7 +208,7 @@ def_box! {
 impl Default for TrackExtendsBox {
     fn default() -> TrackExtendsBox {
         TrackExtendsBox {
-            track_id:   0,
+            track_id: 0,
             default_sample_description_index: 1,
             default_sample_duration: 0,
             default_sample_size: 0,

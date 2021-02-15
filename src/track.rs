@@ -14,12 +14,12 @@ pub use crate::sample_info::*;
 /// General track information.
 #[derive(Debug, Default, Serialize)]
 pub struct TrackInfo {
-    pub id:             u32,
-    pub track_type:     String,
-    pub duration:       Duration,
-    pub size:           u64,
-    pub language:       IsoLanguageCode,
-    pub specific_info:  SpecificTrackInfo,
+    pub id:            u32,
+    pub track_type:    String,
+    pub duration:      Duration,
+    pub size:          u64,
+    pub language:      IsoLanguageCode,
+    pub specific_info: SpecificTrackInfo,
 }
 
 /// Track-type specific info.
@@ -35,7 +35,7 @@ pub enum SpecificTrackInfo {
 impl Default for SpecificTrackInfo {
     fn default() -> SpecificTrackInfo {
         SpecificTrackInfo::UnknownTrackInfo(UnknownTrackInfo {
-            codec_id: "und".to_string(),
+            codec_id:   "und".to_string(),
             codec_name: None,
         })
     }
@@ -66,20 +66,24 @@ impl Display for SpecificTrackInfo {
 /// Audio track details.
 #[derive(Debug, Default, Serialize)]
 pub struct AudioTrackInfo {
-    pub codec_id:   String,
-    pub codec_name: Option<String>,
-    pub channel_count:   u16,
-    pub lfe_channel:    bool,
-    pub bit_depth:  Option<u16>,
-    pub sample_rate:    Option<u32>,
-    pub channel_configuration:  Option<String>,
-    pub avg_bitrate:   Option<u32>,
-    pub max_bitrate:   Option<u32>,
+    pub codec_id:              String,
+    pub codec_name:            Option<String>,
+    pub channel_count:         u16,
+    pub lfe_channel:           bool,
+    pub bit_depth:             Option<u16>,
+    pub sample_rate:           Option<u32>,
+    pub channel_configuration: Option<String>,
+    pub avg_bitrate:           Option<u32>,
+    pub max_bitrate:           Option<u32>,
 }
 
 impl Display for AudioTrackInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} ({}.{})", self.codec_id, self.channel_count, self.lfe_channel as u8)
+        write!(
+            f,
+            "{} ({}.{})",
+            self.codec_id, self.channel_count, self.lfe_channel as u8
+        )
     }
 }
 
@@ -164,23 +168,28 @@ pub fn track_info(mp4: &MP4) -> Vec<TrackInfo> {
         } else if let Some(aac) = first_box!(stsd.entries, AacSampleEntry) {
             info.specific_info = SpecificTrackInfo::AudioTrackInfo(aac.track_info());
         } else {
-            let id = stsd.entries.iter().next().map(|e| e.fourcc().to_string()).unwrap_or("unkn".to_string());
+            let id = stsd
+                .entries
+                .iter()
+                .next()
+                .map(|e| e.fourcc().to_string())
+                .unwrap_or("unkn".to_string());
             let sp_info = match id.as_str() {
                 "tx3g" => {
                     SpecificTrackInfo::SubtitleTrackInfo(SubtitleTrackInfo {
-                        codec_id: id.to_string(),
+                        codec_id:   id.to_string(),
                         codec_name: Some(String::from("3GPP Timed Text")),
                     })
                 },
-                "stpp"|"sbtt" => {
+                "stpp" | "sbtt" => {
                     SpecificTrackInfo::SubtitleTrackInfo(SubtitleTrackInfo {
-                        codec_id: id.to_string(),
+                        codec_id:   id.to_string(),
                         codec_name: None,
                     })
                 },
                 _ => {
                     SpecificTrackInfo::UnknownTrackInfo(UnknownTrackInfo {
-                        codec_id: id,
+                        codec_id:   id,
                         codec_name: None,
                     })
                 },

@@ -1,22 +1,18 @@
 use std::io;
 
-use crate::mp4box::{MP4, MP4Box};
-use crate::types::*;
 use crate::boxes::*;
+use crate::mp4box::{MP4Box, MP4};
+use crate::types::*;
 
 /// Build a Media Initialization Section for fMP4 segments.
 pub fn media_init_section(mp4: &MP4, track_ids: &[u32]) -> MP4 {
-
     let mut boxes = Vec::new();
 
     // Start with the FileType box.
     let ftyp = FileTypeBox {
-        major_brand:    FourCC::new("isom"),
-        minor_version:  1,
-        compatible_brands: vec![
-            FourCC::new("avc1"),
-            FourCC::new("iso6"),
-        ],
+        major_brand:       FourCC::new("isom"),
+        minor_version:     1,
+        compatible_brands: vec![FourCC::new("avc1"), FourCC::new("iso6")],
     };
     boxes.push(MP4Box::FileTypeBox(ftyp));
 
@@ -31,7 +27,7 @@ pub fn media_init_section(mp4: &MP4, track_ids: &[u32]) -> MP4 {
         match box_ {
             MP4Box::MovieHeaderBox(header) => {
                 // initialize MovieExtendsHeaderBox from this box.
-                mvex_boxes.push(MP4Box::MovieExtendsHeaderBox(MovieExtendsHeaderBox{
+                mvex_boxes.push(MP4Box::MovieExtendsHeaderBox(MovieExtendsHeaderBox {
                     fragment_duration: header.duration,
                 }));
                 // always copy this box.
@@ -55,10 +51,10 @@ pub fn media_init_section(mp4: &MP4, track_ids: &[u32]) -> MP4 {
     }
 
     // add the MovieExtendsBox.
-    movie_boxes.push(MP4Box::MovieExtendsBox(MovieExtendsBox{ boxes: mvex_boxes }));
+    movie_boxes.push(MP4Box::MovieExtendsBox(MovieExtendsBox { boxes: mvex_boxes }));
 
     // finally add the MovieBox to the top level boxes!
-    boxes.push(MP4Box::MovieBox(MovieBox{ boxes: movie_boxes }));
+    boxes.push(MP4Box::MovieBox(MovieBox { boxes: movie_boxes }));
 
     MP4 {
         boxes,
@@ -122,15 +118,15 @@ fn fmp4_track(trak: &TrackBox, track_id: u32) -> TrackBox {
     let hdlr = mdia.handler();
     let b = hdlr.handler_type.to_be_bytes();
     match &b[..] {
-        b"sbtl"|b"subt" => {
+        b"sbtl" | b"subt" => {
             media_boxes.push(MP4Box::HandlerBox(HandlerBox {
-                handler_type:   FourCC::new("subt"),
-                name:           ZString("SubtitleHandler".into()),
+                handler_type: FourCC::new("subt"),
+                name:         ZString("SubtitleHandler".into()),
             }));
         },
         _ => {
             media_boxes.push(MP4Box::HandlerBox(hdlr.clone()));
-        }
+        },
     }
 
     // extended language tag, if present.
@@ -187,24 +183,29 @@ fn fmp4_track(trak: &TrackBox, track_id: u32) -> TrackBox {
     }
 
     // add the sample boxes to MediaInfo.
-    media_info_boxes.push(SampleTableBox{ boxes: sample_boxes }.to_mp4box());
+    media_info_boxes.push(SampleTableBox { boxes: sample_boxes }.to_mp4box());
 
     // now add the MediaInformationBox to the MediaBox.
-    media_boxes.push(MediaInformationBox{ boxes: media_info_boxes }.to_mp4box());
+    media_boxes.push(
+        MediaInformationBox {
+            boxes: media_info_boxes,
+        }
+        .to_mp4box(),
+    );
 
     // And add media to the track.
-    boxes.push(MP4Box::MediaBox(MediaBox{ boxes: media_boxes }));
+    boxes.push(MP4Box::MediaBox(MediaBox { boxes: media_boxes }));
 
-    TrackBox{ boxes }
+    TrackBox { boxes }
 }
 
 // Some values are constant for the entire trackfragment, or even the
 // entire track. For now this is pretty coarse and we mostly check
 // the whole track for defaults.
 struct SampleDefaults {
-    sample_duration: Option<u32>,
-    sample_flags: Option<SampleFlags>,
-    sample_size: Option<u32>,
+    sample_duration:                Option<u32>,
+    sample_flags:                   Option<SampleFlags>,
+    sample_size:                    Option<u32>,
     sample_composition_time_offset: Option<i32>,
 }
 
@@ -284,8 +285,13 @@ pub fn movie_fragment(mp4: &MP4, track_id: u32, seq_num: u32, from: u32, to: u32
     let movie = mp4.movie();
     let mut mdat = MediaDataBox::default();
 
-    let track = movie.track_by_id(track_id).ok_or(ioerr!(NotFound, "{}: no such track", track_id))?;
-    let trex = movie.track_extends_by_id(track_id).ok_or(ioerr!(NotFound, "{}: no TrackExtendsBox", track_id))?;
+    let track = movie
+        .track_by_id(track_id)
+        .ok_or(ioerr!(NotFound, "{}: no such track", track_id))?;
+    let trex =
+        movie
+            .track_extends_by_id(track_id)
+            .ok_or(ioerr!(NotFound, "{}: no TrackExtendsBox", track_id))?;
 
     // Track fragment.
     let mut traf = TrackFragmentBox::default();
@@ -318,10 +324,13 @@ pub fn movie_fragment(mp4: &MP4, track_id: u32, seq_num: u32, from: u32, to: u32
 
     for sample in samples.take(sample_count as usize) {
         let entry = TrackRunEntry {
-            sample_duration: default_or(&dfl.sample_duration, sample.duration),
-            sample_flags: default_or(&dfl.sample_flags, build_sample_flags(sample.is_sync)),
-            sample_size: default_or(&dfl.sample_size, sample.size),
-            sample_composition_time_offset: default_or(&dfl.sample_composition_time_offset, sample.composition_delta),
+            sample_duration:                default_or(&dfl.sample_duration, sample.duration),
+            sample_flags:                   default_or(&dfl.sample_flags, build_sample_flags(sample.is_sync)),
+            sample_size:                    default_or(&dfl.sample_size, sample.size),
+            sample_composition_time_offset: default_or(
+                &dfl.sample_composition_time_offset,
+                sample.composition_delta,
+            ),
         };
         trun.entries.push(entry);
     }
@@ -332,7 +341,12 @@ pub fn movie_fragment(mp4: &MP4, track_id: u32, seq_num: u32, from: u32, to: u32
     let mut moof = MovieFragmentBox::default();
 
     // Movie fragment header.
-    moof.boxes.push(MovieFragmentHeaderBox{ sequence_number: seq_num }.to_mp4box());
+    moof.boxes.push(
+        MovieFragmentHeaderBox {
+            sequence_number: seq_num,
+        }
+        .to_mp4box(),
+    );
 
     // Track fragment.
     moof.boxes.push(traf.to_mp4box());
@@ -344,4 +358,3 @@ pub fn movie_fragment(mp4: &MP4, track_id: u32, seq_num: u32, from: u32, to: u32
 
     Ok(boxes)
 }
-

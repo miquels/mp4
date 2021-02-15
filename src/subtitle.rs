@@ -1,15 +1,15 @@
 //! Subtitle handling.
 //!
-use std::io::Write;
 use std::io;
+use std::io::Write;
 use std::str::FromStr;
 
+use crate::boxes::sbtl::Tx3GTextSample;
 use crate::boxes::*;
+use crate::mp4box::BoxInfo;
 use crate::mp4box::MP4;
 use crate::serialize::FromBytes;
 use crate::track::SampleInfo;
-use crate::mp4box::BoxInfo;
-use crate::boxes::sbtl::Tx3GTextSample;
 
 /// Subtitle format.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,7 +27,12 @@ impl FromStr for Format {
             "srt" => Ok(Format::Srt),
             "tx3g" => Ok(Format::Tx3g),
             "3gpp" => Ok(Format::Tx3g),
-            _ => Err(io::Error::new(io::ErrorKind::InvalidInput, "Could not parse format")),
+            _ => {
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Could not parse format",
+                ))
+            },
         }
     }
 }
@@ -85,10 +90,17 @@ fn ptime(secs: f64, format: Format) -> String {
     tm /= 60;
 
     let sep = if format == Format::Vtt { "." } else { "," };
-    format!("{:02}:{:02}:{:02}{}{:03}", tm, mins, secs, sep,  millis)
+    format!("{:02}:{:02}:{:02}{}{:03}", tm, mins, secs, sep, millis)
 }
 
-fn cue(format: Format, _sample: SampleInfo, subt: Tx3GTextSample, count: u32, start: f64, end: f64) -> String {
+fn cue(
+    format: Format,
+    _sample: SampleInfo,
+    subt: Tx3GTextSample,
+    count: u32,
+    start: f64,
+    end: f64,
+) -> String {
     use std::fmt::Write;
     let eol = if format == Format::Vtt { "\n" } else { "\r\n" };
     let mut cue = String::new();
@@ -112,7 +124,12 @@ fn cue(format: Format, _sample: SampleInfo, subt: Tx3GTextSample, count: u32, st
 }
 
 /// Extract a subtitle track into VTT / SRT or 3GPP.
-pub fn subtitle_extract(mp4: &MP4, track: &TrackBox, format: Format, mut output: impl Write) -> io::Result<()> {
+pub fn subtitle_extract(
+    mp4: &MP4,
+    track: &TrackBox,
+    format: Format,
+    mut output: impl Write,
+) -> io::Result<()> {
     let iter = track.sample_info_iter();
     let timescale = iter.timescale();
     let mut prev_text = None;

@@ -589,29 +589,38 @@ mod doc_hidden {
         fn from_usize(n: usize) -> Self;
     }
     impl FromPrimitive for () {
-        fn from_usize(_n: usize) -> () { () }
+        fn from_usize(_n: usize) -> () {
+            ()
+        }
     }
     impl FromPrimitive for u16 {
-        fn from_usize(n: usize) -> u16 { n as u16 }
+        fn from_usize(n: usize) -> u16 {
+            n as u16
+        }
     }
     impl FromPrimitive for u32 {
-        fn from_usize(n: usize) -> u32 { n as u32 }
+        fn from_usize(n: usize) -> u32 {
+            n as u32
+        }
     }
 
     pub trait ToPrimitive {
         fn to_usize(self) -> usize;
     }
-    impl ToPrimitive for ()
-    {
-        fn to_usize(self) -> usize { unimplemented!() }
+    impl ToPrimitive for () {
+        fn to_usize(self) -> usize {
+            unimplemented!()
+        }
     }
-    impl ToPrimitive for u16
-    {
-        fn to_usize(self) -> usize { self as usize }
+    impl ToPrimitive for u16 {
+        fn to_usize(self) -> usize {
+            self as usize
+        }
     }
-    impl ToPrimitive for u32
-    {
-        fn to_usize(self) -> usize { self as usize }
+    impl ToPrimitive for u32 {
+        fn to_usize(self) -> usize {
+            self as usize
+        }
     }
 }
 
@@ -629,7 +638,7 @@ pub use doc_hidden::*;
 /// - `u32`: 4 bytes size.
 ///
 pub struct Array<N, T> {
-    vec: Vec<T>,
+    vec:              Vec<T>,
     num_entries_type: std::marker::PhantomData<N>,
 }
 
@@ -637,7 +646,7 @@ impl<N, T> Array<N, T> {
     /// Constructs a new, empty `Array`.
     pub fn new() -> Self {
         Self {
-            vec: Vec::<T>::new(),
+            vec:              Vec::<T>::new(),
             num_entries_type: std::marker::PhantomData,
         }
     }
@@ -663,10 +672,10 @@ impl<N, T> Array<N, T> {
         T: Clone,
     {
         ArrayIteratorCloned::<'_, T> {
-            count:      self.len(),
-            default:    None,
-            entries:    &self.vec[..],
-            index:      0,
+            count:   self.len(),
+            default: None,
+            entries: &self.vec[..],
+            index:   0,
         }
     }
 
@@ -677,9 +686,9 @@ impl<N, T> Array<N, T> {
     {
         ArrayIteratorCloned::<'_, T> {
             count,
-            default:    Some(item),
-            entries:    &[],
-            index:      0,
+            default: Some(item),
+            entries: &[],
+            index: 0,
         }
     }
 }
@@ -700,8 +709,11 @@ impl<N, T> Default for Array<N, T> {
     }
 }
 
-impl<N, T> FromBytes for Array<N, T> where N: FromBytes + ToPrimitive, T: FromBytes {
-
+impl<N, T> FromBytes for Array<N, T>
+where
+    N: FromBytes + ToPrimitive,
+    T: FromBytes,
+{
     fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<Self> {
         let (mut v, count) = if mem::size_of::<N>() == 0 {
             (Vec::new(), std::u32::MAX as usize)
@@ -714,7 +726,7 @@ impl<N, T> FromBytes for Array<N, T> where N: FromBytes + ToPrimitive, T: FromBy
             v.push(T::from_bytes(stream)?);
         }
         Ok(Self {
-            vec: v,
+            vec:              v,
             num_entries_type: std::marker::PhantomData,
         })
     }
@@ -723,12 +735,16 @@ impl<N, T> FromBytes for Array<N, T> where N: FromBytes + ToPrimitive, T: FromBy
         if mem::size_of::<N>() > 0 {
             N::min_size()
         } else {
-            0           
+            0
         }
     }
 }
 
-impl<N, T> ToBytes for Array<N, T> where N: ToBytes + FromPrimitive, T: ToBytes {
+impl<N, T> ToBytes for Array<N, T>
+where
+    N: ToBytes + FromPrimitive,
+    T: ToBytes,
+{
     fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
         if mem::size_of::<N>() > 0 {
             N::from_usize(self.vec.len()).to_bytes(stream)?;
@@ -740,7 +756,10 @@ impl<N, T> ToBytes for Array<N, T> where N: ToBytes + FromPrimitive, T: ToBytes 
     }
 }
 
-impl<N, T> FullBox for Array<N, T> where T: FullBox {
+impl<N, T> FullBox for Array<N, T>
+where
+    T: FullBox,
+{
     fn version(&self) -> Option<u8> {
         // Find the highest version of any entry.
         let mut r = None;
@@ -759,17 +778,23 @@ impl<N, T> FullBox for Array<N, T> where T: FullBox {
     }
 }
 
-impl<N, T> Clone for Array<N, T> where T: Clone {
+impl<N, T> Clone for Array<N, T>
+where
+    T: Clone,
+{
     fn clone(&self) -> Self {
         Self {
-            vec: self.vec.clone(),
+            vec:              self.vec.clone(),
             num_entries_type: std::marker::PhantomData,
         }
     }
 }
 
 // Debug implementation that delegates to the inner Vec.
-impl<N, T> Debug for Array<N, T> where T: Debug {
+impl<N, T> Debug for Array<N, T>
+where
+    T: Debug,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         if f.alternate() {
             if self.vec.len() > 4 {
@@ -794,7 +819,7 @@ impl<N, T> std::ops::Deref for Array<N, T> {
 }
 
 impl<N, T> std::ops::DerefMut for Array<N, T> {
-    fn deref_mut(&mut self) -> &mut[T] {
+    fn deref_mut(&mut self) -> &mut [T] {
         std::ops::DerefMut::deref_mut(&mut self.vec)
     }
 }
@@ -809,13 +834,16 @@ impl<'a, N, T> IntoIterator for &'a Array<N, T> {
 }
 
 impl<N, T> std::iter::FromIterator<T> for Array<N, T> {
-    fn from_iter<I>(iter: I) -> Self where I: IntoIterator<Item = T> {
+    fn from_iter<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+    {
         let mut v = Vec::new();
         for i in iter {
             v.push(i);
         }
         Self {
-            vec: v,
+            vec:              v,
             num_entries_type: std::marker::PhantomData,
         }
     }
@@ -828,8 +856,7 @@ pub type ArrayUnsized<T> = Array<(), T>;
 /// Iterator over borrowed elements.
 pub struct ArrayIterator<'a, T>(std::slice::Iter<'a, T>);
 
-impl<'a, T> Iterator for ArrayIterator<'a, T>
-{
+impl<'a, T> Iterator for ArrayIterator<'a, T> {
     type Item = &'a T;
 
     #[inline]
@@ -839,10 +866,10 @@ impl<'a, T> Iterator for ArrayIterator<'a, T>
 }
 
 pub struct ArrayIteratorCloned<'a, T> {
-    count:      usize,
-    default:    Option<T>,
-    entries:    &'a [T],
-    index:      usize,
+    count:   usize,
+    default: Option<T>,
+    entries: &'a [T],
+    index:   usize,
 }
 
 impl<'a, T> ArrayIteratorCloned<'a, T> {
@@ -850,7 +877,10 @@ impl<'a, T> ArrayIteratorCloned<'a, T> {
     ///
     /// We assume that the items are ordered, and check only
     /// the first and last item.
-    pub fn in_range(&self, range: std::ops::Range<T>) -> bool where T: std::cmp::PartialOrd<T> {
+    pub fn in_range(&self, range: std::ops::Range<T>) -> bool
+    where
+        T: std::cmp::PartialOrd<T>,
+    {
         if self.count == 0 {
             return true;
         }
@@ -889,7 +919,7 @@ where
 ///    that indicates the number of elements in the slice.
 ///
 /// T: Type of elements in the slice, used with 'push' and 'iter'.
-pub enum List<N=(), T=u8> {
+pub enum List<N = (), T = u8> {
     DataRef(DataRef<N, T>),
     Array(Array<N, T>),
 }
@@ -995,7 +1025,11 @@ impl<N, T> Default for List<N, T> {
     }
 }
 
-impl<N, T> Clone for List<N, T> where N: Clone, T: Clone {
+impl<N, T> Clone for List<N, T>
+where
+    N: Clone,
+    T: Clone,
+{
     fn clone(&self) -> Self {
         match self {
             List::DataRef(this) => List::DataRef(this.clone()),
@@ -1048,7 +1082,10 @@ where
     T: FromBytes + Clone,
 {
     /// Check if all items fall in the range.
-    pub fn in_range(&self, range: std::ops::Range<T>) -> bool where T: std::cmp::PartialOrd<T> {
+    pub fn in_range(&self, range: std::ops::Range<T>) -> bool
+    where
+        T: std::cmp::PartialOrd<T>,
+    {
         match self {
             ListIteratorCloned::DataRef(this) => this.in_range(range),
             ListIteratorCloned::Array(this) => this.in_range(range),
@@ -1168,11 +1205,7 @@ impl std::ops::Deref for PString {
 impl FromBytes for PString {
     fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<PString> {
         let len = u8::from_bytes(stream)? as u64;
-        let data = if len > 0 {
-            stream.read(len)?
-        } else {
-            b""
-        };
+        let data = if len > 0 { stream.read(len)? } else { b"" };
         if let Ok(s) = std::str::from_utf8(data) {
             return Ok(PString(s.to_string()));
         }
@@ -1183,7 +1216,9 @@ impl FromBytes for PString {
         }
         Ok(PString(s))
     }
-    fn min_size() -> usize { 0 }
+    fn min_size() -> usize {
+        0
+    }
 }
 
 impl ToBytes for PString {
@@ -1217,11 +1252,7 @@ impl std::ops::Deref for P16String {
 impl FromBytes for P16String {
     fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<P16String> {
         let len = u16::from_bytes(stream)? as u64;
-        let data = if len > 0 {
-            stream.read(len)?
-        } else {
-            b""
-        };
+        let data = if len > 0 { stream.read(len)? } else { b"" };
         if let Ok(s) = std::str::from_utf8(data) {
             return Ok(P16String(s.to_string()));
         }
@@ -1232,7 +1263,9 @@ impl FromBytes for P16String {
         }
         Ok(P16String(s))
     }
-    fn min_size() -> usize { 0 }
+    fn min_size() -> usize {
+        0
+    }
 }
 
 impl ToBytes for P16String {
@@ -1242,4 +1275,3 @@ impl ToBytes for P16String {
         stream.write(self.0[..len].as_bytes())
     }
 }
-

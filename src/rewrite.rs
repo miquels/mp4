@@ -1,13 +1,12 @@
 //! Track rewriting / reshuffling.
 //!
-use crate::mp4box::MP4;
 use crate::boxes::MP4Box;
 use crate::io::CountBytes;
+use crate::mp4box::MP4;
 use crate::serialize::{BoxBytes, ToBytes};
 
 /// Set the default track.
 pub fn set_default_track(mp4: &mut MP4, track_id: u32) {
-
     let movie = mp4.movie();
 
     // Find the track by id.
@@ -16,7 +15,7 @@ pub fn set_default_track(mp4: &mut MP4, track_id: u32) {
         None => {
             log::debug!("track id {}: no such track", track_id);
             return;
-        }
+        },
     };
     let t = movie.tracks()[track_idx];
 
@@ -37,7 +36,10 @@ pub fn set_default_track(mp4: &mut MP4, track_id: u32) {
 
     // Swap the enabled flag, but set the first track to enabled always.
     let was_enabled = tracks[track_idx].track_header().flags.get_enabled();
-    tracks[first_idx].track_header_mut().flags.set_enabled(was_enabled);
+    tracks[first_idx]
+        .track_header_mut()
+        .flags
+        .set_enabled(was_enabled);
     tracks[track_idx].track_header_mut().flags.set_enabled(true);
 
     // swap the tracks.
@@ -46,7 +48,6 @@ pub fn set_default_track(mp4: &mut MP4, track_id: u32) {
 
 /// Move the "moov" box to the front.
 pub fn movie_at_front(mp4: &mut MP4) {
-
     // Get the index and offset of the moov and mdat boxes.
     let mut mdat_offset = 0u64;
     let mut mdat_size = 0u64;
@@ -83,7 +84,7 @@ pub fn movie_at_front(mp4: &mut MP4) {
     for t in mp4.movie().tracks().iter() {
         let stbl = t.media().media_info().sample_table();
         let iter = stbl.chunk_offset_table().iter();
-        if !iter.in_range(mdat_offset .. mdat_offset + mdat_size) {
+        if !iter.in_range(mdat_offset..mdat_offset + mdat_size) {
             log::error!("movie_at_front: not all tracks in first MovieDataBox");
             return;
         }
@@ -103,4 +104,3 @@ pub fn movie_at_front(mp4: &mut MP4) {
     // Then move the MovieBox to the front of the MP4.
     mp4.boxes.swap(mdat_idx.unwrap(), moov_idx.unwrap());
 }
-

@@ -1,11 +1,10 @@
 //! Debug helpers.
 //!
+use crate::mp4box::{MP4Box, MP4};
 use std::io;
-use crate::mp4box::{MP4, MP4Box};
 
 /// Dump sample information.
 pub fn dump_track_samples(mp4: &MP4, track_id: u32, first_sample: u32, last_sample: u32) -> io::Result<()> {
-
     let movie = mp4.movie();
     let first_sample = std::cmp::max(1, first_sample);
 
@@ -13,8 +12,11 @@ pub fn dump_track_samples(mp4: &MP4, track_id: u32, first_sample: u32, last_samp
     let track_idx = match movie.track_idx_by_id(track_id) {
         Some(idx) => idx,
         None => {
-            return Err(io::Error::new(io::ErrorKind::NotFound, format!("track id {}: no such track", track_id)));
-        }
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("track id {}: no such track", track_id),
+            ));
+        },
     };
 
     let trak = movie.tracks()[track_idx];
@@ -25,16 +27,20 @@ pub fn dump_track_samples(mp4: &MP4, track_id: u32, first_sample: u32, last_samp
     let timescale = samples.timescale();
 
     let mut next_pos = 1;
-    println!("{} {:>8}  {:>10}  {:>6}  {:>10}  {:>6}  {:>5}  {:>7}",
-             " ", "#", "filepos", "size", "dtime", "cdelta", "sync", "chunkno");
+    println!(
+        "{} {:>8}  {:>10}  {:>6}  {:>10}  {:>6}  {:>5}  {:>7}",
+        " ", "#", "filepos", "size", "dtime", "cdelta", "sync", "chunkno"
+    );
     for sample in samples {
         let dtime = sample.decode_time as f64 / (timescale as f64);
         let ctime_d = 1000f64 * sample.composition_delta as f64 / (timescale as f64);
         let is_sync = if sample.is_sync { "sync" } else { "" };
         let jump = if next_pos != sample.fpos { "+" } else { " " };
         next_pos = sample.fpos + sample.size as u64;
-        println!("{} {:>8}  {:>10}  {:>6}  {:>10.1}  {:>6.0}  {:>5}  {:>7}",
-                 jump, idx, sample.fpos, sample.size, dtime, ctime_d, is_sync, sample.chunk);
+        println!(
+            "{} {:>8}  {:>10}  {:>6}  {:>10.1}  {:>6.0}  {:>5}  {:>7}",
+            jump, idx, sample.fpos, sample.size, dtime, ctime_d, is_sync, sample.chunk
+        );
         idx += 1;
         if last_sample > 0 && idx > last_sample {
             break;
@@ -46,8 +52,12 @@ pub fn dump_track_samples(mp4: &MP4, track_id: u32, first_sample: u32, last_samp
 
 /// Dump timestamps of all the Track Fragments.
 pub fn dump_traf_timestamps(mp4: &MP4) {
-
-    let ts: Vec<_> = mp4.movie().tracks().iter().map(|t| t.media().media_header().timescale).collect();
+    let ts: Vec<_> = mp4
+        .movie()
+        .tracks()
+        .iter()
+        .map(|t| t.media().media_header().timescale)
+        .collect();
     let mut count = Vec::new();
     count.resize(ts.len(), 0u32);
 
@@ -89,7 +99,10 @@ pub fn dump_traf_timestamps(mp4: &MP4) {
             };
             let end = start + delta as f64 / (ts[id - 1] as f64);
 
-            println!("{}. start: {:.05}, end: {:.05}, leading: {:?}", id, start, end, is_leading);
+            println!(
+                "{}. start: {:.05}, end: {:.05}, leading: {:?}",
+                id, start, end, is_leading
+            );
             if id == ts.len() {
                 println!("");
             }
@@ -99,4 +112,3 @@ pub fn dump_traf_timestamps(mp4: &MP4) {
         println!("{}: sample_count: {}", c, idx);
     }
 }
-

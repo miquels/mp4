@@ -500,7 +500,7 @@ macro_rules! declare_box_methods {
         pub fn $method_mut(&mut self) -> &mut $type {
             first_box_mut!(&mut self.boxes, $type).unwrap()
         }
-    }
+    };
 }
 
 /// Helper.
@@ -514,6 +514,5 @@ macro_rules! declare_box_methods_opt {
         pub fn $method_mut(&mut self) -> Option<&mut $type> {
             first_box_mut!(&mut self.boxes, $type)
         }
-    }
+    };
 }
-

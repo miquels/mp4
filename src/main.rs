@@ -5,9 +5,9 @@ use anyhow::{anyhow, Result};
 use clap;
 use structopt::StructOpt;
 
-use mp4::io::Mp4File;
-use mp4::mp4box::{MP4, MP4Box};
 use mp4::debug;
+use mp4::io::Mp4File;
+use mp4::mp4box::{MP4Box, MP4};
 use mp4::subtitle;
 
 #[derive(StructOpt, Debug)]
@@ -17,7 +17,7 @@ pub struct MainOpts {
     /// Log options (like RUSTLOG; trace, debug, info etc)
     pub log: Option<String>,
     #[structopt(subcommand)]
-    pub cmd:   Command,
+    pub cmd: Command,
 }
 
 #[derive(StructOpt, Debug)]
@@ -132,11 +132,11 @@ pub struct DebugOpts {
     /// Show the samples for a track.
     pub samples: bool,
 
-    #[structopt(long, default_value="1")]
+    #[structopt(long, default_value = "1")]
     /// First sample to dump.
     pub from: u32,
 
-    #[structopt(long, default_value="0")]
+    #[structopt(long, default_value = "0")]
     /// Last sample to dump.
     pub to: u32,
 
@@ -150,7 +150,6 @@ pub struct DebugOpts {
 
 
 fn main() -> Result<()> {
-
     MP4Box::check();
 
     let opts = MainOpts::from_args();
@@ -219,8 +218,10 @@ fn fragment(opts: FragmentOpts) -> Result<()> {
 
 
 fn short(track: &mp4::track::TrackInfo) {
-    println!("{}. type [{}], length {:?}, lang {}, codec {}",
-        track.id, track.track_type, track.duration, track.language, track.specific_info);
+    println!(
+        "{}. type [{}], length {:?}, lang {}, codec {}",
+        track.id, track.track_type, track.duration, track.language, track.specific_info
+    );
 }
 
 fn mediainfo(opts: MediainfoOpts) -> Result<()> {
@@ -319,7 +320,6 @@ fn debug(opts: DebugOpts) -> Result<()> {
 
     if opts.boxes {
         if let Some(opt_track) = opts.track {
-
             // filter out tracks we don't want.
             let mut boxes = Vec::new();
             let mut movie = mp4.movie_mut();
@@ -343,16 +343,13 @@ fn debug(opts: DebugOpts) -> Result<()> {
             for box_ in mp4.boxes.drain(..) {
                 match &box_ {
                     MP4Box::MovieFragmentBox(ref moof) => {
-                        t_found = moof
-                            .track_fragments()
-                            .iter()
-                            .any(|frag| {
-                                if let Some(hdr) = frag.track_fragment_header() {
-                                    hdr.track_id == opt_track
-                                } else {
-                                    false
-                                }
-                            });
+                        t_found = moof.track_fragments().iter().any(|frag| {
+                            if let Some(hdr) = frag.track_fragment_header() {
+                                hdr.track_id == opt_track
+                            } else {
+                                false
+                            }
+                        });
                         if t_found {
                             boxes.push(box_);
                         }
@@ -361,7 +358,7 @@ fn debug(opts: DebugOpts) -> Result<()> {
                         if t_found {
                             boxes.push(box_);
                         }
-                    }
+                    },
                     _ => boxes.push(box_),
                 }
             }

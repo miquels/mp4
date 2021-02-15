@@ -7,17 +7,17 @@ use std::sync::Arc;
 
 use memmap::{Mmap, MmapOptions};
 
-use crate::serialize::{BoxBytes, FromBytes, ReadBytes, WriteBytes, ToBytes};
+use crate::serialize::{BoxBytes, FromBytes, ReadBytes, ToBytes, WriteBytes};
 use crate::types::{FourCC, ToPrimitive};
 
 /// Reads a MP4 file.
 ///
 /// Implements `ReadBytes`, so can be passed to `MP4::read`.
 pub struct Mp4File {
-    mmap:  Arc<Mmap>,
-    file:  fs::File,
-    pos:   u64,
-    size:  u64,
+    mmap:           Arc<Mmap>,
+    file:           fs::File,
+    pos:            u64,
+    size:           u64,
     input_filename: Option<String>,
 }
 
@@ -43,8 +43,7 @@ impl Mp4File {
     }
 }
 
-impl ReadBytes for Mp4File
-{
+impl ReadBytes for Mp4File {
     #[inline]
     fn read(&mut self, amount: u64) -> io::Result<&[u8]> {
         //println!("XXX DBG read {}", amount);
@@ -53,7 +52,7 @@ impl ReadBytes for Mp4File
         }
         let pos = self.pos as usize;
         self.pos += amount;
-        Ok(&self.mmap[pos..pos+amount as usize])
+        Ok(&self.mmap[pos..pos + amount as usize])
     }
 
     #[inline]
@@ -63,7 +62,7 @@ impl ReadBytes for Mp4File
             return Err(io::Error::new(ErrorKind::UnexpectedEof, "tried to read past eof"));
         }
         let pos = self.pos as usize;
-        Ok(&self.mmap[pos..pos+amount as usize])
+        Ok(&self.mmap[pos..pos + amount as usize])
     }
 
     #[inline]
@@ -85,8 +84,7 @@ impl ReadBytes for Mp4File
     }
 }
 
-impl BoxBytes for Mp4File
-{
+impl BoxBytes for Mp4File {
     #[inline]
     fn pos(&mut self) -> u64 {
         self.pos
@@ -111,11 +109,11 @@ impl BoxBytes for Mp4File
             return Err(io::Error::new(ErrorKind::UnexpectedEof, "tried to seek past eof"));
         }
         Ok(DataRef {
-            mmap: self.mmap.clone(),
-            start: self.pos as usize,
-            end: (self.pos + size) as usize,
+            mmap:             self.mmap.clone(),
+            start:            self.pos as usize,
+            end:              (self.pos + size) as usize,
             num_entries_type: std::marker::PhantomData,
-            entry_type: std::marker::PhantomData,
+            entry_type:       std::marker::PhantomData,
         })
     }
 
@@ -130,12 +128,12 @@ impl BoxBytes for Mp4File
 ///
 /// It is a lot like [`Array`](crate::types::Array), except it's
 /// read-only.
-pub struct DataRef<N=(), T=u8> {
-    mmap:  Arc<Mmap>,
-    start: usize,
-    end: usize,
-    num_entries_type: std::marker::PhantomData::<N>,
-    entry_type: std::marker::PhantomData::<T>,
+pub struct DataRef<N = (), T = u8> {
+    mmap:             Arc<Mmap>,
+    start:            usize,
+    end:              usize,
+    num_entries_type: std::marker::PhantomData<N>,
+    entry_type:       std::marker::PhantomData<T>,
 }
 
 pub type DataRefUnsized<T> = DataRef<(), T>;
@@ -145,7 +143,10 @@ pub type DataRefSized32<T> = DataRef<u32, T>;
 impl<N, T> DataRef<N, T> {
     // This is not the from_bytes from the FromBytes trait, it is
     // a direct method, because it has an extra data_size argument.
-    pub(crate) fn from_bytes_limit<R: ReadBytes>(stream: &mut R, data_size: u64) -> io::Result<DataRef<N, T>> {
+    pub(crate) fn from_bytes_limit<R: ReadBytes>(
+        stream: &mut R,
+        data_size: u64,
+    ) -> io::Result<DataRef<N, T>> {
         // The stream returns a DataRef<(), u8>. we need to convert it
         // into our type.
         let data_ref = stream.data_ref(data_size)?;
@@ -157,16 +158,16 @@ impl<N, T> DataRef<N, T> {
     // It changes the input for put() and the output of the iterator.
     pub(crate) fn transmute<N2, T2>(self) -> DataRef<N2, T2> {
         DataRef {
-            mmap: self.mmap,
-            start: self.start,
-            end: self.end,
+            mmap:             self.mmap,
+            start:            self.start,
+            end:              self.end,
             num_entries_type: std::marker::PhantomData,
-            entry_type: std::marker::PhantomData,
+            entry_type:       std::marker::PhantomData,
         }
     }
 
     pub(crate) fn bytes(&self) -> &[u8] {
-        &self.mmap[self.start .. self.end]
+        &self.mmap[self.start..self.end]
     }
 
     /// Number of items.
@@ -197,10 +198,10 @@ impl<N, T> DataRef<N, T> {
         T: FromBytes + Clone,
     {
         DataRefIteratorCloned::<'_, T> {
-            count:      self.len() as usize,
-            default:    None,
-            entries:    self.bytes(),
-            index:      0,
+            count:   self.len() as usize,
+            default: None,
+            entries: self.bytes(),
+            index:   0,
         }
     }
 
@@ -211,9 +212,9 @@ impl<N, T> DataRef<N, T> {
     {
         DataRefIteratorCloned::<'_, T> {
             count,
-            default:    Some(item),
-            entries:    b"",
-            index:      0,
+            default: Some(item),
+            entries: b"",
+            index: 0,
         }
     }
 }
@@ -231,8 +232,11 @@ where
     }
 }
 
-impl<N, T> FromBytes for DataRef<N, T> where N: FromBytes + ToPrimitive, T: FromBytes {
-
+impl<N, T> FromBytes for DataRef<N, T>
+where
+    N: FromBytes + ToPrimitive,
+    T: FromBytes,
+{
     fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<Self> {
         let elem_size = mem::size_of::<N>() as u64;
         let (size, skip) = if elem_size == 0 {
@@ -266,23 +270,27 @@ impl<N, T> Default for DataRef<N, T> {
         let devzero = fs::File::open("/dev/zero").unwrap();
         let mmap = unsafe { MmapOptions::new().len(4).map(&devzero).unwrap() };
         DataRef {
-            mmap: Arc::new(mmap),
-            start: 0,
-            end: 0,
+            mmap:             Arc::new(mmap),
+            start:            0,
+            end:              0,
             num_entries_type: std::marker::PhantomData,
-            entry_type: std::marker::PhantomData,
+            entry_type:       std::marker::PhantomData,
         }
     }
 }
 
-impl<N, T> Clone for DataRef<N, T> where N: Clone, T: Clone {
+impl<N, T> Clone for DataRef<N, T>
+where
+    N: Clone,
+    T: Clone,
+{
     fn clone(&self) -> Self {
         DataRef {
-            mmap: self.mmap.clone(),
-            start: self.start,
-            end: self.end,
+            mmap:             self.mmap.clone(),
+            start:            self.start,
+            end:              self.end,
             num_entries_type: self.num_entries_type,
-            entry_type: self.entry_type,
+            entry_type:       self.entry_type,
         }
     }
 }
@@ -304,7 +312,7 @@ impl<N, T> std::fmt::Debug for DataRef<N, T> {
 }
 
 pub struct DataRefIterator<'a, T> {
-    type_:  std::marker::PhantomData<&'a T>,
+    type_: std::marker::PhantomData<&'a T>,
 }
 
 impl<'a, T> Iterator for DataRefIterator<'a, T>
@@ -324,10 +332,10 @@ where
 
 
 pub struct DataRefIteratorCloned<'a, T> {
-    count:      usize,
-    default:    Option<T>,
-    entries:    &'a [u8],
-    index:      usize,
+    count:   usize,
+    default: Option<T>,
+    entries: &'a [u8],
+    index:   usize,
 }
 
 impl<'a, T> DataRefIteratorCloned<'a, T>
@@ -338,7 +346,10 @@ where
     ///
     /// We assume that the items are ordered, and check only
     /// the first and last item.
-    pub fn in_range(&self, range: std::ops::Range<T>) -> bool where T: std::cmp::PartialOrd<T> {
+    pub fn in_range(&self, range: std::ops::Range<T>) -> bool
+    where
+        T: std::cmp::PartialOrd<T>,
+    {
         if self.count == 0 {
             return true;
         }
@@ -359,7 +370,7 @@ where
             return Some((entry.clone(), entry.clone()));
         }
 
-        let mut data = &self.entries[0 .. mem::size_of::<T>()];
+        let mut data = &self.entries[0..mem::size_of::<T>()];
         let first = T::from_bytes(&mut data).ok()?;
 
         let start = (self.count - 1) * mem::size_of::<T>();
@@ -396,16 +407,13 @@ where
 // Count bytes, don't actually write.
 #[derive(Debug, Default)]
 pub(crate) struct CountBytes {
-    pos:    usize,
-    max:    usize,
+    pos: usize,
+    max: usize,
 }
 
 impl CountBytes {
     pub fn new() -> CountBytes {
-        CountBytes {
-            pos: 0,
-            max: 0,
-        }
+        CountBytes { pos: 0, max: 0 }
     }
 }
 
@@ -487,4 +495,3 @@ impl<'a, B: ?Sized + BoxBytes + 'a> BoxBytes for Box<B> {
         B::input_filename(&*self)
     }
 }
-

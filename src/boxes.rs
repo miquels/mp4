@@ -7,7 +7,7 @@ use std::fmt::Debug;
 use std::io;
 
 pub(crate) mod misc;
-pub (crate) mod prelude;
+pub(crate) mod prelude;
 
 pub use self::misc::*;
 use self::prelude::*;

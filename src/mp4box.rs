@@ -2,7 +2,7 @@
 use std::fmt::Debug;
 use std::io;
 
-use crate::boxes::{MovieBox, FileTypeBox};
+use crate::boxes::{FileTypeBox, MovieBox};
 use crate::io::DataRef;
 use crate::serialize::{BoxBytes, FromBytes, ReadBytes, ToBytes, WriteBytes};
 use crate::types::*;
@@ -324,7 +324,7 @@ impl<'a> BoxBytes for BoxWriter<'a> {
 #[derive(Clone)]
 pub struct MP4 {
     /// The boxes at the top level.
-    pub boxes:  Vec<MP4Box>,
+    pub boxes:             Vec<MP4Box>,
     pub(crate) data_ref:   DataRef,
     pub(crate) input_file: Option<String>,
 }
@@ -343,7 +343,11 @@ impl MP4 {
         let data_ref = file.data_ref(file.size())?;
         let input_file = file.input_filename().map(|s| s.to_string());
         let boxes = read_boxes(file)?;
-        let mut mp4 = MP4{ boxes, data_ref, input_file };
+        let mut mp4 = MP4 {
+            boxes,
+            data_ref,
+            input_file,
+        };
         mp4.insert_file_type_box();
         Ok(mp4)
     }
@@ -386,13 +390,13 @@ impl MP4 {
             None => {
                 log::error!("no MovieBox present");
                 valid = false;
-            }
+            },
         }
         valid
     }
 
     pub(crate) fn data_ref(&self, offset: u64, len: u64) -> &[u8] {
-        &self.data_ref[offset as usize .. (offset + len) as usize]
+        &self.data_ref[offset as usize..(offset + len) as usize]
     }
 
     pub(crate) fn insert_file_type_box(&mut self) {
@@ -400,9 +404,9 @@ impl MP4 {
             return;
         }
         let ftype = FileTypeBox {
-            major_brand:    FourCC::new("mp41"),
-            minor_version:  0,
-            compatible_brands: vec![ FourCC::new("mp41") ],
+            major_brand:       FourCC::new("mp41"),
+            minor_version:     0,
+            compatible_brands: vec![FourCC::new("mp41")],
         };
         self.boxes.insert(0, MP4Box::FileTypeBox(ftype));
     }
@@ -435,10 +439,10 @@ pub fn write_boxes<W: WriteBytes>(mut file: W, boxes: &[MP4Box]) -> io::Result<(
 /// Any unknown boxes we encounter are put into a GenericBox.
 #[derive(Clone)]
 pub struct GenericBox {
-    fourcc: FourCC,
-    data:   Option<Vec<u8>>,
-    data_ref:   Option<DataRef>,
-    size:   u64,
+    fourcc:   FourCC,
+    data:     Option<Vec<u8>>,
+    data_ref: Option<DataRef>,
+    size:     u64,
 }
 
 impl FromBytes for GenericBox {
@@ -505,4 +509,3 @@ impl Debug for GenericBox {
         dbg.finish()
     }
 }
-
