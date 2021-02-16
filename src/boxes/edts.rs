@@ -4,6 +4,7 @@ use crate::boxes::prelude::*;
 
 def_box! {
     /// 8.6.5 Edit Box (ISO/IEC 14496-12:2015(E))
+    #[derive(Default)]
     EditBox {
         boxes:  Vec<EditListBox>,
     },

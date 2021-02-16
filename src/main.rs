@@ -6,6 +6,7 @@ use anyhow::{anyhow, Result};
 use clap;
 use structopt::StructOpt;
 
+use mp4::fragment::FragmentSource;
 use mp4::debug;
 use mp4::io::Mp4File;
 use mp4::mp4box::{MP4Box, MP4};
@@ -98,17 +99,13 @@ pub struct SubtitlesOpts {
 
 #[derive(StructOpt, Debug)]
 pub struct FragmentOpts {
-    #[structopt(short, long, default_value = "1", use_delimiter = true)]
-    /// Select tracks.
-    pub tracks: Vec<u32>,
+    #[structopt(long, use_delimiter = true)]
+    /// Select primary track, first and last sample.
+    pub track: Vec<u32>,
 
-    #[structopt(long, default_value = "1")]
-    /// Start sample.
-    pub from: u32,
-
-    #[structopt(long, default_value = "4294967295")]
-    /// Last sample.
-    pub to: u32,
+    #[structopt(long, use_delimiter = true)]
+    /// Select secondary track, first and last sample.
+    pub track2: Option<Vec<u32>>,
 
     /// Input filename.
     pub input: String,
@@ -203,7 +200,7 @@ fn subtitles(opts: SubtitlesOpts) -> Result<()> {
     let tracks = movie.tracks();
     let track = match movie.track_idx_by_id(opts.track) {
         Some(idx) => &tracks[idx],
-        None => return Err(anyhow!("dump: track id {} not found", opts.track)),
+        None => return Err(anyhow!("subtitles: track id {} not found", opts.track)),
     };
 
     let stdout = io::stdout();
@@ -217,8 +214,28 @@ fn fragment(opts: FragmentOpts) -> Result<()> {
     let mut reader = Mp4File::open(&opts.input)?;
     let mp4 = MP4::read(&mut reader)?;
 
-    let mut mp4_frag = mp4::fragment::media_init_section(&mp4, &opts.tracks);
-    let mut moof = mp4::fragment::movie_fragment(&mp4, opts.tracks[0], 1, opts.from, opts.to)?;
+    if opts.track.len() != 3 {
+        return Err(anyhow!("fragment: --track needs track_id,first_sample,last_sample"));
+    }
+    let mut sources = Vec::new();
+    sources.push(FragmentSource {
+        track_id:  opts.track[0],
+        from_sample: opts.track[1],
+        to_sample: opts.track[2],
+    });
+    if let Some(track2) = opts.track2.as_ref() {
+        if track2.len() != 3 {
+            return Err(anyhow!("fragment: --track2 needs track_id,first_sample,last_sample"));
+        }
+        sources.push(FragmentSource {
+            track_id:  track2[0],
+            from_sample: track2[1],
+            to_sample: track2[2],
+        });
+    }
+
+    let mut mp4_frag = mp4::fragment::media_init_section(&mp4, &sources);
+    let mut moof = mp4::fragment::movie_fragment(&mp4, 1, &sources)?;
     mp4_frag.boxes.append(&mut moof);
 
     let writer = File::create(&opts.output)?;

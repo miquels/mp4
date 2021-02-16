@@ -61,7 +61,6 @@ impl ToBytes for SampleSizeBox {
         if self.size != 0 {
             self.count.to_bytes(stream)?;
         } else {
-            ((self.entries.len() / 4) as u32).to_bytes(stream)?;
             self.entries.to_bytes(stream)?;
         }
 

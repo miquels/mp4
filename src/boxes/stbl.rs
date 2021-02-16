@@ -1,7 +1,8 @@
 use std::io;
 
 use crate::boxes::prelude::*;
-use crate::boxes::{SampleDescriptionBox, SampleSizeBox, TimeToSampleBox, SampleToChunkBox};
+use crate::boxes::{SampleDescriptionBox, SampleToGroupBox, SampleGroupDescriptionBox};
+use crate::boxes::{SampleSizeBox, TimeToSampleBox, SampleToChunkBox};
 use crate::boxes::{ChunkOffsetBox, ChunkLargeOffsetBox};
 use crate::boxes::{CompositionOffsetBox, SyncSampleBox};
 
@@ -49,6 +50,8 @@ impl SampleTableBox {
     declare_box_methods!(SampleSizeBox, sample_size, sample_size_mut);
     declare_box_methods!(TimeToSampleBox, time_to_sample, time_to_sample_mut);
     declare_box_methods!(SampleToChunkBox, sample_to_chunk, sample_to_chunk_mut);
+    declare_box_methods_opt!(SampleToGroupBox, sample_to_group, sample_to_group_mut);
+    declare_box_methods_opt!(SampleGroupDescriptionBox, sample_group_description, sample_group_description_mut);
     declare_box_methods_opt!(CompositionOffsetBox, composition_time_to_sample, composition_time_to_sample_mut);
     declare_box_methods_opt!(SyncSampleBox, sync_samples, sync_samples_mut);
 

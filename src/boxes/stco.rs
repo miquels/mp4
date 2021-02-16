@@ -68,9 +68,36 @@ impl ToBytes for ChunkOffsetBox {
         let mut writer = BoxWriter::new(stream, self)?;
         let stream = &mut writer;
         match &self.entries.0 {
-            Entries_::Normal(entries) => entries.to_bytes(stream),
-            Entries_::Large(entries) => entries.to_bytes(stream),
+            Entries_::Normal(entries) => {
+                (entries.len() as u32).to_bytes(stream)?;
+                if self.large {
+                    for &entry in entries {
+                        let entry = entry as i64 + (self.offset as i64);
+                        (entry as u64).to_bytes(stream)?;
+                    }
+                } else {
+                    for &entry in entries {
+                        let entry = entry as i64 + (self.offset as i64);
+                        (entry as u32).to_bytes(stream)?;
+                    }
+                }
+            },
+            Entries_::Large(entries) => {
+                (entries.len() as u32).to_bytes(stream)?;
+                if self.large {
+                    for &entry in entries {
+                        let entry = entry as i64 + (self.offset as i64);
+                        (entry as u64).to_bytes(stream)?;
+                    }
+                } else {
+                    for &entry in entries {
+                        let entry = entry as i64 + (self.offset as i64);
+                        (entry as u32).to_bytes(stream)?;
+                    }
+                }
+            },
         }
+        Ok(())
     }
 }
 
@@ -81,8 +108,8 @@ impl ChunkOffsetBox {
     /// the offset any entry is larger than 4G (2^32 - 1), the box will
     /// be serialized as a ChunkLargeOffsetBox (`co64`).
     pub fn add_offset(&mut self, move_offset: i64) {
-        self.check_offsets();
         self.offset = move_offset;
+        self.check_offsets();
     }
 
     /// Add an offset to the list.
@@ -91,6 +118,7 @@ impl ChunkOffsetBox {
     /// read-only and this method will panic.
     pub fn push(&mut self, offset: u64) {
         if offset as i64 + self.offset > u32::MAX as i64 {
+            self.fourcc = FourCC::new("co64");
             self.large = true;
         }
 
@@ -114,6 +142,7 @@ impl ChunkOffsetBox {
         };
         if large {
             self.fourcc = FourCC::new("co64");
+            self.large = true;
         }
     }
 }
@@ -121,10 +150,10 @@ impl ChunkOffsetBox {
 impl Default for ChunkOffsetBox {
     fn default() -> Self {
         ChunkOffsetBox {
-            fourcc:  FourCC::new("co64"),
+            fourcc:  FourCC::new("stco"),
             entries: Entries(Entries_::Large(ArraySized32::<u64>::default())),
             offset: 0,
-            large: true,
+            large: false,
         }
     }
 }

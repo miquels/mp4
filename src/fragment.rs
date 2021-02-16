@@ -1,3 +1,11 @@
+//! Convert a ISOBMFF (MP4) file to fragmented mp4 (fMP4).
+//!
+//! If all segments start with an independent sample (sync sample), then
+//! the fMP4 segments are CMAF compatible.
+//!
+//! If we split on non-sync samples, the segments are technicaly
+//! not valid CMAF (but will probably work with HLS and DASH).
+//!
 use std::convert::TryInto;
 use std::io;
 
@@ -7,20 +15,23 @@ use crate::mp4box::{MP4Box, MP4};
 use crate::serialize::{BoxBytes, ToBytes};
 use crate::types::*;
 
+pub struct FragmentSource {
+    pub track_id:   u32,
+    pub from_sample: u32,
+    pub to_sample: u32,
+}
+
 /// Build a Media Initialization Section for fMP4 segments.
-pub fn media_init_section(mp4: &MP4, track_ids: &[u32]) -> MP4 {
+pub fn media_init_section(mp4: &MP4, sources: &[FragmentSource]) -> MP4 {
     let mut boxes = Vec::new();
 
     // Start with the FileType box.
     let ftyp = FileTypeBox {
-        major_brand:       FourCC::new("isom"),
-        minor_version:     512,
+        major_brand:       FourCC::new("iso5"),
+        minor_version:     1,
         compatible_brands: vec![
-            FourCC::new("isom"),
-            FourCC::new("iso2"),
             FourCC::new("avc1"),
             FourCC::new("mp41"),
-            FourCC::new("iso5"),
         ],
     };
     boxes.push(MP4Box::FileTypeBox(ftyp));
@@ -46,7 +57,7 @@ pub fn media_init_section(mp4: &MP4, track_ids: &[u32]) -> MP4 {
             MP4Box::TrackBox(track) => {
                 // only the selected tracks.
                 track_id += 1;
-                if !track_ids.iter().any(|&id| id == track_id) {
+                if !sources.iter().any(|src| src.track_id == track_id) {
                     continue;
                 }
                 new_track_id += 1;
@@ -77,15 +88,17 @@ fn track_extends(trak: &TrackBox, track_id: u32) -> TrackExtendsBox {
     let mut trex = TrackExtendsBox::default();
     trex.track_id = track_id;
 
-    // We only set the defaults for flags and duration, if we can.
-    // sample_size never has a default because it's always different,
-    // and description_index has already been set to '1'.
+    trex.default_sample_description_index = 1;
+
     let dfl = SampleDefaults::new(trak, 1, u32::MAX);
     if let Some(flags) = dfl.sample_flags.as_ref() {
         trex.default_sample_flags = flags.clone();
     }
     if let Some(duration) = dfl.sample_duration {
         trex.default_sample_duration = duration;
+    }
+    if let Some(size) = dfl.sample_size {
+        trex.default_sample_size = size;
     }
 
     trex
@@ -98,6 +111,9 @@ fn fmp4_track(trak: &TrackBox, track_id: u32) -> TrackBox {
     // add TrackHeaderBox.
     let mut tkhd = trak.track_header().clone();
     tkhd.track_id = track_id;
+    tkhd.flags.set_enabled(true);
+    tkhd.flags.set_in_movie(true);
+    tkhd.flags.set_in_preview(true);
     boxes.push(MP4Box::TrackHeaderBox(tkhd));
 
     // add EditListBox, if present.
@@ -106,9 +122,11 @@ fn fmp4_track(trak: &TrackBox, track_id: u32) -> TrackBox {
         // Copy it, and set the duration to 0 (meaning: valid for all track fragments).
         let mut entry = elst.entries[0].clone();
         entry.segment_duration = 0;
-        let mut edts = EditListBox::default();
-        edts.entries.push(entry);
-        boxes.push(MP4Box::EditListBox(edts.clone()));
+        let mut elst = EditListBox::default();
+        elst.entries.push(entry);
+        let mut edts = EditBox::default();
+        edts.boxes.push(elst);
+        boxes.push(edts.to_mp4box());
     }
 
     // media box.
@@ -181,6 +199,11 @@ fn fmp4_track(trak: &TrackBox, track_id: u32) -> TrackBox {
     sample_boxes.push(MP4Box::SampleSizeBox(SampleSizeBox::default()));
     sample_boxes.push(MP4Box::ChunkOffsetBox(ChunkOffsetBox::default()));
 
+    // Clone the SampleGroupDescriptionBox.
+    if let Some(sgpd) = minf.sample_table().sample_group_description() {
+        sample_boxes.push(sgpd.clone().to_mp4box());
+    }
+
     // add the sample boxes to MediaInfo.
     media_info_boxes.push(SampleTableBox { boxes: sample_boxes }.to_mp4box());
 
@@ -213,7 +236,6 @@ impl SampleDefaults {
     // Analyze the tables in the SampleTableBox and see if there are any
     // defaults for the samples in this track.
     //
-    #[inline(never)]
     fn new(track: &TrackBox, from: u32, to: u32) -> SampleDefaults {
         let tables = track.media().media_info().sample_table();
 
@@ -222,6 +244,16 @@ impl SampleDefaults {
         let entries = &tables.time_to_sample().entries;
         let sample_duration = if entries.len() == 1 {
             Some(entries[0].delta)
+        } else {
+            None
+        };
+
+        // If 'size' in the SampleSize box > 0, then all entries
+        // have the same size, so use that as the default.
+        // samples so that one entry is the default.
+        let size = tables.sample_size().size;
+        let sample_size = if size > 0 {
+            Some(size)
         } else {
             None
         };
@@ -259,7 +291,7 @@ impl SampleDefaults {
         SampleDefaults {
             sample_duration,
             sample_flags,
-            sample_size: None,
+            sample_size,
             sample_composition_time_offset,
         }
     }
@@ -287,15 +319,14 @@ fn default_or<A, B>(dfl: &Option<A>, val: B) -> Option<B> {
     }
 }
 
-/// Generate a MovieFragmentBox + MediaDataBox for a range of samples.
-pub fn movie_fragment(mp4: &MP4, track_id: u32, seq_num: u32, from: u32, to: u32) -> io::Result<Vec<MP4Box>> {
+/// Generate a MovieFragmentBox + MediaDataBox for a range of samples from one or more tracks.
+///
+/// Note that from_sample and to_sample for different tracks need to have
+/// the same composition time.
+pub fn movie_fragment(mp4: &MP4, seq_num: u32, source: &[FragmentSource]) -> io::Result<Vec<MP4Box>> {
     let movie = mp4.movie();
     let data_ref = mp4.data_ref(0, 0);
     let mut mdat = MediaDataBox::default();
-
-    let track = movie
-        .track_by_id(track_id)
-        .ok_or(ioerr!(NotFound, "{}: no such track", track_id))?;
 
     // Create moof and push movie fragment header.
     let mut moof = MovieFragmentBox::default();
@@ -307,8 +338,15 @@ pub fn movie_fragment(mp4: &MP4, track_id: u32, seq_num: u32, from: u32, to: u32
     );
 
     // Track fragments.
-    let traf = track_fragment(track, from, to, data_ref, &mut mdat)?;
-    moof.boxes.push(traf.to_mp4box());
+    let mut new_id = 0u32;
+    for src in source {
+        let track = movie
+            .track_by_id(src.track_id)
+            .ok_or(ioerr!(NotFound, "{}: no such track", src.track_id))?;
+        new_id += 1;
+        let traf = track_fragment(track, src.from_sample, src.to_sample, new_id, data_ref, &mut mdat)?;
+        moof.boxes.push(traf.to_mp4box());
+    }
 
     // Now that the moof is done, edit the data_offset field in all the trun boxes.
     let mut cb = CountBytes::new();
@@ -338,6 +376,7 @@ fn track_fragment(
     track: &TrackBox,
     from: u32,
     to: u32,
+    new_track_id: u32,
     data_ref: &[u8],
     mdat: &mut MediaDataBox,
 ) -> io::Result<TrackFragmentBox> {
@@ -351,9 +390,17 @@ fn track_fragment(
 
     // Track fragment header.
     let mut tfhd = TrackFragmentHeaderBox::default();
-    tfhd.track_id = track.track_id();
+    tfhd.track_id = new_track_id;
     tfhd.default_base_is_moof = true;
     traf.boxes.push(tfhd.to_mp4box());
+
+    // SampleToGroupBox.
+    if let Some(track_sbgp) = track.media().media_info().sample_table().sample_to_group() {
+        let sbgp = track_sbgp.clone_range(from, to);
+        if sbgp.entries.len() > 0 {
+            traf.boxes.push(sbgp.to_mp4box());
+        }
+    }
 
     // Decode time.
     let tfdt = TrackFragmentBaseMediaDecodeTimeBox {

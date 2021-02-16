@@ -4,7 +4,6 @@ use crate::boxes::prelude::*;
 use crate::boxes::{
     MediaHeaderBox,
     HandlerBox,
-    SampleTableBox,
     MediaInformationBox,
     ExtendedLanguageBox
 };
@@ -44,21 +43,6 @@ impl MediaBox {
     /// Get an optional reference to the ExtendedLanguageBox.
     pub fn extended_language(&self) -> Option<&ExtendedLanguageBox> {
         first_box!(&self.boxes, ExtendedLanguageBox)
-    }
-
-    /// Get a reference to the sample table box.
-    pub fn sample_table(&self) -> &SampleTableBox {
-        first_box!(&self.boxes, SampleTableBox).unwrap()
-    }
-
-    /// Get a mutable reference to the sample table box.
-    pub fn sample_table_mut(&mut self) -> &SampleTableBox {
-        first_box_mut!(&mut self.boxes, SampleTableBox).unwrap()
-    }
-
-    /// Get an iterator over the boxes in the Sample Table.
-    pub fn sample_table_iter(&self) -> impl Iterator<Item=&SampleTableBox> {
-        iter_box!(&self.boxes, SampleTableBox)
     }
 
     /// Check if this track is valid (has header, handler, and mediainfo boxes).

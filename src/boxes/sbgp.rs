@@ -3,6 +3,7 @@ use std::io;
 use crate::boxes::prelude::*;
 
 def_box! {
+    /// 8.9.2 Sample to Group Box (ISO/IEC 14496-12:2015(E))
     SampleToGroupBox {
         grouping_type:  FourCC,
         grouping_type_parameter: Option<u32>,
@@ -11,6 +12,44 @@ def_box! {
     fourcc => "sbgp",
     version => [1],
     impls => [ boxinfo, debug ],
+}
+
+fn overlap(a: u32, b:u32, c: u32, d: u32) -> Option<u32> {
+    use std::cmp::min;
+
+    if b < c || a > d {
+        return None;
+    }
+    let d = min(b - a, min(b - c, min(d - c, d - a))) + 1;
+    Some(d)
+}
+
+impl SampleToGroupBox {
+    /// Clone a range of the SampleToGroupBox.
+    ///
+    /// Used for building a TrackFragmentBox.
+    pub fn clone_range(&self, from_sample: u32, to_sample: u32) -> SampleToGroupBox {
+        let mut sbgp = SampleToGroupBox {
+            grouping_type: self.grouping_type.clone(),
+            grouping_type_parameter: self.grouping_type_parameter.clone(),
+            entries: ArraySized32::<SampleToGroupEntry>::new(),
+        };
+        let mut begin = 1;
+        for entry in self.entries.iter() {
+            let end = begin + entry.sample_count - 1;
+            if begin > to_sample {
+                break;
+            }
+            if let Some(count) = overlap(from_sample, to_sample, begin, end) {
+                sbgp.entries.push(SampleToGroupEntry{
+                    sample_count: count,
+                    group_description_index: entry.group_description_index,
+                });
+            }
+            begin += entry.sample_count;
+        }
+        sbgp
+    }
 }
 
 impl FromBytes for SampleToGroupBox {
