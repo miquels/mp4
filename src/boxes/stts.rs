@@ -49,13 +49,14 @@ impl TimeToSampleIterator<'_> {
     /// Sample indices start at `1`.
     pub fn seek(&mut self, seek_to: u32) -> io::Result<()> {
         // FIXME: this is not very efficient. do something smarter.
-        let seek_to = seek_to.saturating_sub(1);
-        let mut cur_sample = 0;
+        let seek_to = std::cmp::max(1, seek_to);
+        let mut cur_sample = 1;
         let mut cumulative = 0;
         for (index, entry) in self.entries.iter().enumerate() {
             if seek_to >= cur_sample && seek_to < cur_sample + entry.count {
                 self.entry.count = cur_sample + entry.count - seek_to;
                 self.cumulative = cumulative + (seek_to - cur_sample) as u64 * (entry.delta as u64);
+                self.entry = self.entries[index].clone();
                 self.index = index;
                 return Ok(());
             }
@@ -83,13 +84,6 @@ impl<'a> Iterator for TimeToSampleIterator<'a> {
                 return None;
             }
             self.entry = self.entries[self.index].clone();
-            if self.entry.count == 0 {
-                continue;
-            }
-            self.entry.count -= 1;
-            let cumulative = self.cumulative;
-            self.cumulative += self.entry.delta as u64;
-            return Some((self.entry.delta, cumulative));
         }
     }
 }

@@ -14,11 +14,11 @@ use crate::types::{FourCC, ToPrimitive};
 ///
 /// Implements `ReadBytes`, so can be passed to `MP4::read`.
 pub struct Mp4File {
-    mmap:           Arc<Mmap>,
-    file:           Arc<fs::File>,
-    pos:            u64,
-    size:           u64,
-    input_filename: Option<String>,
+    pub(crate) mmap: Arc<Mmap>,
+    file:            Arc<fs::File>,
+    pos:             u64,
+    size:            u64,
+    input_filename:  Option<String>,
 }
 
 impl Mp4File {
@@ -130,7 +130,7 @@ impl BoxBytes for Mp4File {
 /// It is a lot like [`Array`](crate::types::Array), except it's
 /// read-only.
 pub struct DataRef<N = (), T = u8> {
-    mmap:             Arc<Mmap>,
+    pub(crate) mmap:  Arc<Mmap>,
     file:             Arc<fs::File>,
     start:            usize,
     end:              usize,

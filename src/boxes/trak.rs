@@ -61,17 +61,7 @@ impl TrackBox {
     /// Return value is expressed in the movie timescale.
     pub fn composition_time_shift(&self) -> Option<u32> {
         if let Some(elst) = self.edit_list() {
-            let tkhd = self.track_header();
-            let entry = &elst.entries[0];
-            // If the first entry has about the same duration as the track,
-            // assume it covers the entire track.
-            if tkhd.duration.0 == 0 {
-                return None;
-            }
-            let x = (entry.segment_duration as f64) / (tkhd.duration.0 as f64);
-            if x >= 0.95f64 && x <= 1.05f64 {
-                return Some(std::cmp::min(0x7ffffff, entry.media_time) as u32);
-            }
+            return Some(elst.entries[0].media_time as u32);
         }
         None
     }
@@ -87,6 +77,7 @@ impl TrackBox {
             },
         };
 
+        // The must be at least one MediaBox present.
         match first_box!(&self.boxes, MediaBox) {
             Some(m) => {
                 if !m.is_valid() {
@@ -99,6 +90,7 @@ impl TrackBox {
             },
         }
 
+        // The must be exactly one MediaBox present.
         match first_box!(&self.boxes, SampleTableBox) {
             Some(m) => {
                 if !m.is_valid() {
@@ -109,6 +101,35 @@ impl TrackBox {
                 log::error!("TrackBox(id {}): no SampleTableBox present", track_id);
                 valid = false;
             },
+        }
+
+        // If there is an edit list, the first entry must be valid
+        // for the entire track.
+        if let Some(elst) = self.edit_list() {
+            let tkhd = self.track_header();
+            if tkhd.duration.0 != 0 {
+
+                // If the first entry has about the same duration as the track,
+                // assume it covers the entire track.
+                let entry = &elst.entries[0];
+                let x = (entry.segment_duration as f64) / (tkhd.duration.0 as f64);
+                if x < 0.95f64 {
+                    log::error!("TrackBox(id {}): EditBox: first entry: does not cover entire duration", track_id);
+                    valid = false;
+                }
+                if entry.media_rate != 1 {
+                    log::error!("TrackBox(id {}): EditBox: first entry: does not have media_rate 1", track_id);
+                    valid = false;
+                }
+                if entry.media_time > i32::MAX as i64 {
+                    log::error!("TrackBox(id {}): EditBox: first entry: media_time too large", track_id);
+                    valid = false;
+                }
+                if entry.media_time < 0 {
+                    log::error!("TrackBox(id {}): EditBox: first entry: media_time negative", track_id);
+                    valid = false;
+                }
+            }
         }
 
         valid

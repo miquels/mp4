@@ -117,7 +117,7 @@ impl ToBytes for MediaData {
     fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
         match &self.0 {
             MediaData_::DataRef(d) => d.to_bytes(stream),
-            MediaData_::Data(d) => d.to_bytes(stream),
+            MediaData_::Data(d) => stream.write(&d[..]),
         }
     }
 }

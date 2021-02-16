@@ -98,9 +98,17 @@ pub struct SubtitlesOpts {
 
 #[derive(StructOpt, Debug)]
 pub struct FragmentOpts {
-    #[structopt(short, long, use_delimiter = true)]
+    #[structopt(short, long, default_value = "1", use_delimiter = true)]
     /// Select tracks.
     pub tracks: Vec<u32>,
+
+    #[structopt(long, default_value = "1")]
+    /// Start sample.
+    pub from: u32,
+
+    #[structopt(long, default_value = "4294967295")]
+    /// Last sample.
+    pub to: u32,
 
     /// Input filename.
     pub input: String,
@@ -209,10 +217,12 @@ fn fragment(opts: FragmentOpts) -> Result<()> {
     let mut reader = Mp4File::open(&opts.input)?;
     let mp4 = MP4::read(&mut reader)?;
 
-    let media_init_section = mp4::fragment::media_init_section(&mp4, &opts.tracks);
+    let mut mp4_frag = mp4::fragment::media_init_section(&mp4, &opts.tracks);
+    let mut moof = mp4::fragment::movie_fragment(&mp4, opts.tracks[0], 1, opts.from, opts.to)?;
+    mp4_frag.boxes.append(&mut moof);
 
     let writer = File::create(&opts.output)?;
-    media_init_section.write(writer)?;
+    mp4_frag.write(writer)?;
 
     Ok(())
 }

@@ -396,6 +396,11 @@ impl MP4 {
     }
 
     pub(crate) fn data_ref(&self, offset: u64, len: u64) -> &[u8] {
+        let len = if len == 0 {
+            self.data_ref.mmap.len() as u64
+        } else {
+            len
+        };
         &self.data_ref[offset as usize..(offset + len) as usize]
     }
 

@@ -24,39 +24,6 @@ impl CompositionOffsetBox {
         }
         iter
     }
-
-    /// Returns an iterator starting at sample `from`.
-    pub fn iter_from(&self, from: u32) -> CompositionOffsetIterator {
-        let mut tot = 0;
-        let entries = &self.entries;
-
-        // walk over all entries, and find the entry that 'fits' the 'from' sample count.
-        for index in 0 .. entries.len() {
-            let offset = entries[index].offset;
-            let count = entries[index].count;
-
-            // If 'from' fits here, we have a match.
-            if from >= tot && from < tot + count {
-                // build a 'current entry' with the correct 'count' for this sample offset.
-                let cur_entry = CompositionOffsetEntry {
-                    count: tot + count - from,
-                    offset,
-                };
-                return CompositionOffsetIterator {
-                    entries,
-                    index,
-                    cur_entry,
-                }
-            }
-            tot += count;
-        }
-        // No match, so return an iterator that is exhausted.
-        CompositionOffsetIterator {
-            entries: &self.entries,
-            index: entries.len(),
-            cur_entry: CompositionOffsetEntry::default(),
-        }
-    }
 }
 
 /// Composition offset entry.
@@ -116,9 +83,9 @@ impl <'a> CompositionOffsetIterator<'a> {
     ///
     /// Sample indices start at `1`.
     pub fn seek(&mut self, seek_to: u32) -> io::Result<()> {
-        let mut cur_sample = 0;
+        let seek_to = std::cmp::max(1, seek_to);
+        let mut cur_sample = 1;
         let entries = &self.entries;
-        let seek_to = seek_to.saturating_sub(1);
 
         // walk over all entries, and find the entry where to 'seek_to' index fits.
         for index in 0 .. entries.len() {

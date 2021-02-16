@@ -3,6 +3,7 @@ use std::io;
 use crate::boxes::prelude::*;
 
 def_box! {
+    /// 8.6.5 Edit Box (ISO/IEC 14496-12:2015(E))
     EditBox {
         boxes:  Vec<EditListBox>,
     },
@@ -12,6 +13,8 @@ def_box! {
 }
 
 def_box! {
+    /// 8.6.6r1 Edit List Box (ISO/IEC 14496-12:2015(E))
+    #[derive(Default)]
     EditListBox {
         entries:    ArraySized32<EditListEntry>,
     },

@@ -81,6 +81,7 @@ impl ToBytes for TrackFragmentHeaderBox {
         let mut writer = BoxWriter::new(stream, self)?;
         let stream = &mut writer;
 
+        self.track_id.to_bytes(stream)?;
         self.base_data_offset.as_ref().map_or(Ok(()), |x| x.to_bytes(stream))?;
         self.sample_description_index.as_ref().map_or(Ok(()), |x| x.to_bytes(stream))?;
         self.default_sample_duration.as_ref().map_or(Ok(()), |x| x.to_bytes(stream))?;

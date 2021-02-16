@@ -801,8 +801,8 @@ where
                 writeln!(f, "\n// Array length: {}", self.vec.len())?;
             }
             if self.vec.len() > 20 {
-                writeln!(f, "// (only showing first and last entry)")?;
-                let v = vec![&self.vec[0], &self.vec[self.vec.len() - 1]];
+                writeln!(f, "// (only showing first, second, and last entry)")?;
+                let v = vec![&self.vec[0], &self.vec[1], &self.vec[self.vec.len() - 1]];
                 return f.debug_list().entries(v.into_iter()).finish();
             }
         }
@@ -1116,7 +1116,7 @@ macro_rules! fixed_float {
         def_from_to_bytes_newtype!($name, $type);
 
         impl $name {
-            fn get(&self) -> f64 {
+            pub fn get(&self) -> f64 {
                 (self.0 as f64) / ((1 << $frac_bits) as f64)
             }
 

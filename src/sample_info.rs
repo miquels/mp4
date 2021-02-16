@@ -31,23 +31,33 @@ pub struct SampleInfo {
 /// Iterator that yields SampleInfo.
 #[derive(Clone)]
 pub struct SampleInfoIterator<'a> {
-    stsz_iter:       SampleSizeIterator<'a>,
-    stts_iter:       TimeToSampleIterator<'a>,
-    stsc_iter:       SampleToChunkIterator<'a>,
-    ctts_iter:       Option<CompositionOffsetIterator<'a>>,
-    stss_iter:       Option<SyncSampleIterator<'a>>,
-    chunk_offset:    &'a ChunkOffsetBox,
-    media_timescale: u32,
-    comp_time_shift: i32,
-    fpos:            u64,
-    cur_sample:      u32,
-    cur_chunk:       u32,
+    stsz_iter:        SampleSizeIterator<'a>,
+    stts_iter:        TimeToSampleIterator<'a>,
+    stsc_iter:        SampleToChunkIterator<'a>,
+    ctts_iter:        Option<CompositionOffsetIterator<'a>>,
+    stss_iter:        Option<SyncSampleIterator<'a>>,
+    chunk_offset:     &'a ChunkOffsetBox,
+    media_timescale:  u32,
+    comp_time_shift_: i32,
+    comp_time_shift:  i32,
+    fpos:             u64,
+    cur_sample:       u32,
+    cur_chunk:        u32,
 }
 
 impl SampleInfoIterator<'_> {
-    /// Timescale of the track being iterated over.
+    /// Timescale of the media being iterated over.
     pub fn timescale(&self) -> u32 {
         self.media_timescale
+    }
+
+    /// For the composition_delta field, also take any edit lists for the track in account.
+    pub fn with_edit_list(&mut self, use_elst: bool) {
+        if use_elst {
+            self.comp_time_shift = self.comp_time_shift_;
+        } else {
+            self.comp_time_shift = 0;
+        }
     }
 }
 
@@ -60,7 +70,7 @@ pub fn sample_info_iter<'a>(trak: &'a TrackBox) -> SampleInfoIterator<'a> {
     let stbl = trak.media().media_info().sample_table();
     let media_timescale = mdhd.timescale;
 
-    let comp_time_shift = trak.composition_time_shift().unwrap_or(0) as i32;
+    let comp_time_shift_ = trak.composition_time_shift().unwrap_or(0) as i32;
 
     SampleInfoIterator {
         stsz_iter: stbl.sample_size().iter(),
@@ -70,7 +80,8 @@ pub fn sample_info_iter<'a>(trak: &'a TrackBox) -> SampleInfoIterator<'a> {
         stss_iter: stbl.sync_samples().map(|stss| stss.iter()),
         chunk_offset: stbl.chunk_offset_table(),
         media_timescale,
-        comp_time_shift,
+        comp_time_shift_,
+        comp_time_shift: 0,
         fpos: 0,
         cur_sample: 1,
         cur_chunk: 1,
