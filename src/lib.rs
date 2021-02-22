@@ -36,7 +36,7 @@
 #[macro_use]
 mod ioerr;
 #[macro_use]
-mod macros;
+pub mod macros;
 #[macro_use]
 pub mod serialize;
 #[macro_use]
@@ -49,7 +49,9 @@ pub mod fragment;
 pub mod io;
 pub mod mp4box;
 pub mod rewrite;
+pub mod pseudo_streaming;
 pub(crate) mod sample_info;
+pub mod segment;
 pub mod subtitle;
 pub mod track;
 

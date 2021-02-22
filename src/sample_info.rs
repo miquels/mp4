@@ -10,7 +10,7 @@ use crate::boxes::stsz::SampleSizeIterator;
 use crate::boxes::stts::TimeToSampleIterator;
 
 /// Information about one sample.
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct SampleInfo {
     /// File position.
     pub fpos:              u64,
@@ -43,6 +43,7 @@ pub struct SampleInfoIterator<'a> {
     fpos:             u64,
     cur_sample:       u32,
     cur_chunk:        u32,
+    pending:          Option<SampleInfo>,
 }
 
 impl SampleInfoIterator<'_> {
@@ -85,6 +86,7 @@ pub fn sample_info_iter<'a>(trak: &'a TrackBox) -> SampleInfoIterator<'a> {
         fpos: 0,
         cur_sample: 1,
         cur_chunk: 1,
+        pending: None,
     }
 }
 
@@ -111,7 +113,13 @@ impl<'a> SampleInfoIterator<'a> {
         self.fpos = self.chunk_offset.entries.get(idx);
         self.fpos += self.stsz_iter.add_sizes(chunk_info.first_sample, to_sample);
 
+        self.pending.take();
+
         Ok(())
+    }
+
+    pub fn push(&mut self, info: SampleInfo) {
+        self.pending.replace(info);
     }
 }
 
@@ -119,6 +127,11 @@ impl<'a> Iterator for SampleInfoIterator<'a> {
     type Item = SampleInfo;
 
     fn next(&mut self) -> Option<Self::Item> {
+
+        if let Some(pending) = self.pending.take() {
+            return Some(pending);
+        }
+
         let size = match self.stsz_iter.next() {
             Some(size) => size,
             None => return None,

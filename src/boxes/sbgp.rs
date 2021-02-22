@@ -14,14 +14,19 @@ def_box! {
     impls => [ boxinfo, debug ],
 }
 
+// @johnpc: de overlap is min(b,d) - max(a,c). En als dat negatief is, dan is er geen overlap.
+//
+// The explanation above is for exclusive ranges, the code
+// below has been adjusted for inclusive ranges.
 fn overlap(a: u32, b:u32, c: u32, d: u32) -> Option<u32> {
-    use std::cmp::min;
+    use std::cmp::{min, max};
 
-    if b < c || a > d {
+    let x = min(b, d);
+    let y = max(a, c);
+    if y > x {
         return None;
     }
-    let d = min(b - a, min(b - c, min(d - c, d - a))) + 1;
-    Some(d)
+    Some(x - y + 1)
 }
 
 impl SampleToGroupBox {

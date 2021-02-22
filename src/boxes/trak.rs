@@ -142,5 +142,43 @@ impl TrackBox {
     pub fn sample_info_iter(&self) -> SampleInfoIterator<'_> {
         sample_info_iter(self)
     }
+
+    /// Look up the composition timestamp of a sample.
+    ///
+    /// Returns the time in seconds, in an f64.
+    pub fn sample_to_time(&self, sample_index: u32) -> io::Result<f64> {
+
+        // XXX not very efficient, should cache stts_iter / ctts_iter !
+        let media = self.media();
+        let media_header = media.media_header();
+        let sample_table = media.media_info().sample_table();
+
+        // Get the decoding time of the sample.
+        let stts = sample_table.time_to_sample();
+        let mut stts_iter = stts.iter();
+        stts_iter.seek(sample_index)?;
+        let (_, time) = stts_iter.next().unwrap();
+        let mut time = time as i64;
+
+        // Take the edit box offset into account.
+        if let Some(cts) = self.composition_time_shift() {
+            time -= cts as i64;
+        }
+
+        // Adjust for the composition time offset of this sample.
+        if let Some(ctts) = sample_table.composition_time_to_sample() {
+            let mut ctts_iter = ctts.iter();
+            ctts_iter.seek(sample_index)?;
+            time -= ctts_iter.next().unwrap() as i64;
+        }
+
+        // Time can't be negative. If it is, we screwed up or the MP4
+        // is corrupt .. it will make for interesting colored blocks.
+        if time < 0 {
+            time = 0;
+        }
+
+        Ok(time as f64 / (media_header.timescale as f64))
+    }
 }
 

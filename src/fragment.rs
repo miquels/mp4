@@ -15,14 +15,16 @@ use crate::mp4box::{MP4Box, MP4};
 use crate::serialize::{BoxBytes, ToBytes};
 use crate::types::*;
 
+/// Passed to [`media_init_section`] and [`movie_fragment`].
 pub struct FragmentSource {
-    pub track_id:   u32,
+    pub src_track_id:   u32,
+    pub dst_track_id:   u32,
     pub from_sample: u32,
     pub to_sample: u32,
 }
 
 /// Build a Media Initialization Section for fMP4 segments.
-pub fn media_init_section(mp4: &MP4, sources: &[FragmentSource]) -> MP4 {
+pub fn media_init_section(mp4: &MP4, tracks: &[u32]) -> MP4 {
     let mut boxes = Vec::new();
 
     // Start with the FileType box.
@@ -57,7 +59,7 @@ pub fn media_init_section(mp4: &MP4, sources: &[FragmentSource]) -> MP4 {
             MP4Box::TrackBox(track) => {
                 // only the selected tracks.
                 track_id += 1;
-                if !sources.iter().any(|src| src.track_id == track_id) {
+                if !tracks.iter().any(|&trk| trk == track_id) {
                     continue;
                 }
                 new_track_id += 1;
@@ -72,6 +74,11 @@ pub fn media_init_section(mp4: &MP4, sources: &[FragmentSource]) -> MP4 {
 
     // add the MovieExtendsBox.
     movie_boxes.push(MP4Box::MovieExtendsBox(MovieExtendsBox { boxes: mvex_boxes }));
+
+    // Temporary marker, for debugging.
+    let mut mdat = MediaDataBox::default();
+    mdat.data.push(b"\n---END---\n");
+    movie_boxes.push(mdat.to_mp4box());
 
     // finally add the MovieBox to the top level boxes!
     boxes.push(MP4Box::MovieBox(MovieBox { boxes: movie_boxes }));
@@ -263,12 +270,14 @@ impl SampleDefaults {
         let sample_flags;
         if let Some(sync_table) = tables.sync_samples() {
             let mut is_sync = 0_u32;
-            for entry in &sync_table.entries {
-                if *entry > from && *entry <= to {
-                    is_sync += 1;
-                }
-                if *entry > to {
-                    break;
+            if to >= 1 && to != u32::MAX {
+                for entry in &sync_table.entries {
+                    if *entry > from && *entry <= to {
+                        is_sync += 1;
+                    }
+                    if *entry > to {
+                        break;
+                    }
                 }
             }
             if is_sync == 0 || is_sync == to - from {
@@ -338,13 +347,11 @@ pub fn movie_fragment(mp4: &MP4, seq_num: u32, source: &[FragmentSource]) -> io:
     );
 
     // Track fragments.
-    let mut new_id = 0u32;
     for src in source {
         let track = movie
-            .track_by_id(src.track_id)
-            .ok_or(ioerr!(NotFound, "{}: no such track", src.track_id))?;
-        new_id += 1;
-        let traf = track_fragment(track, src.from_sample, src.to_sample, new_id, data_ref, &mut mdat)?;
+            .track_by_id(src.src_track_id)
+            .ok_or(ioerr!(NotFound, "{}: no such track", src.src_track_id))?;
+        let traf = track_fragment(track, src.from_sample, src.to_sample, src.dst_track_id, data_ref, &mut mdat)?;
         moof.boxes.push(traf.to_mp4box());
     }
 
@@ -380,6 +387,7 @@ fn track_fragment(
     data_ref: &[u8],
     mdat: &mut MediaDataBox,
 ) -> io::Result<TrackFragmentBox> {
+
     // Seek to 'from' and peek at the first sample.
     let mut samples = track.sample_info_iter();
     samples.seek(from)?;

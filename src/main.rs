@@ -6,9 +6,12 @@ use anyhow::{anyhow, Result};
 use clap;
 use structopt::StructOpt;
 
-use mp4::fragment::FragmentSource;
+use mp4::boxes::*;
 use mp4::debug;
+use mp4::first_box;
+use mp4::fragment::FragmentSource;
 use mp4::io::Mp4File;
+use mp4::iter_box;
 use mp4::mp4box::{MP4Box, MP4};
 use mp4::subtitle;
 
@@ -100,12 +103,16 @@ pub struct SubtitlesOpts {
 #[derive(StructOpt, Debug)]
 pub struct FragmentOpts {
     #[structopt(long, use_delimiter = true)]
-    /// Select primary track, first and last sample.
-    pub track: Vec<u32>,
+    /// Select primary track.
+    pub track: u32,
 
     #[structopt(long, use_delimiter = true)]
-    /// Select secondary track, first and last sample.
-    pub track2: Option<Vec<u32>>,
+    /// Select secondary track.
+    pub track2: Option<u32>,
+
+    #[structopt(short, long)]
+    /// Fragments of fixed duration (milliseconds)
+    pub duration: Option<u32>,
 
     /// Input filename.
     pub input: String,
@@ -137,6 +144,10 @@ pub struct DebugOpts {
     #[structopt(short, long)]
     /// Show the samples for a track.
     pub samples: bool,
+
+    #[structopt(short, long)]
+    /// Fragment a track on sync sample boundaries
+    pub fragment: bool,
 
     #[structopt(long, default_value = "1")]
     /// First sample to dump.
@@ -213,30 +224,70 @@ fn subtitles(opts: SubtitlesOpts) -> Result<()> {
 fn fragment(opts: FragmentOpts) -> Result<()> {
     let mut reader = Mp4File::open(&opts.input)?;
     let mp4 = MP4::read(&mut reader)?;
+    let mut tracks = Vec::new();
 
-    if opts.track.len() != 3 {
-        return Err(anyhow!("fragment: --track needs track_id,first_sample,last_sample"));
+    let track = mp4.movie().track_by_id(opts.track).ok_or(anyhow!("track {} not found", opts.track))?;
+    let segments = mp4::segment::track_to_segments(track, opts.duration)?;
+    tracks.push(opts.track);
+
+    // See if we wanted an extra track.
+    let mut segments2 = Vec::new();
+    let mut track2 = 0;
+    if let Some(t2) = opts.track2 {
+        let track = mp4.movie().track_by_id(t2).ok_or(anyhow!("track {} not found", t2))?;
+        segments2 = mp4::segment::track_to_segments_timed(track, &segments)?;
+        track2 = t2;
+        tracks.push(track2);
     }
-    let mut sources = Vec::new();
-    sources.push(FragmentSource {
-        track_id:  opts.track[0],
-        from_sample: opts.track[1],
-        to_sample: opts.track[2],
-    });
-    if let Some(track2) = opts.track2.as_ref() {
-        if track2.len() != 3 {
-            return Err(anyhow!("fragment: --track2 needs track_id,first_sample,last_sample"));
+
+    // Media init section (empty moov).
+    let mut mp4_frag = mp4::fragment::media_init_section(&mp4, &tracks);
+
+    let mut segments_iter = segments.iter();
+    let mut segments2_iter = segments2.iter();
+
+    // moof + mdats.
+    let mut seq = 1;
+    let mut prev_seq = 0;
+    let mut frag_src = Vec::new();
+    while seq > prev_seq {
+        frag_src.truncate(0);
+        prev_seq = seq;
+
+        // Primary segment.
+        if let Some(segment) = segments_iter.next() {
+            let fs = FragmentSource {
+                src_track_id: opts.track,
+                dst_track_id: 1,
+                from_sample: segment.start_sample,
+                to_sample: segment.end_sample,
+            };
+            frag_src.push(fs);
+            //let mut frag = mp4::fragment::movie_fragment(&mp4, seq, &[ fs ])?;
+            //mp4_frag.boxes.append(&mut frag);
+            //seq += 1;
         }
-        sources.push(FragmentSource {
-            track_id:  track2[0],
-            from_sample: track2[1],
-            to_sample: track2[2],
-        });
-    }
 
-    let mut mp4_frag = mp4::fragment::media_init_section(&mp4, &sources);
-    let mut moof = mp4::fragment::movie_fragment(&mp4, 1, &sources)?;
-    mp4_frag.boxes.append(&mut moof);
+        // Optional extra segment.
+        if let Some(segment) = segments2_iter.next() {
+            let fs = FragmentSource {
+                src_track_id: track2,
+                dst_track_id: 2,
+                from_sample: segment.start_sample,
+                to_sample: segment.end_sample,
+            };
+            frag_src.push(fs);
+            //let mut frag = mp4::fragment::movie_fragment(&mp4, seq, &[ fs ])?;
+            //mp4_frag.boxes.append(&mut frag);
+            //seq += 1;
+        }
+        if frag_src.len() == 0 {
+            break;
+        }
+        let mut frag = mp4::fragment::movie_fragment(&mp4, seq, &frag_src)?;
+        mp4_frag.boxes.append(&mut frag);
+        seq += 1;
+    }
 
     let writer = File::create(&opts.output)?;
     mp4_frag.write(writer)?;
@@ -317,6 +368,7 @@ fn dump(opts: DumpOpts) -> Result<()> {
     let stdout = io::stdout();
     let mut handle = BufWriter::with_capacity(128000, stdout.lock());
 
+    // tracks.
     let mut buffer = Vec::new();
     for sample_info in track.sample_info_iter() {
         let sz = sample_info.size as usize;
@@ -325,6 +377,30 @@ fn dump(opts: DumpOpts) -> Result<()> {
         }
         infh.read_exact_at(&mut buffer[..sz], sample_info.fpos)?;
         handle.write_all(&buffer[..sz])?;
+    }
+
+    let dfl_sample_size = 0;
+
+    for moof in iter_box!(mp4, MovieFragmentBox) {
+        for traf in iter_box!(moof, TrackFragmentBox) {
+            let tfhd = first_box!(traf, TrackFragmentHeaderBox).unwrap();
+            if !tfhd.default_base_is_moof {
+                return Err(anyhow!("dump: track_id {}: default_base_is_moof not set in fragment", opts.track));
+            }
+            for trun in iter_box!(traf, TrackRunBox) {
+                let offset = moof.offset + trun.data_offset.unwrap_or(0) as u64;
+                let mut size = 0;
+                for entry in &trun.entries {
+                    size += entry.sample_size.unwrap_or(dfl_sample_size);
+                }
+                let sz = size as usize;
+                if buffer.len() < sz {
+                    buffer.resize(sz, 0);
+                }
+                infh.read_exact_at(&mut buffer[..sz], offset)?;
+                handle.write_all(&buffer[..sz])?;
+            }
+        }
     }
 
     Ok(())
@@ -337,10 +413,27 @@ fn debug(opts: DebugOpts) -> Result<()> {
     if opts.samples {
         let track = match opts.track {
             Some(track) => track,
-            None => return Err(anyhow!("debug: debugtrack: need --track")),
+            None => return Err(anyhow!("debug: samples: need --track")),
         };
         debug::dump_track_samples(&mp4, track, opts.from, opts.to)?;
         return Ok(());
+    }
+
+    if opts.fragment {
+        let track = match opts.track {
+            Some(track) => mp4.movie().track_by_id(track).ok_or(anyhow!("track {} not found", track))?,
+            None => return Err(anyhow!("debug: fragment: need --track")),
+        };
+        let segments = mp4::segment::track_to_segments(track, None)?;
+        let longest = segments.iter().fold(0_f64, |max, t| {
+            if t.duration.partial_cmp(&max) == Some(std::cmp::Ordering::Greater) {
+                t.duration
+            } else {
+                max
+            }
+        });
+        println!("longest sample: {}s", longest);
+        println!("{:#?}", segments);
     }
 
     if opts.traf {

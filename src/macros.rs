@@ -403,6 +403,7 @@ macro_rules! impl_from {
 }
 
 /// Find the first box of type $type in $vec.
+#[macro_export]
 macro_rules! first_box {
     (@FIELD $val:expr, SampleDescriptionBox) => {
         &$val.entries
@@ -412,7 +413,7 @@ macro_rules! first_box {
     };
     (@MAIN $vec:expr, $type:ident) => {
         {
-            let _x: Option<&$type> = iter_box!($vec, $type).next();
+            let _x: Option<&$type> = $crate::iter_box!($vec, $type).next();
             _x
         }
     };
@@ -431,6 +432,7 @@ macro_rules! first_box {
 }
 
 /// Find the first box of type $type in $vec, mutable.
+#[macro_export]
 macro_rules! first_box_mut {
     (@FIELD $val:expr, SampleDescriptionBox) => {
         &mut $val.entries
@@ -440,7 +442,7 @@ macro_rules! first_box_mut {
     };
     (@MAIN $vec:expr, $type:ident) => {
         {
-            let _x: Option<&mut $type> = iter_box_mut!($vec, $type).next();
+            let _x: Option<&mut $type> = $crate::iter_box_mut!($vec, $type).next();
             _x
         }
     };
@@ -459,6 +461,7 @@ macro_rules! first_box_mut {
 }
 
 /// Iterate over all boxes of type $type in $vec.
+#[macro_export]
 macro_rules! iter_box {
     ($vec:ident, $type:ident) => {
         iter_box!($vec.boxes, $type)
@@ -474,6 +477,7 @@ macro_rules! iter_box {
 }
 
 /// Iterate over all boxes of type $type in $vec.
+#[macro_export]
 macro_rules! iter_box_mut {
     ($vec:ident, $type:ident) => {
         iter_box_mut!($vec.boxes, $type)

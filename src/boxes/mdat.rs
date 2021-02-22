@@ -17,14 +17,15 @@ def_box! {
 
 /// Raw media data.
 #[derive(Clone)]
-pub struct MediaData(MediaData_);
+pub struct MediaData(MediaData_, u64);
 
 impl FromBytes for MediaDataBox {
     fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<MediaDataBox> {
         let mut reader = BoxReader::new(stream)?;
         let size = reader.left();
+        let offset = reader.pos();
         let data_ref = DataRef::from_bytes_limit(&mut reader, size)?;
-        let data = MediaData(MediaData_::DataRef(data_ref));
+        let data = MediaData(MediaData_::DataRef(data_ref), offset);
         Ok(MediaDataBox{ data })
     }
     fn min_size() -> usize { 8 }
@@ -35,9 +36,8 @@ impl ToBytes for MediaDataBox {
 
         // First write a header.
         let fourcc = FourCC::new("mdat");
-        let data = &self.data;
-        let mut box_size = data.len() + 8;
-        let is_large = data.is_large();
+        let mut box_size = self.data.len() + 8;
+        let is_large = self.data.is_large();
         if is_large {
             box_size += 8;
             1u32.to_bytes(stream)?;
@@ -73,6 +73,20 @@ impl MediaData {
         }
     }
 
+    /// Offset of the inner data, relative to the start of the containing file.
+    pub fn offset(&self) -> u64 {
+        match &self.0 {
+            MediaData_::DataRef(_) => self.1,
+            MediaData_::Data(d) => {
+                if self.is_large() {
+                    16
+                } else {
+                    8
+                }
+            },
+        }
+    }
+
     /// Add data.
     pub fn push(&mut self, data: &[u8]) {
         match &mut self.0 {
@@ -89,6 +103,14 @@ impl MediaData {
         }
     }
 
+    /// Reference as bytes.
+    pub fn bytes(&self) -> &[u8] {
+        match &self.0 {
+            MediaData_::DataRef(d) => d.bytes(),
+            MediaData_::Data(d) => &d[..],
+        }
+    }
+
     /// Mutable reference as bytes.
     pub fn bytes_mut(&mut self) -> &mut [u8] {
         match &mut self.0 {
@@ -100,7 +122,7 @@ impl MediaData {
 
 impl Default for MediaData {
     fn default() -> MediaData {
-        MediaData(MediaData_::Data(Vec::new()))
+        MediaData(MediaData_::Data(Vec::new()), 0)
     }
 }
 
