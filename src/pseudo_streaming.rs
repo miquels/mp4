@@ -200,19 +200,16 @@ struct MdatMapping {
     init_size:  u32,
     // offset into original MP4 file.
     offset: u64,
-    // size of the data in the original MediaDataBox.
-    mdat_size:   u64,
     // size of the data in the generated MediaDataBox.
     virt_size:   u64,
 }
 
 impl MdatMapping {
-    fn new(offset: u64, mdat_size: u64) -> MdatMapping {
+    fn new(offset: u64) -> MdatMapping {
         MdatMapping {
             map:    Vec::new(),
             init_size: 0,
             offset,
-            mdat_size,
             virt_size: 0,
         }
     }
@@ -522,12 +519,12 @@ impl InitSection {
             timescale.push(ts);
         }
 
-        let (offset, len) = match first_box!(mp4, MediaDataBox) {
-            Some(mdat) => (mdat.data.offset(), mdat.data.len()),
-            None => (0, 0),
+        let offset = match first_box!(mp4, MediaDataBox) {
+            Some(mdat) => mdat.data.offset(),
+            None => 0,
         };
 
-        let mut mapping = MdatMapping::new(offset, len);
+        let mut mapping = MdatMapping::new(offset);
         let mut offset = 0_u64;
         let mut until = 0.5_f64;
         let duration = 0.5_f64;
