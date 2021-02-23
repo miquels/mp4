@@ -1,3 +1,5 @@
+#[doc(hidden)]
+#[macro_export]
 macro_rules! ioerr {
     (@E $kind:expr, $arg:expr) => {
         ::std::io::Error::new($kind, $arg)

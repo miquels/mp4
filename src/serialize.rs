@@ -158,19 +158,17 @@ impl BoxBytes for fs::File {
 /// Implementation of WriteBytes on a byte slice.
 impl WriteBytes for &mut [u8] {
     fn write(&mut self, data: &[u8]) -> io::Result<()> {
-        if (*self).len() < data.len() {
+        let len = data.len();
+        if self.len() < len {
             return Err(io::ErrorKind::InvalidData.into());
         }
+        self[..len].copy_from_slice(data);
         let nself = std::mem::replace(self, &mut [0u8; 0]);
-        nself.copy_from_slice(data);
-        *self = &mut nself[data.len()..];
+        *self = &mut nself[len..];
         Ok(())
     }
     fn skip(&mut self, amount: u64) -> io::Result<()> {
-        let mut amount = amount;
-        if amount > (*self).len() as u64 {
-            amount = self.len() as u64;
-        }
+        let amount = std::cmp::min(amount, self.len() as u64);
         let nself = std::mem::replace(self, &mut [0u8; 0]);
         *self = &mut nself[amount as usize..];
         Ok(())

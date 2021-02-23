@@ -16,6 +16,7 @@ use std::mem;
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, Duration, SystemTime};
 
+use memmap::Mmap;
 use once_cell::sync::Lazy;
 
 use crate::boxes::*;
@@ -41,6 +42,7 @@ pub struct Mp4Stream {
     modified: SystemTime,
     size:   u64,
     pos:    u64,
+    mmap:   Option<Mmap>,
 }
 
 impl Mp4Stream {
@@ -54,6 +56,8 @@ impl Mp4Stream {
         let modified = meta.modified().unwrap();
         let inode = meta.ino();
 
+        let mmap = Some(unsafe { Mmap::map(&file)? });
+
         // prime the LRU cache.
         let key = SectionKey {
             path,
@@ -61,7 +65,7 @@ impl Mp4Stream {
         };
         let mapping = InitSection::mapping(&key)?;
         let init_size = mapping.init_size;
-        let size = init_size as u64 + 16 + mapping.size;
+        let size = init_size as u64 + 16 + mapping.virt_size;
 
         Ok(Mp4Stream{
             key,
@@ -71,7 +75,8 @@ impl Mp4Stream {
             inode,
             modified,
             size,
-            pos: 0
+            pos: 0,
+            mmap,
         })
     }
 
@@ -89,7 +94,7 @@ impl Mp4Stream {
     pub fn etag(&self) -> String {
         let d = self.modified.duration_since(SystemTime::UNIX_EPOCH);
         let secs = d.map(|s| s.as_secs()).unwrap_or(0);
-        format!("{:08x}.{:08x}.{}", secs, self.inode, self.size)
+        format!("\"{:08x}.{:08x}.{}\"", secs, self.inode, self.size)
     }
 
     /// Read data and advance file position.
@@ -101,6 +106,7 @@ impl Mp4Stream {
 
     /// Read data at a certain offset.
     pub fn read_at(&mut self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+        //println!("0. read_at(buf[0..{}], {})", buf.len(), offset);
         let mut buf = buf;
         let mut offset = offset;
         let mut done = 0;
@@ -139,7 +145,10 @@ impl Mp4Stream {
 
         // Okay we have to map the mdat section.
         let mapping = InitSection::mapping(&self.key)?;
-        mapping.read_at(&self.file, buf, offset)
+        let n = mapping.read_at(&self.file, self.mmap.as_ref(), buf, offset)?;
+        done += n;
+        //println!("read {} bytes ({} via mapping)", done, n);
+        Ok(done)
     }
 }
 
@@ -173,6 +182,7 @@ fn open_mp4(path: &str) -> io::Result<Arc<MP4>> {
 }
 
 // One entry per sample.
+#[derive(Debug)]
 struct MdatEntry {
     // Offset into the original MP4 file.
     mdat_offset:  u64,
@@ -190,17 +200,20 @@ struct MdatMapping {
     init_size:  u32,
     // offset into original MP4 file.
     offset: u64,
-    // size of the data in the MediaDataBox.
-    size:   u64,
+    // size of the data in the original MediaDataBox.
+    mdat_size:   u64,
+    // size of the data in the generated MediaDataBox.
+    virt_size:   u64,
 }
 
 impl MdatMapping {
-    fn new(offset: u64, size: u64) -> MdatMapping {
+    fn new(offset: u64, mdat_size: u64) -> MdatMapping {
         MdatMapping {
             map:    Vec::new(),
             init_size: 0,
             offset,
-            size,
+            mdat_size,
+            virt_size: 0,
         }
     }
 
@@ -210,13 +223,13 @@ impl MdatMapping {
             panic!("MdatMapping::push: {} {} too large (>2^40)", name, offset);
         }
         self.map.push(hi as u8);
-        let lo = offset & 0xffffffff;
+        let lo = (offset & 0xffffffff) as u32;
         self.map.extend_from_slice(&lo.to_ne_bytes());
     }
 
-    fn push(&mut self, virt_offset: u64, mdat_offset: u64, size: u32) {
-        self.push_offset(virt_offset, "virt_offset");
+    fn push(&mut self, mdat_offset: u64, virt_offset: u64, size: u32) {
         self.push_offset(mdat_offset, "mdat_offset");
+        self.push_offset(virt_offset, "virt_offset");
         // XXX TODO: optimization: size is virt_offset[index + 1] - virt_offset[index]
         self.map.extend_from_slice(&size.to_ne_bytes());
     }
@@ -225,21 +238,22 @@ impl MdatMapping {
         let offset = index * 14;
         let data = &self.map[offset .. offset + 14];
         let hi = data[0] as u64;
-        let virt_offset = u32::from_ne_bytes(data[1 .. 5].try_into().unwrap()) as u64 | hi;
+        let mdat_offset = u32::from_ne_bytes(data[1 .. 5].try_into().unwrap()) as u64 | hi;
         let hi = data[5] as u64;
-        let mdat_offset = u32::from_ne_bytes(data[6 .. 10].try_into().unwrap()) as u64 | hi;
+        let virt_offset = u32::from_ne_bytes(data[6 .. 10].try_into().unwrap()) as u64 | hi;
         let size = u32::from_ne_bytes(data[10 .. 14].try_into().unwrap());
         MdatEntry { virt_offset, mdat_offset, size: size as u64 }
     }
 
-    fn read_at(&self, file: &fs::File, mut buf: &mut [u8], offset: u64) -> io::Result<usize> {
+    fn read_at(&self, file: &fs::File, mmap: Option<&Mmap>, mut buf: &mut [u8], offset: u64) -> io::Result<usize> {
 
         // Some range checks.
         if offset < self.init_size as u64 {
             return Err(ioerr!(InvalidInput, "MdatMapping::read_at: invalid offset (<{})", self.offset));
         }
         let mut offset = offset - self.init_size as u64;
-        if offset >= self.size + 16 {
+        //println!("1. read_at(buf[0..{}], offset {}, size {}", buf.len(), offset, self.virt_size + 16);
+        if offset >= self.virt_size + 16 {
             return Ok(0);
         }
 
@@ -249,29 +263,33 @@ impl MdatMapping {
             let mut writer = &mut data[..];
             1u32.to_bytes(&mut writer)?;
             FourCC::new("mdat").to_bytes(&mut writer)?;
-            (self.size + 16).to_bytes(&mut writer)?;
+            (self.virt_size + 16).to_bytes(&mut writer)?;
             let len = std::cmp::min(buf.len(), (16 - offset) as usize);
             buf[..len].copy_from_slice(&data[offset as usize .. offset as usize + len]);
             offset += len as u64;
             buf = &mut buf[len..];
             if offset < 16 {
+                //println!("return Ok({})", len);
                 return Ok(len);
             }
         }
         offset -= 16;
+        //println!("2. read_at(buf[0..{}], offset {}", buf.len(), offset);
 
         // Now, start at an index close to where we think we need to be.
         let num_entries = self.map.len() / 14;
-        let mut idx = (offset * num_entries as u64 / self.size as u64) as usize;
+        let mut idx = (offset * num_entries as u64 / self.virt_size as u64) as usize;
 
         // If the target offset < first entry.virt_offset, we need search
         // upwards, otherwise downwards.
         let mut entries = Vec::new();
         let mut entry = self.get(idx);
-        let up = offset <= entry.virt_offset;
+        let up = entry.virt_offset < offset;
+        //println!("idx: {}, up: {:?}", idx, up);
 
         loop {
-            // Found if it is in the range.
+            // If 'offset' falls in the range, it is the first matching entry.
+            //println!("offset: {}, entry: {:?}", offset, entry);
             if offset >= entry.virt_offset && offset < entry.virt_offset + entry.size {
                 // adjust so it starts at 'offset'.
                 let delta = offset - entry.virt_offset;
@@ -291,6 +309,7 @@ impl MdatMapping {
                 }
                 idx -= 1;
             }
+            entry = self.get(idx);
         }
 
         // Now collect entries until we have enough to fill 'buf', or reach EOF.
@@ -313,6 +332,7 @@ impl MdatMapping {
         entries.sort_unstable_by(|a, b| a.mdat_offset.cmp(&b.mdat_offset));
 
         // Mmap the range we need.
+        /*
         let start = entries[0].mdat_offset;
         let end = entries[entries.len()-1].mdat_offset + entries[entries.len()-1].size;
         let data = unsafe {
@@ -321,15 +341,24 @@ impl MdatMapping {
                 .len((end - start) as usize)
                 .map(file)
         }?;
+        */
+        let start = 0;
+        let data = mmap.unwrap();
 
         // and copy.
         let mut count = 0;
         for entry in &entries {
             let buf_index = (entry.virt_offset - offset) as usize;
             let sample_index = (entry.mdat_offset - start) as usize;
-            let size = entry.size as usize;
+            let left = buf.len() - buf_index;
+            let size = std::cmp::min(left, entry.size as usize);
+            //println!("buf_index {}, buf.len {}, sample_index {}, data.len {}, size {}",
+            //    buf_index, buf.len(), sample_index, data.len(), size);
             buf[buf_index .. buf_index + size].copy_from_slice(&data[sample_index .. sample_index + size]);
             count += size;
+            //if left == size {
+            //    break;
+            //}
         }
 
         Ok(count as usize)
@@ -430,10 +459,10 @@ impl InitSection {
         // Now process the MovieBox.
         let mut new_moov = MovieBox::default();
         let moov = mp4.movie();
-        if let Some(mvhd) = first_box!(mp4, MovieHeaderBox) {
+        if let Some(mvhd) = first_box!(moov, MovieHeaderBox) {
             new_moov.boxes.push(mvhd.clone().to_mp4box());
         }
-        if let Some(meta) = first_box!(mp4, MetaBox) {
+        if let Some(meta) = first_box!(moov, MetaBox) {
             new_moov.boxes.push(meta.clone().to_mp4box());
         }
 
@@ -512,7 +541,6 @@ impl InitSection {
 
                 let mut num_samples = 0u32;
                 let mut size = 0u32;
-                until += duration;
 
                 while let Some(info) = sample_info[t].next() {
 
@@ -523,11 +551,11 @@ impl InitSection {
                         break;
                     }
 
+                    // Mapping
+                    mapping.push(info.fpos, offset + size as u64, info.size);
+
                     num_samples += 1;
                     size += info.size;
-
-                    // Mapping
-                    mapping.push(offset + size as u64, info.fpos, info.size);
                 }
 
                 if num_samples > 0 {
@@ -548,7 +576,11 @@ impl InitSection {
                     done = false;
                 }
             }
+
+            until += duration;
         }
+
+        mapping.virt_size = offset;
 
         (chunks, mapping)
     }
@@ -607,6 +639,8 @@ where
         while let Some((_, peek)) = cache.peek_lru() {
             if now.duration_since(peek.last_used) >= self.max_unused {
                 cache.pop_lru();
+            } else {
+                break;
             }
         }
     }

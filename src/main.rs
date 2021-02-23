@@ -11,6 +11,7 @@ use mp4::debug;
 use mp4::first_box;
 use mp4::fragment::FragmentSource;
 use mp4::io::Mp4File;
+use mp4::ioerr;
 use mp4::iter_box;
 use mp4::mp4box::{MP4Box, MP4};
 use mp4::subtitle;
@@ -45,10 +46,14 @@ pub enum Command {
     Fragment(FragmentOpts),
 
     #[structopt(display_order = 5)]
+    /// interleave an mp4 file.
+    Interleave(InterleaveOpts),
+
+    #[structopt(display_order = 6)]
     /// Dump the mp4 file
     Dump(DumpOpts),
 
-    #[structopt(display_order = 6)]
+    #[structopt(display_order = 7)]
     /// Debugging.
     Debug(DebugOpts),
 }
@@ -122,6 +127,19 @@ pub struct FragmentOpts {
 }
 
 #[derive(StructOpt, Debug)]
+pub struct InterleaveOpts {
+    #[structopt(short, long, use_delimiter = true)]
+    /// Select tracks.
+    pub tracks: Vec<u32>,
+
+    /// Input filename.
+    pub input: String,
+
+    /// Output filename.
+    pub output: String,
+}
+
+#[derive(StructOpt, Debug)]
 pub struct DumpOpts {
     #[structopt(short, long)]
     /// Select a track.
@@ -184,6 +202,7 @@ fn main() -> Result<()> {
         Command::Rewrite(opts) => return rewrite(opts),
         Command::Subtitles(opts) => return subtitles(opts),
         Command::Fragment(opts) => return fragment(opts),
+        Command::Interleave(opts) => return interleave(opts),
         Command::Mediainfo(opts) => return mediainfo(opts),
         Command::Debug(opts) => return debug(opts),
     }
@@ -293,6 +312,24 @@ fn fragment(opts: FragmentOpts) -> Result<()> {
     Ok(())
 }
 
+fn interleave(opts: InterleaveOpts) -> Result<()> {
+    let mut reader = mp4::pseudo_streaming::Mp4Stream::open(&opts.input, &opts.tracks[..])
+        .map_err(|e| ioerr!(e.kind(), "{}: {}", opts.input, e))?;
+    let mut writer = File::create(&opts.output)?;
+
+    let mut buf = Vec::<u8>::new();
+    buf.resize(128000, 0);
+
+    loop {
+        let n = reader.read(&mut buf).map_err(|e| ioerr!(e.kind(), "{}: read: {}", opts.input, e))?;
+        if n == 0 {
+            break;
+        }
+        writer.write_all(&buf[..n])?;
+    }
+
+    Ok(())
+}
 
 fn short(track: &mp4::track::TrackInfo) {
     println!(
