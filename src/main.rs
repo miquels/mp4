@@ -167,8 +167,6 @@ pub struct DebugOpts {
 
 
 fn main() -> Result<()> {
-    MP4Box::check();
-
     let opts = MainOpts::from_args();
 
     let mut builder = env_logger::Builder::new();

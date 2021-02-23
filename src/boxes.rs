@@ -72,6 +72,8 @@ def_boxes! {
     Skip, b"skip";
     Wide, b"wide";
 
+    ProgressiveDownloadInfoBox, b"pdin" => pdin;
+
     SampleDescriptionBox, b"stsd" => stsd;
     SampleGroupDescriptionBox, b"sgpd" => sgpd;
     SampleSizeBox, b"stsz" => stsz;

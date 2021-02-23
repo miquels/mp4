@@ -3,30 +3,26 @@
 //! This optimizes the MP4 file by:
 //!
 //! - putting the MovieBox at the front
-//! - interleaving of audio / video in 500ms chunks
+//! - interleaving audio / video in 500ms chunks
 //! - only including the audio track(s) you need
 //!
 use std::borrow::Borrow;
 use std::convert::TryInto;
+use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::hash::Hash;
 use std::io;
+use std::mem;
 use std::sync::{Arc, Mutex};
-use std::time::{Instant, Duration};
+use std::time::{Instant, Duration, SystemTime};
 
 use once_cell::sync::Lazy;
 
+use crate::boxes::*;
+use crate::io::{DataRef, Mp4File};
 use crate::mp4box::{MP4, MP4Box};
-use crate::io::Mp4File;
-use crate::boxes::{SampleToChunkBox, SampleToChunkEntry, ChunkOffsetBox, TrackBox, MediaDataBox};
-
-// The original, unmodified MP4s.
-static MP4_FILES: Lazy<LruCache<String, Arc<MP4>>> = Lazy::new(|| LruCache::new(Duration::new(60, 0)));
-
-// Rewritten init sections, for the specific tracks, and with interleaving.
-static INIT_SECTIONS: Lazy<LruCache<SectionKey, Arc<InitSection>>> = Lazy::new(|| LruCache::new(Duration::new(10, 0)));
-
-// Mappings of the rewritten data sections, for the specific tracks, and with interleaving.
-static DATA_SECTIONS: Lazy<LruCache<SectionKey, Arc<DataSection>>> = Lazy::new(|| LruCache::new(Duration::new(60, 0)));
+use crate::serialize::ToBytes;
+use crate::types::FourCC;
 
 // Key into INIT_SECTION / DATA_SECTION cache.
 #[derive(Hash, PartialEq, Eq, Clone)]
@@ -37,62 +33,164 @@ struct SectionKey {
 
 /// An on-the-fly streaming-optimized MP4 file.
 pub struct Mp4Stream {
-    path:   String,
-    init:   Arc<InitSection>,
-    mp4:    Arc<MP4>,
+    key:    SectionKey,
+    file:   fs::File,
+    init_section: Option<Vec<u8>>,
+    init_size: u32,
+    inode:  u64,
+    modified: SystemTime,
+    size:   u64,
     pos:    u64,
 }
 
 impl Mp4Stream {
-    // Open an MP4 file.
+    /// Open an MP4 file.
     pub fn open(path: impl Into<String>, tracks: impl Into<Vec<u32>>) -> io::Result<Mp4Stream> {
         let path = path.into();
         let tracks = tracks.into();
 
-        let mp4 = match MP4_FILES.get(&path) {
-            Some(mp4) => mp4,
-            None => {
-                let mut reader = Mp4File::open(&path)?;
-                let mp4 = Arc::new(MP4::read(&mut reader)?);
-                MP4_FILES.put(path.clone(), mp4.clone());
-                mp4
-            },
-        };
+        let file = fs::File::open(&path)?;
+        let meta = file.metadata()?;
+        let modified = meta.modified().unwrap();
+        let inode = meta.ino();
 
-        let init_key = SectionKey {
-            path: path.clone(),
+        // prime the LRU cache.
+        let key = SectionKey {
+            path,
             tracks,
         };
-        let init = match INIT_SECTIONS.get(&init_key) {
-            Some(init) => init,
-            None => {
-                let init = Arc::new(InitSection::new(&init_key, mp4.as_ref())?);
-                INIT_SECTIONS.put(init_key, init.clone());
-                init
-            },
-        };
+        let mapping = InitSection::mapping(&key)?;
+        let init_size = mapping.init_size;
+        let size = init_size as u64 + 16 + mapping.size;
 
-        Ok(Mp4Stream{ path, init, mp4, pos: 0 })
+        Ok(Mp4Stream{
+            key,
+            file,
+            init_section: None,
+            init_size,
+            inode,
+            modified,
+            size,
+            pos: 0
+        })
     }
 
-    // Read data and advance file position.
+    /// Size of the (virtual) file.
+    pub fn size(&self) -> u64 {
+        self.size
+    }
+
+    /// Last modified.
+    pub fn modified(&self) -> SystemTime {
+        self.modified
+    }
+
+    /// HTTP ETag.
+    pub fn etag(&self) -> String {
+        let d = self.modified.duration_since(SystemTime::UNIX_EPOCH);
+        let secs = d.map(|s| s.as_secs()).unwrap_or(0);
+        format!("{:08x}.{:08x}.{}", secs, self.inode, self.size)
+    }
+
+    /// Read data and advance file position.
     pub fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let n = self.read_at(self.pos, buf)?;
+        let n = self.read_at(buf, self.pos)?;
         self.pos += n as u64;
         Ok(n)
     }
 
-    // Read data at a certain offset.
-    pub fn read_at(&mut self, pos: u64, buf: &mut [u8]) -> io::Result<usize> {
-        unimplemented!()
+    /// Read data at a certain offset.
+    pub fn read_at(&mut self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+        let mut buf = buf;
+        let mut offset = offset;
+        let mut done = 0;
+
+        // Does the offset start in the init section?
+        if offset < self.init_size as u64 {
+
+            // Yep, so read the init section.
+            let init_section = match self.init_section.as_ref() {
+                Some(data) => data,
+                None => {
+                    let init_section = InitSection::init_section(&self.key)?;
+                    let mut buf = crate::io::MemBuffer::new();
+                    init_section.init.write(&mut buf)?;
+                    self.init_section = Some(buf.into_vec());
+                    self.init_section.as_ref().unwrap()
+                }
+            };
+
+            // Copy to buf.
+            let init_size = self.init_size as usize;
+            let u_offset = offset as usize;
+            let len = std::cmp::min(buf.len(), init_size - u_offset);
+            buf[..len].copy_from_slice(&init_section[u_offset .. u_offset + len]);
+
+            // advance buf and offset. if there is space in buf left,
+            // we'll start reading from the MdatMapping.
+            done = len;
+            buf = &mut buf[len..];
+            offset += len as u64;
+        }
+
+        if buf.len() == 0 {
+            return Ok(done);
+        }
+
+        // Okay we have to map the mdat section.
+        let mapping = InitSection::mapping(&self.key)?;
+        mapping.read_at(&self.file, buf, offset)
     }
+}
+
+impl std::fmt::Debug for Mp4Stream {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let mut dbg = f.debug_struct("Mp4Stream");
+        dbg.field("path", &self.key.path);
+        dbg.field("tracks", &self.key.tracks);
+        dbg.field("inode", &self.inode);
+        dbg.field("modified", &self.modified);
+        dbg.field("size", &self.size);
+        dbg.field("etag", &self.etag());
+        dbg.finish()
+    }
+}
+
+fn open_mp4(path: &str) -> io::Result<Arc<MP4>> {
+    static MP4_FILES: Lazy<LruCache<String, Arc<MP4>>> = Lazy::new(|| LruCache::new(Duration::new(60, 0)));
+    let path = path.to_string();
+    let mp4 = match MP4_FILES.get(&path) {
+        Some(mp4) => mp4,
+        None => {
+            let mut reader = Mp4File::open(&path)?;
+            let mp4 = Arc::new(MP4::read(&mut reader)?);
+            MP4_FILES.put(path, mp4.clone());
+            mp4
+        },
+    };
+    MP4_FILES.expire();
+    Ok(mp4)
+}
+
+// One entry per sample.
+struct MdatEntry {
+    // Offset into the original MP4 file.
+    mdat_offset:  u64,
+    // Offset into the generated 'virtual' mp4 file.
+    virt_offset:    u64,
+    // Size of the sample.
+    size:    u64,
 }
 
 // Mapping of the samples in the virtual metadata to the samples
 // in the original metadata.
 struct MdatMapping {
     map:    Vec<u8>,
+    // virtual initialization section size.
+    init_size:  u32,
+    // offset into original MP4 file.
     offset: u64,
+    // size of the data in the MediaDataBox.
     size:   u64,
 }
 
@@ -100,6 +198,7 @@ impl MdatMapping {
     fn new(offset: u64, size: u64) -> MdatMapping {
         MdatMapping {
             map:    Vec::new(),
+            init_size: 0,
             offset,
             size,
         }
@@ -115,22 +214,125 @@ impl MdatMapping {
         self.map.extend_from_slice(&lo.to_ne_bytes());
     }
 
-    fn push(&mut self, mdat_offset: u64, sample_offset: u64, sample_size: u32) {
+    fn push(&mut self, virt_offset: u64, mdat_offset: u64, size: u32) {
+        self.push_offset(virt_offset, "virt_offset");
         self.push_offset(mdat_offset, "mdat_offset");
-        self.push_offset(sample_offset, "sample_offset");
-        // XXX TODO: optimization: size is mdat_offset[index + 1] - mdat_offset[index]
-        self.map.extend_from_slice(&sample_size.to_ne_bytes());
+        // XXX TODO: optimization: size is virt_offset[index + 1] - virt_offset[index]
+        self.map.extend_from_slice(&size.to_ne_bytes());
     }
 
-    fn get(&self, index: usize) -> (u64, u64, u32) {
+    fn get(&self, index: usize) -> MdatEntry {
         let offset = index * 14;
         let data = &self.map[offset .. offset + 14];
         let hi = data[0] as u64;
-        let mdat_offset = u32::from_ne_bytes(data[1 .. 5].try_into().unwrap()) as u64 | hi;
+        let virt_offset = u32::from_ne_bytes(data[1 .. 5].try_into().unwrap()) as u64 | hi;
         let hi = data[5] as u64;
-        let sample_offset = u32::from_ne_bytes(data[6 .. 10].try_into().unwrap()) as u64 | hi;
-        let sample_size = u32::from_ne_bytes(data[10 .. 14].try_into().unwrap());
-        (mdat_offset, sample_offset, sample_size)
+        let mdat_offset = u32::from_ne_bytes(data[6 .. 10].try_into().unwrap()) as u64 | hi;
+        let size = u32::from_ne_bytes(data[10 .. 14].try_into().unwrap());
+        MdatEntry { virt_offset, mdat_offset, size: size as u64 }
+    }
+
+    fn read_at(&self, file: &fs::File, mut buf: &mut [u8], offset: u64) -> io::Result<usize> {
+
+        // Some range checks.
+        if offset < self.init_size as u64 {
+            return Err(ioerr!(InvalidInput, "MdatMapping::read_at: invalid offset (<{})", self.offset));
+        }
+        let mut offset = offset - self.init_size as u64;
+        if offset >= self.size + 16 {
+            return Ok(0);
+        }
+
+        // The first 16 bytes are the MediaDataBox header.
+        if offset < 16 {
+            let mut data = [0u8; 16];
+            let mut writer = &mut data[..];
+            1u32.to_bytes(&mut writer)?;
+            FourCC::new("mdat").to_bytes(&mut writer)?;
+            (self.size + 16).to_bytes(&mut writer)?;
+            let len = std::cmp::min(buf.len(), (16 - offset) as usize);
+            buf[..len].copy_from_slice(&data[offset as usize .. offset as usize + len]);
+            offset += len as u64;
+            buf = &mut buf[len..];
+            if offset < 16 {
+                return Ok(len);
+            }
+        }
+        offset -= 16;
+
+        // Now, start at an index close to where we think we need to be.
+        let num_entries = self.map.len() / 14;
+        let mut idx = (offset * num_entries as u64 / self.size as u64) as usize;
+
+        // If the target offset < first entry.virt_offset, we need search
+        // upwards, otherwise downwards.
+        let mut entries = Vec::new();
+        let mut entry = self.get(idx);
+        let up = offset <= entry.virt_offset;
+
+        loop {
+            // Found if it is in the range.
+            if offset >= entry.virt_offset && offset < entry.virt_offset + entry.size {
+                // adjust so it starts at 'offset'.
+                let delta = offset - entry.virt_offset;
+                entry.virt_offset += delta;
+                entry.mdat_offset += delta;
+                entry.size -= delta;
+                break;
+            }
+            if up {
+                idx += 1;
+                if idx >= num_entries {
+                    panic!("MdatMapping::read_at: can't find entry for offset {}", offset);
+                }
+            } else  {
+                if idx == 0 {
+                    panic!("MdatMapping::read_at: can't find entry for offset {}", offset);
+                }
+                idx -= 1;
+            }
+        }
+
+        // Now collect entries until we have enough to fill 'buf', or reach EOF.
+        let mut size = 0;
+        loop {
+            size += entry.size;
+            entries.push(entry);
+            if size >= buf.len() as u64 {
+                break;
+            }
+            if idx + 1 >= num_entries {
+                break;
+            }
+            idx += 1;
+            entry = self.get(idx);
+        }
+
+        // Sort entries on the mdat_offset, so that we always read
+        // forwards in the original MP4 file. Minimizes seeks.
+        entries.sort_unstable_by(|a, b| a.mdat_offset.cmp(&b.mdat_offset));
+
+        // Mmap the range we need.
+        let start = entries[0].mdat_offset;
+        let end = entries[entries.len()-1].mdat_offset + entries[entries.len()-1].size;
+        let data = unsafe {
+            memmap::MmapOptions::new()
+                .offset(start)
+                .len((end - start) as usize)
+                .map(file)
+        }?;
+
+        // and copy.
+        let mut count = 0;
+        for entry in &entries {
+            let buf_index = (entry.virt_offset - offset) as usize;
+            let sample_index = (entry.mdat_offset - start) as usize;
+            let size = entry.size as usize;
+            buf[buf_index .. buf_index + size].copy_from_slice(&data[sample_index .. sample_index + size]);
+            count += size;
+        }
+
+        Ok(count as usize)
     }
 }
 
@@ -141,20 +343,136 @@ struct InitChunk {
     stco:   ChunkOffsetBox,
 }
 
+// Rewritten init sections, for the specific tracks, and with interleaving.
+static INIT_SECTIONS: Lazy<LruCache<SectionKey, Arc<InitSection>>> = {
+    Lazy::new(|| LruCache::new(Duration::new(30, 0)))
+};
+// Mapping from the virtual mdat to the real mdat.
+static MAPPINGS: Lazy<LruCache<SectionKey, Arc<MdatMapping>>> = {
+    Lazy::new(|| LruCache::new(Duration::new(120, 0)))
+};
+
 // The InitSection is an MP4 file without the MediaData boxes,
 // with only a selected set of tracks, and rewritten
 // SampleToChunk boxes and ChunkOffset bxoes.
 struct InitSection {
     init:   MP4,
-    size:   u32,
 }
 
 impl InitSection {
-    fn new(key: &SectionKey, mp4: &MP4) -> io::Result<InitSection> {
-        unimplemented!()
+    fn init_section(key: &SectionKey) -> io::Result<Arc<InitSection>> {
+        let init = match INIT_SECTIONS.get(key) {
+            Some(init) => init,
+            None => {
+                let mp4 = open_mp4(&key.path)?;
+                let (init, mapping) = InitSection::init_and_mapping(key, mp4.as_ref())?;
+                let init = Arc::new(init);
+                let mapping = Arc::new(mapping);
+                INIT_SECTIONS.put(key.clone(), init.clone());
+                MAPPINGS.put(key.clone(), mapping);
+                init
+            },
+        };
+        INIT_SECTIONS.expire();
+        Ok(init)
     }
 
-    fn interleave(mp4: &MP4, tracks: &[TrackBox]) -> (Vec<InitChunk>, MdatMapping) {
+    fn mapping(key: &SectionKey) -> io::Result<Arc<MdatMapping>> {
+        let mapping = match MAPPINGS.get(key) {
+            Some(mapping) => mapping,
+            None => {
+                let mp4 = open_mp4(&key.path)?;
+                let (init, mapping) = InitSection::init_and_mapping(key, mp4.as_ref())?;
+                let init = Arc::new(init);
+                let mapping = Arc::new(mapping);
+                INIT_SECTIONS.put(key.clone(), init.clone());
+                MAPPINGS.put(key.clone(), mapping.clone());
+                mapping
+            },
+        };
+        MAPPINGS.expire();
+        Ok(mapping)
+    }
+
+    fn init_and_mapping(key: &SectionKey, mp4: &MP4) -> io::Result<(InitSection, MdatMapping)> {
+        let mut tracks = Vec::new();
+        let moov = mp4.movie();
+        for track in &key.tracks {
+            tracks.push(moov.track_by_id(*track).ok_or_else(|| ioerr!(NotFound, "track {} not found", track))?);
+        }
+        let (chunks, mut mapping) = Self::interleave(mp4, &tracks[..]);
+        let mut init = Self::build_init(key, mp4, chunks);
+        let size = init.boxes.iter().fold(0, |acc, x| acc + x.size()) as u32;
+        for track in init.movie_mut().tracks_mut().iter_mut() {
+            track
+                .media_mut()
+                .media_info_mut()
+                .sample_table_mut()
+                .chunk_offset_table_mut()
+                .add_offset(size as i64 + 16);
+        }
+        let init_section = InitSection { init };
+        mapping.init_size = size;
+        Ok((init_section, mapping))
+    }
+
+    fn build_init(key: &SectionKey, mp4: &MP4, mut new_chunks: Vec<InitChunk>) -> MP4 {
+        let mut boxes = Vec::new();
+
+        // First, loop over the top-level boxes. Copy those that we need.
+        if let Some(ftyp) = first_box!(mp4, FileTypeBox) {
+            boxes.push(ftyp.clone().to_mp4box());
+        }
+        if let Some(pdin) = first_box!(mp4, ProgressiveDownloadInfoBox) {
+            boxes.push(pdin.clone().to_mp4box());
+        }
+
+        // Now process the MovieBox.
+        let mut new_moov = MovieBox::default();
+        let moov = mp4.movie();
+        if let Some(mvhd) = first_box!(mp4, MovieHeaderBox) {
+            new_moov.boxes.push(mvhd.clone().to_mp4box());
+        }
+        if let Some(meta) = first_box!(mp4, MetaBox) {
+            new_moov.boxes.push(meta.clone().to_mp4box());
+        }
+
+        let mut new_track_id = 1;
+        for trak in moov.tracks() {
+
+            let id = trak.track_header().track_id;
+            if !key.tracks.iter().any(|&t| t == id) {
+                continue;
+            }
+            let mut chunks = new_chunks.remove(0);
+
+            // Clone the track, then replace the ChunkOffsetBox and SampleToChunkBox.
+            //
+            // TODO: optimization: don't clone stco / stsc.
+            let mut trak = trak.clone();
+            let table = trak.media_mut().media_info_mut().sample_table_mut();
+            for entry in &mut table.boxes {
+                match entry {
+                    MP4Box::ChunkOffsetBox(ref mut b) => mem::swap(&mut chunks.stco, b),
+                    MP4Box::SampleToChunkBox(ref mut b) => mem::swap(&mut chunks.stsc, b),
+                    _ => {},
+                }
+            }
+            trak.track_header_mut().track_id = new_track_id;
+            new_track_id += 1;
+            new_moov.boxes.push(trak.to_mp4box());
+        }
+
+        boxes.push(new_moov.to_mp4box());
+
+        MP4 {
+            data_ref:   DataRef::default(),
+            input_file: mp4.input_file.clone(),
+            boxes
+        }
+    }
+
+    fn interleave(mp4: &MP4, tracks: &[&TrackBox]) -> (Vec<InitChunk>, MdatMapping) {
 
         // Initialize empty chunks vec (one entry per track).
         let mut chunks = Vec::new();
@@ -183,7 +501,7 @@ impl InitSection {
         let mut mapping = MdatMapping::new(offset, len);
         let mut offset = 0_u64;
         let mut until = 0.5_f64;
-        let mut duration = 0.5_f64;
+        let duration = 0.5_f64;
         let mut done = false;
 
         while !done {
@@ -235,25 +553,6 @@ impl InitSection {
         (chunks, mapping)
     }
 }
-
-// The DataSection is a mapping from file offsets in the virtual, on-the-fly
-// generated MediaDataBox to a sample number. Using the original sampletables
-// in the source MP4 file we can then map that to one or more ranges in the
-// source MediaDataBox.
-struct DataSection {
-    // Size of the InitSection.
-    init_size:  u64,
-    // Mapping. First vec is track, second is (offset, sample).
-    mapping: MdatMapping,
-}
-
-impl DataSection {
-}
-
-
-
-
-
 
 
 struct LruCacheEntry<T> {

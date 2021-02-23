@@ -263,6 +263,14 @@ macro_rules! impl_enum {
                 }
             }
 
+            /// Number of bytes when serialized.
+            pub fn size(&self) -> u64 {
+                let mut cb = crate::io::CountBytes::new();
+                self.to_bytes(&mut cb).unwrap();
+                cb.size()
+            }
+
+            /*
             pub fn check() {
                 let mut ok = true;
                 $(
@@ -277,7 +285,8 @@ macro_rules! impl_enum {
                 if !ok {
                     panic!("MP4Box::check failed");
                 }
-            }
+            }*/
+
 
         }
 

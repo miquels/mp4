@@ -77,7 +77,7 @@ impl MediaData {
     pub fn offset(&self) -> u64 {
         match &self.0 {
             MediaData_::DataRef(_) => self.1,
-            MediaData_::Data(d) => {
+            MediaData_::Data(_) => {
                 if self.is_large() {
                     16
                 } else {

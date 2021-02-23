@@ -5,6 +5,7 @@ use crate::boxes::{MovieHeaderBox, TrackBox, TrackExtendsBox};
 
 def_box! {
     /// 8.2.1 Movie Box (ISO/IEC 14496-12:2015(E))
+    #[derive(Default)]
     MovieBox {
         boxes:      Vec<MP4Box>,
     },
