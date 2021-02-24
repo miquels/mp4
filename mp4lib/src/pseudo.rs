@@ -391,11 +391,16 @@ struct InitChunk {
 }
 
 // Rewritten init sections, for the specific tracks, and with interleaving.
-static INIT_SECTIONS: Lazy<LruCache<SectionKey, Arc<InitSection>>> =
-    { Lazy::new(|| LruCache::new(Duration::new(30, 0))) };
+#[rustfmt::skip]
+static INIT_SECTIONS: Lazy<LruCache<SectionKey, Arc<InitSection>>> = {
+    Lazy::new(|| LruCache::new(Duration::new(30, 0)))
+};
+
 // Mapping from the virtual mdat to the real mdat.
-static MAPPINGS: Lazy<LruCache<SectionKey, Arc<MdatMapping>>> =
-    { Lazy::new(|| LruCache::new(Duration::new(120, 0))) };
+#[rustfmt::skip]
+static MAPPINGS: Lazy<LruCache<SectionKey, Arc<MdatMapping>>> = {
+    Lazy::new(|| LruCache::new(Duration::new(120, 0)))
+};
 
 // The InitSection is an MP4 file without the MediaData boxes,
 // with only a selected set of tracks, and rewritten

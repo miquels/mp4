@@ -36,6 +36,7 @@
 #[macro_use]
 mod ioerr;
 #[macro_use]
+#[doc(hidden)]
 pub mod macros;
 #[macro_use]
 pub mod serialize;
