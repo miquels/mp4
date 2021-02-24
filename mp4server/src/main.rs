@@ -12,7 +12,7 @@ use structopt::StructOpt;
 use tokio::task;
 use warp::Filter;
 
-use mp4::pseudo_streaming::Mp4Stream;
+use mp4lib::pseudo_streaming::Mp4Stream;
 
 #[derive(StructOpt, Debug)]
 #[structopt(setting = clap::AppSettings::VersionlessSubcommands)]

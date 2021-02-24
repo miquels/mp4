@@ -1,14 +1,39 @@
+# MP4
 
-MP4
-===
+This repository contains 3 rust crates:
 
-Experimenting with the MP4 file format.
+## [`mp4lib`](mp4lib/)
 
-Goal is to build a server that can serve DASH/HLS from a single standard MP4 file,
-doing the translation to fMP4 / CMAF on-the-fly.
+A library to read, modify, and write MP4 files. It can also rewrite MP4 files
+on-the-fly for use in streaming servers.
 
-## ISOBMMF / MP4 / Dash / HLS standards information.
+### HTML5 pseudo streaming
 
-See the [doc subdirectory](doc/)
+To be used with a standard HTML5 `<video>` element.
 
+- only include selected track(s) (useful for audio switching)
+- put the MovieFragmentBox at the front of the file (faster loading)
+- re-interleave the tracks (prevents stuttering)
+
+### HLS
+
+Serves an MP4 file as a HLS VOD resource, with m3u manifest, and CMAF segments
+(not done yet)
+
+
+## [`mp4cli`](mp4cli/)
+
+A cli tool called `mp4` that can
+
+- show information about mp4 files
+- edit/rewrite mp4 files
+
+
+## [`mpserver`](mp4cli/)
+
+HTTP server:
+
+- serves MP4 files, optimized for streaming, can select tracks via query params
+- serves embedded subtitles as .vtt resource
+- TODO: serves HLS
 

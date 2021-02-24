@@ -6,15 +6,15 @@ use anyhow::{anyhow, Result};
 use clap;
 use structopt::StructOpt;
 
-use mp4::boxes::*;
-use mp4::debug;
-use mp4::first_box;
-use mp4::fragment::FragmentSource;
-use mp4::io::Mp4File;
-use mp4::ioerr;
-use mp4::iter_box;
-use mp4::mp4box::{MP4Box, MP4};
-use mp4::subtitle;
+use mp4lib::boxes::*;
+use mp4lib::debug;
+use mp4lib::first_box;
+use mp4lib::fragment::FragmentSource;
+use mp4lib::io::Mp4File;
+use mp4lib::ioerr;
+use mp4lib::iter_box;
+use mp4lib::mp4box::{MP4Box, MP4};
+use mp4lib::subtitle;
 
 #[derive(StructOpt, Debug)]
 #[structopt(setting = clap::AppSettings::VersionlessSubcommands)]
@@ -99,7 +99,7 @@ pub struct SubtitlesOpts {
 
     #[structopt(short, long)]
     /// Format (vtt, srt, tx3g)
-    pub format: mp4::subtitle::Format,
+    pub format: mp4lib::subtitle::Format,
 
     /// Input filename.
     pub input: String,
@@ -212,7 +212,7 @@ fn rewrite(opts: RewriteOpts) -> Result<()> {
     let mut reader = Mp4File::open(&opts.input)?;
     let mut mp4 = MP4::read(&mut reader)?;
 
-    mp4::rewrite::movie_at_front(&mut mp4);
+    mp4lib::rewrite::movie_at_front(&mut mp4);
 
     let writer = File::create(&opts.output)?;
     mp4.write(writer)?;
@@ -244,7 +244,7 @@ fn fragment(opts: FragmentOpts) -> Result<()> {
     let mut tracks = Vec::new();
 
     let track = mp4.movie().track_by_id(opts.track).ok_or(anyhow!("track {} not found", opts.track))?;
-    let segments = mp4::segment::track_to_segments(track, opts.duration)?;
+    let segments = mp4lib::segment::track_to_segments(track, opts.duration)?;
     tracks.push(opts.track);
 
     // See if we wanted an extra track.
@@ -252,13 +252,13 @@ fn fragment(opts: FragmentOpts) -> Result<()> {
     let mut track2 = 0;
     if let Some(t2) = opts.track2 {
         let track = mp4.movie().track_by_id(t2).ok_or(anyhow!("track {} not found", t2))?;
-        segments2 = mp4::segment::track_to_segments_timed(track, &segments)?;
+        segments2 = mp4lib::segment::track_to_segments_timed(track, &segments)?;
         track2 = t2;
         tracks.push(track2);
     }
 
     // Media init section (empty moov).
-    let mut mp4_frag = mp4::fragment::media_init_section(&mp4, &tracks);
+    let mut mp4_frag = mp4lib::fragment::media_init_section(&mp4, &tracks);
 
     let mut segments_iter = segments.iter();
     let mut segments2_iter = segments2.iter();
@@ -280,7 +280,7 @@ fn fragment(opts: FragmentOpts) -> Result<()> {
                 to_sample: segment.end_sample,
             };
             frag_src.push(fs);
-            //let mut frag = mp4::fragment::movie_fragment(&mp4, seq, &[ fs ])?;
+            //let mut frag = mp4lib::fragment::movie_fragment(&mp4, seq, &[ fs ])?;
             //mp4_frag.boxes.append(&mut frag);
             //seq += 1;
         }
@@ -294,14 +294,14 @@ fn fragment(opts: FragmentOpts) -> Result<()> {
                 to_sample: segment.end_sample,
             };
             frag_src.push(fs);
-            //let mut frag = mp4::fragment::movie_fragment(&mp4, seq, &[ fs ])?;
+            //let mut frag = mp4lib::fragment::movie_fragment(&mp4, seq, &[ fs ])?;
             //mp4_frag.boxes.append(&mut frag);
             //seq += 1;
         }
         if frag_src.len() == 0 {
             break;
         }
-        let mut frag = mp4::fragment::movie_fragment(&mp4, seq, &frag_src)?;
+        let mut frag = mp4lib::fragment::movie_fragment(&mp4, seq, &frag_src)?;
         mp4_frag.boxes.append(&mut frag);
         seq += 1;
     }
@@ -313,7 +313,7 @@ fn fragment(opts: FragmentOpts) -> Result<()> {
 }
 
 fn interleave(opts: InterleaveOpts) -> Result<()> {
-    let mut reader = mp4::pseudo_streaming::Mp4Stream::open(&opts.input, &opts.tracks[..])
+    let mut reader = mp4lib::pseudo_streaming::Mp4Stream::open(&opts.input, &opts.tracks[..])
         .map_err(|e| ioerr!(e.kind(), "{}: {}", opts.input, e))?;
     let mut writer = File::create(&opts.output)?;
 
@@ -331,7 +331,7 @@ fn interleave(opts: InterleaveOpts) -> Result<()> {
     Ok(())
 }
 
-fn short(track: &mp4::track::TrackInfo) {
+fn short(track: &mp4lib::track::TrackInfo) {
     println!(
         "{}. type [{}], length {:?}, lang {}, codec {}",
         track.id, track.track_type, track.duration, track.language, track.specific_info
@@ -343,7 +343,7 @@ fn mediainfo(opts: MediainfoOpts) -> Result<()> {
     let mp4 = MP4::read(&mut reader)?;
     let mp4 = mp4.clone();
 
-    let res = mp4::track::track_info(&mp4);
+    let res = mp4lib::track::track_info(&mp4);
     if let Some(track) = opts.track {
         for t in &res {
             if t.id == track {
@@ -459,7 +459,7 @@ fn debug(opts: DebugOpts) -> Result<()> {
             Some(track) => mp4.movie().track_by_id(track).ok_or(anyhow!("track {} not found", track))?,
             None => return Err(anyhow!("debug: fragment: need --track")),
         };
-        let segments = mp4::segment::track_to_segments(track, None)?;
+        let segments = mp4lib::segment::track_to_segments(track, None)?;
         let longest = segments.iter().fold(0_f64, |max, t| {
             if t.duration.partial_cmp(&max) == Some(std::cmp::Ordering::Greater) {
                 t.duration
