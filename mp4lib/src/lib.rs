@@ -49,7 +49,7 @@ pub mod fragment;
 pub mod io;
 pub mod mp4box;
 pub mod rewrite;
-pub mod pseudo_streaming;
+pub mod pseudo;
 pub(crate) mod sample_info;
 pub mod segment;
 pub mod subtitle;

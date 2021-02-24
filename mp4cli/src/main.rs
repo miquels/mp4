@@ -313,7 +313,7 @@ fn fragment(opts: FragmentOpts) -> Result<()> {
 }
 
 fn interleave(opts: InterleaveOpts) -> Result<()> {
-    let mut reader = mp4lib::pseudo_streaming::Mp4Stream::open(&opts.input, &opts.tracks[..])
+    let mut reader = mp4lib::pseudo::Mp4Stream::open(&opts.input, &opts.tracks[..])
         .map_err(|e| ioerr!(e.kind(), "{}: {}", opts.input, e))?;
     let mut writer = File::create(&opts.output)?;
 
