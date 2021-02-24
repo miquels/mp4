@@ -72,7 +72,7 @@ async fn serve(opts: ServeOpts) -> Result<()> {
         .and(warp::method())
         .and(warp::header::headers_cloned())
         .and(warp::path::tail())
-        .and(warp::query::raw())
+        .and(warp::filters::query::raw().or(warp::any().map(|| String::default())).unify())
         .and_then(|dir: String, method: Method, headers: HeaderMap, tail: warp::path::Tail, query: String| async move {
             Ok::<_, warp::Rejection>(mp4stream(dir, method, headers, tail.as_str(), query).await)
         });

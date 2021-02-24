@@ -49,7 +49,7 @@ impl Mp4Stream {
     /// Open an MP4 file.
     pub fn open(path: impl Into<String>, tracks: impl Into<Vec<u32>>) -> io::Result<Mp4Stream> {
         let path = path.into();
-        let tracks = tracks.into();
+        let mut tracks = tracks.into();
 
         let file = fs::File::open(&path)?;
         let meta = file.metadata()?;
@@ -57,6 +57,18 @@ impl Mp4Stream {
         let inode = meta.ino();
 
         let mmap = Some(unsafe { Mmap::map(&file)? });
+
+        // If no tracks were selected, we choose the first video and the first audio track.
+        if tracks.len() == 0 {
+            let mp4 = open_mp4(&path)?;
+            let info = crate::track::track_info(&mp4);
+            if let Some(id) = info.iter().find(|t| t.track_type == "vide").map(|t| t.id) {
+                tracks.push(id);
+            }
+            if let Some(id) = info.iter().find(|t| t.track_type == "soun").map(|t| t.id) {
+                tracks.push(id);
+            }
+        }
 
         // prime the LRU cache.
         let key = SectionKey {
