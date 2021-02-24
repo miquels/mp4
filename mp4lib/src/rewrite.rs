@@ -42,6 +42,12 @@ pub fn set_default_track(mp4: &mut MP4, track_id: u32) {
         .set_enabled(was_enabled);
     tracks[track_idx].track_header_mut().flags.set_enabled(true);
 
+    // swap the track ids.
+    let id1 = tracks[first_idx].track_id();
+    let id2 = tracks[track_idx].track_id();
+    tracks[first_idx].set_track_id(id2);
+    tracks[track_idx].set_track_id(id1);
+
     // swap the tracks.
     tracks.swap(first_idx, track_idx);
 }

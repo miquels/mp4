@@ -1,7 +1,7 @@
 use std::io;
 
 use crate::boxes::prelude::*;
-use crate::boxes::{SampleTableBox, TrackHeaderBox, MediaBox, EditBox, EditListBox};
+use crate::boxes::{AacSampleEntry, SampleTableBox, TrackHeaderBox, MediaBox, EditBox, EditListBox};
 use crate::sample_info::sample_info_iter;
 
 #[doc(inline)]
@@ -42,6 +42,23 @@ impl TrackBox {
     /// Get the track id.
     pub fn track_id(&self) -> u32 {
         self.track_header().track_id
+    }
+
+    /// Set the track id.
+    ///
+    /// You should call this instead of setting the field directly,
+    /// since there might be boxes deeper down that contain
+    /// the track id, such as 'mp4a'.
+    pub fn set_track_id(&mut self, track_id: u32) {
+        self.track_header_mut().track_id = track_id;
+        let stsd = self
+            .media_mut()
+            .media_info_mut()
+            .sample_table_mut()
+            .sample_description_mut();
+        if let Some(mp4a) = first_box_mut!(stsd.entries, AacSampleEntry) {
+            mp4a.set_track_id(track_id);
+        }
     }
 
     /// Get the edit list, if it is present and has at least one entry.
@@ -181,4 +198,3 @@ impl TrackBox {
         Ok(time as f64 / (media_header.timescale as f64))
     }
 }
-

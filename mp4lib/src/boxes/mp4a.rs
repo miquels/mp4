@@ -49,7 +49,7 @@ impl AacSampleEntry {
             let config = &esds.es_descriptor.decoder_config;
             if let Some(ref audio) = config.specific_info.audio {
                 ai.channel_configuration = match audio.channel_config {
-                    1 => Some("1"),
+                    1 => Some("C"),
                     2 => Some("L,R"),
                     3 => Some("C,L,R"),
                     4 => Some("C,L,R,S"),
@@ -92,6 +92,18 @@ impl AacSampleEntry {
 
         ai
     }
+
+    // Update the `es_id` field of the [`ESDescriptor`].
+    //
+    // The ESDescriptor in the sample description has a field 'es_id'
+    // that _must_ be the same as the track_id. So if you change the
+    // track_id of a track, call this function to update the ESDescriptor.
+    pub(crate) fn set_track_id(&mut self, track_id: u32) {
+        if let Some(esds) = first_box_mut!(self, ESDescriptorBox) {
+            esds.es_descriptor.es_id = (track_id & 0xffff) as u16;
+        }
+    }
+
 }
 
 

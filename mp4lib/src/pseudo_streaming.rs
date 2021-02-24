@@ -464,12 +464,13 @@ impl InitSection {
         }
 
         let mut new_track_id = 1;
-        for trak in moov.tracks() {
+        for track_id in &key.tracks {
 
-            let id = trak.track_header().track_id;
-            if !key.tracks.iter().any(|&t| t == id) {
-                continue;
-            }
+            let trak = match moov.track_by_id(*track_id) {
+                Some(trak) => trak,
+                None => continue,
+            };
+
             let mut chunks = new_chunks.remove(0);
 
             // Clone the track, then replace the ChunkOffsetBox and SampleToChunkBox.
@@ -484,7 +485,7 @@ impl InitSection {
                     _ => {},
                 }
             }
-            trak.track_header_mut().track_id = new_track_id;
+            trak.set_track_id(new_track_id);
             new_track_id += 1;
             new_moov.boxes.push(trak.to_mp4box());
         }
