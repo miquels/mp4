@@ -127,7 +127,6 @@ impl<'a> Iterator for SampleInfoIterator<'a> {
     type Item = SampleInfo;
 
     fn next(&mut self) -> Option<Self::Item> {
-
         if let Some(pending) = self.pending.take() {
             return Some(pending);
         }
