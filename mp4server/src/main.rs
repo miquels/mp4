@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use anyhow::Result;
 use bytes::Bytes;
-use headers::{Range, HeaderMapExt};
+use headers::{Range, Header, HeaderMapExt};
 use http::header::HeaderMap;
 use http::{Method, Response};
 use percent_encoding::percent_decode_str;
@@ -178,6 +178,11 @@ async fn mp4stream(dir: String, method: Method, headers: HeaderMap, path: &str, 
     response = response.header("content-type", "video/mp4");
     response = response.header("content-length", format!("{}", end - start));
     response = response.header("etag", strm.etag());
+
+    let date = headers::Date::from(strm.modified());
+    let mut v = Vec::new();
+    date.encode(&mut v);
+    response = response.header("last-modified", v.pop().unwrap());
 
     // if HEAD quit now
     if method == Method::HEAD {
