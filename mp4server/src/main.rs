@@ -8,6 +8,7 @@ use bytes::Bytes;
 use headers::{Range, HeaderMapExt};
 use http::header::HeaderMap;
 use http::{Method, Response};
+use percent_encoding::percent_decode_str;
 use structopt::StructOpt;
 use tokio::task;
 use warp::Filter;
@@ -109,9 +110,13 @@ async fn mp4stream(dir: String, method: Method, headers: HeaderMap, path: &str, 
         return error(405, "Method Not Allowed");
     }
 
-    // Check path for shenanigans
+    // Decode path and check for shenanigans
+    let path = match percent_decode_str(path).decode_utf8() {
+        Ok(path) => path,
+        Err(_) => return error(400, "Bad Request (path not utf-8)"),
+    };
     if path.split('/').any(|elem| elem == "" || elem == "." || elem == "..") {
-        return error(404, "Not Found");
+        return error(400, "Bad Request (path elements invalid)");
     }
 
     // Decode query.
@@ -166,6 +171,7 @@ async fn mp4stream(dir: String, method: Method, headers: HeaderMap, path: &str, 
         }
         let cr = format!("bytes {}-{}/{}", start, end - 1, strm.size());
         response = response.header("content-range", cr);
+        response = response.status(206);
     }
 
     // add headers.
