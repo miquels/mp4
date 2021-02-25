@@ -1,4 +1,4 @@
-//! Read and write MP4 / ISBMFF containers.
+//! Read and write MP4 / ISOBMFF containers.
 //!
 //! There are several other crates that let you read an MP file into
 //! a set of structures, but none of them let you write one.
