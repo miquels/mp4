@@ -5,9 +5,8 @@ use std::str::FromStr;
 
 use anyhow::Result;
 use bytes::Bytes;
-use headers::{Range, Header, HeaderMapExt};
-use http::header::HeaderMap;
-use http::{Method, Response};
+use headers::{ContentLength, ContentRange, ETag, HeaderMapExt, IfMatch, IfNoneMatch, IfModifiedSince, IfUnmodifiedSince, IfRange, LastModified, Range};
+use http::{HeaderMap, HeaderValue, Method, Response};
 use percent_encoding::percent_decode_str;
 use structopt::StructOpt;
 use tokio::task;
@@ -124,7 +123,7 @@ fn error(code: u16, text: impl Into<String>) -> http::Response<hyper::Body> {
 async fn mp4stream(
     dir: String,
     method: Method,
-    headers: HeaderMap,
+    req_headers: HeaderMap,
     path: &str,
     query: String,
 ) -> http::Response<hyper::Body> {
@@ -178,35 +177,72 @@ async fn mp4stream(
     };
 
     let mut response = http::Response::builder();
+    let mut status = 200;
+
+    // add headers.
+    let resp_headers = response.headers_mut().unwrap();
+    let etag = ETag::from_str(&strm.etag()).unwrap();
+    let last_mod = LastModified::from(strm.modified());
+    resp_headers.typed_insert(etag.clone());
+    resp_headers.typed_insert(last_mod.clone());
+
+    // Check If-Match.
+    if let Some(im) = req_headers.typed_get::<IfMatch>() {
+        if !im.precondition_passes(&etag) {
+            return error(412, "ETag does not match");
+        }
+    } else {
+        // Check If-Unmodified-Since.
+        if let Some(iums) = req_headers.typed_get::<IfUnmodifiedSince>() {
+            if !iums.precondition_passes(strm.modified()) {
+                return error(412, "resource was modified");
+            }
+        }
+    }
+
+    // Check If-None-Match.
+    if let Some(inm) = req_headers.typed_get::<IfNoneMatch>() {
+        if !inm.precondition_passes(&etag) {
+            response = response.status(304);
+            return response.body(hyper::Body::empty()).unwrap();
+        }
+    } else {
+        if let Some(ims) = req_headers.typed_get::<IfModifiedSince>() {
+            if !ims.is_modified(strm.modified()) {
+                response = response.status(304);
+                return response.body(hyper::Body::empty()).unwrap();
+            }
+        }
+    }
 
     // Check ranges.
     let mut start = 0;
     let mut end = strm.size();
 
-    if let Some(range) = headers.typed_get::<Range>() {
-        let ranges: Vec<_> = range.iter().collect();
-        if ranges.len() > 1 {
-            return error(416, "multiple ranges not supported");
+    if let Some(range) = req_headers.typed_get::<Range>() {
+        let do_range = match req_headers.typed_get::<IfRange>() {
+            Some(if_range) => !if_range.is_modified(Some(&etag), Some(&last_mod)),
+            None => true,
+        };
+        if do_range {
+            let ranges: Vec<_> = range.iter().collect();
+            if ranges.len() > 1 {
+                return error(416, "multiple ranges not supported");
+            }
+            start = bound(ranges[0].0, 0);
+            end = bound(ranges[0].1, strm.size());
+            let cr = match ContentRange::bytes(start .. end, strm.size()) {
+                Ok(cr) => cr,
+                Err(_) => return error(416, "invalid range"),
+            };
+            resp_headers.typed_insert(cr);
+            status = 206;
         }
-        start = bound(ranges[0].0, 0);
-        end = bound(ranges[0].1, strm.size());
-        if start >= strm.size() || end > strm.size() {
-            return error(416, "invalid range");
-        }
-        let cr = format!("bytes {}-{}/{}", start, end - 1, strm.size());
-        response = response.header("content-range", cr);
-        response = response.status(206);
     }
 
-    // add headers.
-    response = response.header("content-type", "video/mp4");
-    response = response.header("content-length", format!("{}", end - start));
-    response = response.header("etag", strm.etag());
-
-    let date = headers::Date::from(strm.modified());
-    let mut v = Vec::new();
-    date.encode(&mut v);
-    response = response.header("last-modified", v.pop().unwrap());
+    resp_headers.insert("content-type", HeaderValue::from_static("video/mp4"));
+    resp_headers.typed_insert(ContentLength(end - start));
+    response = response.status(status);
 
     // if HEAD quit now
     if method == Method::HEAD {
