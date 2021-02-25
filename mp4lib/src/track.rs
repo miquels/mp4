@@ -1,6 +1,6 @@
 //! Get some general information about the tracks in this movie.
 //!
-//! See also [`TrackBox`](boxes::TrackBox)
+//! See also [`TrackBox`](crate::boxes::TrackBox)
 //!
 use std::fmt::{self, Debug, Display};
 use std::time::Duration;

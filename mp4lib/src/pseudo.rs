@@ -6,6 +6,12 @@
 //! - interleaving audio / video in 500ms chunks
 //! - only including the audio track(s) you need
 //!
+//! The source file is not actually rewritten. A [`virtual`](Mp4Stream) file is generated,
+//! on which you can call methods like `read`, `read_at`, and more.
+//!
+//! The main use-case for this is a HTTP server that serves and rewrites
+//! files on-the-fly.
+//!
 use std::borrow::Borrow;
 use std::convert::TryInto;
 use std::fs;
@@ -32,7 +38,7 @@ struct SectionKey {
     tracks: Vec<u32>,
 }
 
-/// An on-the-fly streaming-optimized MP4 file.
+/// An on-the-fly generated, streaming-optimized MP4 file.
 pub struct Mp4Stream {
     key:          SectionKey,
     file:         fs::File,
@@ -47,6 +53,13 @@ pub struct Mp4Stream {
 
 impl Mp4Stream {
     /// Open an MP4 file.
+    ///
+    /// The opened file is virtual. It only contains the tracks indicated
+    /// in the `tracks` argument. Also:
+    ///
+    /// - the tracks are interleaved in 500 ms periods, even if the original file wasn't
+    /// - the MovieBox box is located at the front of the file rather than at the back.
+    ///
     pub fn open(path: impl Into<String>, tracks: impl Into<Vec<u32>>) -> io::Result<Mp4Stream> {
         let path = path.into();
         let mut tracks = tracks.into();
@@ -56,7 +69,17 @@ impl Mp4Stream {
         let modified = meta.modified().unwrap();
         let inode = meta.ino();
 
-        let mmap = Some(unsafe { Mmap::map(&file)? });
+        // This is kind of aribitraty.
+        //
+        // Depending on the file size, we either mmap the entire file, or,
+        // every `read_at` the part we need. This is supposing that mapping
+        // really large files is more expensive than mapping parts of it
+        // multiple times. Is that actually true? XXX TESTME
+        let mmap = if meta.len() > 750_000_000 {
+            Some(unsafe { Mmap::map(&file)? })
+        } else {
+            None
+        };
 
         // If no tracks were selected, we choose the first video and the first audio track.
         if tracks.len() == 0 {
@@ -89,17 +112,17 @@ impl Mp4Stream {
         })
     }
 
-    /// Size of the (virtual) file.
+    /// Returns the size of the (virtual) file.
     pub fn size(&self) -> u64 {
         self.size
     }
 
-    /// Last modified.
+    /// Returns the last modified time stamp.
     pub fn modified(&self) -> SystemTime {
         self.modified
     }
 
-    /// HTTP ETag.
+    /// Returns the HTTP ETag.
     pub fn etag(&self) -> String {
         let d = self.modified.duration_since(SystemTime::UNIX_EPOCH);
         let secs = d.map(|s| s.as_secs()).unwrap_or(0);
@@ -349,19 +372,23 @@ impl MdatMapping {
         // forwards in the original MP4 file. Minimizes seeks.
         entries.sort_unstable_by(|a, b| a.mdat_offset.cmp(&b.mdat_offset));
 
-        // Mmap the range we need.
-        /*
-        let start = entries[0].mdat_offset;
-        let end = entries[entries.len()-1].mdat_offset + entries[entries.len()-1].size;
-        let data = unsafe {
-            memmap::MmapOptions::new()
-                .offset(start)
-                .len((end - start) as usize)
-                .map(file)
-        }?;
-        */
-        let start = 0;
-        let data = mmap.unwrap();
+        // Mmap the range we need, unless we already mmap'ed the whole file.
+        let mut holder = None;
+        let (start, data) = match mmap {
+            Some(mmap) => (0, mmap),
+            None => {
+                let start = entries[0].mdat_offset;
+                let end = entries[entries.len()-1].mdat_offset + entries[entries.len()-1].size;
+                let data = unsafe {
+                    memmap::MmapOptions::new()
+                        .offset(start)
+                        .len((end - start) as usize)
+                        .map(file)
+                }?;
+                holder.replace(data);
+                (start, holder.as_ref().unwrap())
+            }
+        };
 
         // and copy.
         let mut count = 0;
