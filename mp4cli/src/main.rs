@@ -243,7 +243,10 @@ fn fragment(opts: FragmentOpts) -> Result<()> {
     let mp4 = MP4::read(&mut reader)?;
     let mut tracks = Vec::new();
 
-    let track = mp4.movie().track_by_id(opts.track).ok_or(anyhow!("track {} not found", opts.track))?;
+    let track = mp4
+        .movie()
+        .track_by_id(opts.track)
+        .ok_or(anyhow!("track {} not found", opts.track))?;
     let segments = mp4lib::segment::track_to_segments(track, opts.duration)?;
     tracks.push(opts.track);
 
@@ -251,7 +254,10 @@ fn fragment(opts: FragmentOpts) -> Result<()> {
     let mut segments2 = Vec::new();
     let mut track2 = 0;
     if let Some(t2) = opts.track2 {
-        let track = mp4.movie().track_by_id(t2).ok_or(anyhow!("track {} not found", t2))?;
+        let track = mp4
+            .movie()
+            .track_by_id(t2)
+            .ok_or(anyhow!("track {} not found", t2))?;
         segments2 = mp4lib::segment::track_to_segments_timed(track, &segments)?;
         track2 = t2;
         tracks.push(track2);
@@ -276,8 +282,8 @@ fn fragment(opts: FragmentOpts) -> Result<()> {
             let fs = FragmentSource {
                 src_track_id: opts.track,
                 dst_track_id: 1,
-                from_sample: segment.start_sample,
-                to_sample: segment.end_sample,
+                from_sample:  segment.start_sample,
+                to_sample:    segment.end_sample,
             };
             frag_src.push(fs);
             //let mut frag = mp4lib::fragment::movie_fragment(&mp4, seq, &[ fs ])?;
@@ -290,8 +296,8 @@ fn fragment(opts: FragmentOpts) -> Result<()> {
             let fs = FragmentSource {
                 src_track_id: track2,
                 dst_track_id: 2,
-                from_sample: segment.start_sample,
-                to_sample: segment.end_sample,
+                from_sample:  segment.start_sample,
+                to_sample:    segment.end_sample,
             };
             frag_src.push(fs);
             //let mut frag = mp4lib::fragment::movie_fragment(&mp4, seq, &[ fs ])?;
@@ -313,7 +319,7 @@ fn fragment(opts: FragmentOpts) -> Result<()> {
 }
 
 fn interleave(opts: InterleaveOpts) -> Result<()> {
-    let mut reader = mp4lib::pseudo_streaming::Mp4Stream::open(&opts.input, &opts.tracks[..])
+    let mut reader = mp4lib::pseudo::Mp4Stream::open(&opts.input, &opts.tracks[..])
         .map_err(|e| ioerr!(e.kind(), "{}: {}", opts.input, e))?;
     let mut writer = File::create(&opts.output)?;
 
@@ -321,7 +327,9 @@ fn interleave(opts: InterleaveOpts) -> Result<()> {
     buf.resize(128000, 0);
 
     loop {
-        let n = reader.read(&mut buf).map_err(|e| ioerr!(e.kind(), "{}: read: {}", opts.input, e))?;
+        let n = reader
+            .read(&mut buf)
+            .map_err(|e| ioerr!(e.kind(), "{}: read: {}", opts.input, e))?;
         if n == 0 {
             break;
         }
@@ -420,7 +428,10 @@ fn dump(opts: DumpOpts) -> Result<()> {
         for traf in iter_box!(moof, TrackFragmentBox) {
             let tfhd = first_box!(traf, TrackFragmentHeaderBox).unwrap();
             if !tfhd.default_base_is_moof {
-                return Err(anyhow!("dump: track_id {}: default_base_is_moof not set in fragment", opts.track));
+                return Err(anyhow!(
+                    "dump: track_id {}: default_base_is_moof not set in fragment",
+                    opts.track
+                ));
             }
             for trun in iter_box!(traf, TrackRunBox) {
                 let offset = moof.offset + trun.data_offset.unwrap_or(0) as u64;
@@ -456,7 +467,11 @@ fn debug(opts: DebugOpts) -> Result<()> {
 
     if opts.fragment {
         let track = match opts.track {
-            Some(track) => mp4.movie().track_by_id(track).ok_or(anyhow!("track {} not found", track))?,
+            Some(track) => {
+                mp4.movie()
+                    .track_by_id(track)
+                    .ok_or(anyhow!("track {} not found", track))?
+            },
             None => return Err(anyhow!("debug: fragment: need --track")),
         };
         let segments = mp4lib::segment::track_to_segments(track, None)?;

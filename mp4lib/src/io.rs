@@ -454,12 +454,15 @@ impl BoxBytes for CountBytes {
 #[derive(Debug, Default)]
 pub(crate) struct MemBuffer {
     data: Vec<u8>,
-    pos: usize,
+    pos:  usize,
 }
 
 impl MemBuffer {
     pub fn new() -> MemBuffer {
-        MemBuffer { data: Vec::new(), pos: 0 }
+        MemBuffer {
+            data: Vec::new(),
+            pos:  0,
+        }
     }
 
     pub fn into_vec(self) -> Vec<u8> {

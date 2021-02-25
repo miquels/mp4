@@ -13,7 +13,7 @@ use structopt::StructOpt;
 use tokio::task;
 use warp::Filter;
 
-use mp4lib::pseudo_streaming::Mp4Stream;
+use mp4lib::pseudo::Mp4Stream;
 
 #[derive(StructOpt, Debug)]
 #[structopt(setting = clap::AppSettings::VersionlessSubcommands)]
@@ -72,24 +72,42 @@ async fn serve(opts: ServeOpts) -> Result<()> {
         .and(warp::method())
         .and(warp::header::headers_cloned())
         .and(warp::path::tail())
-        .and(warp::filters::query::raw().or(warp::any().map(|| String::default())).unify())
-        .and_then(|dir: String, method: Method, headers: HeaderMap, tail: warp::path::Tail, query: String| async move {
-            Ok::<_, warp::Rejection>(mp4stream(dir, method, headers, tail.as_str(), query).await)
-        });
+        .and(
+            warp::filters::query::raw()
+                .or(warp::any().map(|| String::default()))
+                .unify(),
+        )
+        .and_then(
+            |dir: String, method: Method, headers: HeaderMap, tail: warp::path::Tail, query: String| {
+                async move {
+                    Ok::<_, warp::Rejection>(mp4stream(dir, method, headers, tail.as_str(), query).await)
+                }
+            },
+        );
 
     let addr = IpAddr::V6(Ipv6Addr::from(0u128));
 
-    warp::serve(data)
-        .run(SocketAddr::new(addr, opts.port))
-        .await;
+    warp::serve(data).run(SocketAddr::new(addr, opts.port)).await;
 
     Ok(())
 }
 
 fn bound(bound: std::ops::Bound<u64>, max: u64) -> u64 {
     match bound {
-        Bound::Included(n) => if max > 0 { n + 1 } else { n },
-        Bound::Excluded(n) => if max > 0 { n } else { n + 1 },
+        Bound::Included(n) => {
+            if max > 0 {
+                n + 1
+            } else {
+                n
+            }
+        },
+        Bound::Excluded(n) => {
+            if max > 0 {
+                n
+            } else {
+                n + 1
+            }
+        },
         Bound::Unbounded => max,
     }
 }
@@ -103,8 +121,13 @@ fn error(code: u16, text: impl Into<String>) -> http::Response<hyper::Body> {
         .unwrap()
 }
 
-async fn mp4stream(dir: String, method: Method, headers: HeaderMap, path: &str, query: String) -> http::Response<hyper::Body> {
-
+async fn mp4stream(
+    dir: String,
+    method: Method,
+    headers: HeaderMap,
+    path: &str,
+    query: String,
+) -> http::Response<hyper::Body> {
     // Check method.
     if method != Method::GET && method != Method::HEAD {
         return error(405, "Method Not Allowed");
@@ -115,7 +138,10 @@ async fn mp4stream(dir: String, method: Method, headers: HeaderMap, path: &str, 
         Ok(path) => path,
         Err(_) => return error(400, "Bad Request (path not utf-8)"),
     };
-    if path.split('/').any(|elem| elem == "" || elem == "." || elem == "..") {
+    if path
+        .split('/')
+        .any(|elem| elem == "" || elem == "." || elem == "..")
+    {
         return error(400, "Bad Request (path elements invalid)");
     }
 
@@ -139,9 +165,7 @@ async fn mp4stream(dir: String, method: Method, headers: HeaderMap, path: &str, 
 
     // Open mp4 file.
     let path = format!("{}/{}", dir, path);
-    let result = task::block_in_place(move || {
-        Mp4Stream::open(path, tracks)
-    });
+    let result = task::block_in_place(move || Mp4Stream::open(path, tracks));
     let mut strm = match result {
         Ok(strm) => strm,
         Err(e) => {

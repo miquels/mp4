@@ -1,4 +1,4 @@
-//! Read and write MP4 / ISBMFF containers.
+//! Read and write MP4 / ISOBMFF containers.
 //!
 //! There are several other crates that let you read an MP file into
 //! a set of structures, but none of them let you write one.
@@ -36,6 +36,7 @@
 #[macro_use]
 mod ioerr;
 #[macro_use]
+#[doc(hidden)]
 pub mod macros;
 #[macro_use]
 pub mod serialize;
@@ -48,8 +49,8 @@ pub mod debug;
 pub mod fragment;
 pub mod io;
 pub mod mp4box;
+pub mod pseudo;
 pub mod rewrite;
-pub mod pseudo_streaming;
 pub(crate) mod sample_info;
 pub mod segment;
 pub mod subtitle;

@@ -1,4 +1,3 @@
-
 //! Segment a track.
 //!
 //! Cut a track into segments, either on sync (I-Frame) boundaries,
@@ -16,10 +15,10 @@ use crate::boxes::*;
 ///
 #[derive(Default, Clone, Debug)]
 pub struct Segment {
-    pub start_sample:   u32,
-    pub end_sample:     u32,
-    pub start_time:     f64,
-    pub duration:       f64,
+    pub start_sample: u32,
+    pub end_sample:   u32,
+    pub start_time:   f64,
+    pub duration:     f64,
 }
 
 /// Parse a track into segments, each starting at a sync sample.
@@ -54,8 +53,7 @@ pub fn track_to_segments(trak: &TrackBox, segment_duration: Option<u32>) -> io::
     let mut cur_segment = Segment::default();
     cur_segment.start_sample = 1;
 
-    for cur_sample in 1 ..= u32::MAX {
-
+    for cur_sample in 1..=u32::MAX {
         // FIXME? with fixed durations, only update delta on sync-frames?
         let delta = ctss_iter.as_mut().and_then(|iter| iter.next()).unwrap_or(0);
 
@@ -128,8 +126,7 @@ pub fn track_to_segments_timed(trak: &TrackBox, timing_segments: &[Segment]) -> 
     };
     segment_end_time = next_segment_end_time();
 
-    for cur_sample in 1 ..= u32::MAX {
-
+    for cur_sample in 1..=u32::MAX {
         let delta = ctss_iter.as_mut().and_then(|iter| iter.next()).unwrap_or(0);
 
         let sample_duration = match stts_iter.next() {
@@ -153,7 +150,6 @@ pub fn track_to_segments_timed(trak: &TrackBox, timing_segments: &[Segment]) -> 
         // if composition time >= current segment start + duration,
         // we have to start a new segment.
         if cur_comp_time.partial_cmp(&segment_end_time) != Some(Ordering::Less) {
-
             // Finish the previous segment and push it onto the vec.
             cur_segment.end_sample = cur_sample - 1;
             cur_segment.duration = seg_duration as f64 / timescale;

@@ -17,10 +17,10 @@ use crate::types::*;
 
 /// Passed to [`media_init_section`] and [`movie_fragment`].
 pub struct FragmentSource {
-    pub src_track_id:   u32,
-    pub dst_track_id:   u32,
-    pub from_sample: u32,
-    pub to_sample: u32,
+    pub src_track_id: u32,
+    pub dst_track_id: u32,
+    pub from_sample:  u32,
+    pub to_sample:    u32,
 }
 
 /// Build a Media Initialization Section for fMP4 segments.
@@ -31,10 +31,7 @@ pub fn media_init_section(mp4: &MP4, tracks: &[u32]) -> MP4 {
     let ftyp = FileTypeBox {
         major_brand:       FourCC::new("iso5"),
         minor_version:     1,
-        compatible_brands: vec![
-            FourCC::new("avc1"),
-            FourCC::new("mp41"),
-        ],
+        compatible_brands: vec![FourCC::new("avc1"), FourCC::new("mp41")],
     };
     boxes.push(MP4Box::FileTypeBox(ftyp));
 
@@ -259,11 +256,7 @@ impl SampleDefaults {
         // have the same size, so use that as the default.
         // samples so that one entry is the default.
         let size = tables.sample_size().size;
-        let sample_size = if size > 0 {
-            Some(size)
-        } else {
-            None
-        };
+        let sample_size = if size > 0 { Some(size) } else { None };
 
         // We have a SyncSampleBox. Skip the first sample. Then if the rest is all
         // sync or all non-sync, use that as the default.
@@ -348,10 +341,19 @@ pub fn movie_fragment(mp4: &MP4, seq_num: u32, source: &[FragmentSource]) -> io:
 
     // Track fragments.
     for src in source {
-        let track = movie
-            .track_by_id(src.src_track_id)
-            .ok_or(ioerr!(NotFound, "{}: no such track", src.src_track_id))?;
-        let traf = track_fragment(track, src.from_sample, src.to_sample, src.dst_track_id, data_ref, &mut mdat)?;
+        let track = movie.track_by_id(src.src_track_id).ok_or(ioerr!(
+            NotFound,
+            "{}: no such track",
+            src.src_track_id
+        ))?;
+        let traf = track_fragment(
+            track,
+            src.from_sample,
+            src.to_sample,
+            src.dst_track_id,
+            data_ref,
+            &mut mdat,
+        )?;
         moof.boxes.push(traf.to_mp4box());
     }
 
@@ -387,7 +389,6 @@ fn track_fragment(
     data_ref: &[u8],
     mdat: &mut MediaDataBox,
 ) -> io::Result<TrackFragmentBox> {
-
     // Seek to 'from' and peek at the first sample.
     let mut samples = track.sample_info_iter();
     samples.seek(from)?;
