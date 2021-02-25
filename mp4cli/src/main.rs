@@ -46,14 +46,18 @@ pub enum Command {
     Fragment(FragmentOpts),
 
     #[structopt(display_order = 5)]
-    /// interleave an mp4 file.
+    /// interleave and optimize an mp4 file.
     Interleave(InterleaveOpts),
 
     #[structopt(display_order = 6)]
-    /// Dump the mp4 file
-    Dump(DumpOpts),
+    /// Show the boxes.
+    Boxes(BoxesOpts),
 
     #[structopt(display_order = 7)]
+    /// Dump a track from the mp4 file
+    Dump(DumpOpts),
+
+    #[structopt(display_order = 8)]
     /// Debugging.
     Debug(DebugOpts),
 }
@@ -140,6 +144,16 @@ pub struct InterleaveOpts {
 }
 
 #[derive(StructOpt, Debug)]
+pub struct BoxesOpts {
+    #[structopt(short, long)]
+    /// Select a track.
+    pub track: Option<u32>,
+
+    /// Input filename.
+    pub input: String,
+}
+
+#[derive(StructOpt, Debug)]
 pub struct DumpOpts {
     #[structopt(short, long)]
     /// Select a track.
@@ -154,10 +168,6 @@ pub struct DebugOpts {
     #[structopt(short, long)]
     /// Select a track.
     pub track: Option<u32>,
-
-    #[structopt(short, long)]
-    /// Show all the boxes.
-    pub boxes: bool,
 
     #[structopt(short, long)]
     /// Show the samples for a track.
@@ -198,13 +208,14 @@ fn main() -> Result<()> {
     builder.init();
 
     match opts.cmd {
+        Command::Boxes(opts) => return boxes(opts),
+        Command::Debug(opts) => return debug(opts),
         Command::Dump(opts) => return dump(opts),
-        Command::Rewrite(opts) => return rewrite(opts),
-        Command::Subtitles(opts) => return subtitles(opts),
         Command::Fragment(opts) => return fragment(opts),
         Command::Interleave(opts) => return interleave(opts),
         Command::Mediainfo(opts) => return mediainfo(opts),
-        Command::Debug(opts) => return debug(opts),
+        Command::Rewrite(opts) => return rewrite(opts),
+        Command::Subtitles(opts) => return subtitles(opts),
     }
 }
 
@@ -452,9 +463,66 @@ fn dump(opts: DumpOpts) -> Result<()> {
     Ok(())
 }
 
-fn debug(opts: DebugOpts) -> Result<()> {
+fn boxes(opts: BoxesOpts) -> Result<()> {
     let mut reader = Mp4File::open(&opts.input)?;
     let mut mp4 = MP4::read(&mut reader)?;
+
+    if let Some(opt_track) = opts.track {
+        // filter out tracks we don't want.
+        let mut boxes = Vec::new();
+        let mut movie = mp4.movie_mut();
+        let mut trak_id = 0;
+        for box_ in movie.boxes.drain(..) {
+            match &box_ {
+                MP4Box::TrackBox(_) => {
+                    trak_id += 1;
+                    if opt_track == trak_id {
+                        boxes.push(box_);
+                    }
+                },
+                _ => boxes.push(box_),
+            }
+        }
+        movie.boxes = boxes;
+
+        // now do the same at the top level for moof/mdat.
+        let mut boxes = Vec::new();
+        let mut t_found = false;
+        for box_ in mp4.boxes.drain(..) {
+            match &box_ {
+                MP4Box::MovieFragmentBox(ref moof) => {
+                    t_found = moof.track_fragments().iter().any(|frag| {
+                        if let Some(hdr) = frag.track_fragment_header() {
+                            hdr.track_id == opt_track
+                        } else {
+                            false
+                        }
+                    });
+                    if t_found {
+                        boxes.push(box_);
+                    }
+                },
+                MP4Box::MediaDataBox(_) => {
+                    if t_found {
+                        boxes.push(box_);
+                    }
+                },
+                _ => boxes.push(box_),
+            }
+        }
+        mp4.boxes = boxes;
+    }
+
+    let stdout = io::stdout();
+    let mut handle = BufWriter::with_capacity(128000, stdout.lock());
+    let _ = writeln!(handle, "{:#?}", mp4);
+
+    return Ok(());
+}
+
+fn debug(opts: DebugOpts) -> Result<()> {
+    let mut reader = Mp4File::open(&opts.input)?;
+    let mp4 = MP4::read(&mut reader)?;
 
     if opts.samples {
         let track = match opts.track {
@@ -488,58 +556,6 @@ fn debug(opts: DebugOpts) -> Result<()> {
 
     if opts.traf {
         debug::dump_traf_timestamps(&mp4);
-        return Ok(());
-    }
-
-    if opts.boxes {
-        if let Some(opt_track) = opts.track {
-            // filter out tracks we don't want.
-            let mut boxes = Vec::new();
-            let mut movie = mp4.movie_mut();
-            let mut trak_id = 0;
-            for box_ in movie.boxes.drain(..) {
-                match &box_ {
-                    MP4Box::TrackBox(_) => {
-                        trak_id += 1;
-                        if opt_track == trak_id {
-                            boxes.push(box_);
-                        }
-                    },
-                    _ => boxes.push(box_),
-                }
-            }
-            movie.boxes = boxes;
-
-            // now do the same at the top level for moof/mdat.
-            let mut boxes = Vec::new();
-            let mut t_found = false;
-            for box_ in mp4.boxes.drain(..) {
-                match &box_ {
-                    MP4Box::MovieFragmentBox(ref moof) => {
-                        t_found = moof.track_fragments().iter().any(|frag| {
-                            if let Some(hdr) = frag.track_fragment_header() {
-                                hdr.track_id == opt_track
-                            } else {
-                                false
-                            }
-                        });
-                        if t_found {
-                            boxes.push(box_);
-                        }
-                    },
-                    MP4Box::MediaDataBox(_) => {
-                        if t_found {
-                            boxes.push(box_);
-                        }
-                    },
-                    _ => boxes.push(box_),
-                }
-            }
-            mp4.boxes = boxes;
-        }
-        let stdout = io::stdout();
-        let mut handle = BufWriter::with_capacity(128000, stdout.lock());
-        let _ = writeln!(handle, "{:#?}", mp4);
         return Ok(());
     }
 
