@@ -40,7 +40,7 @@ def_boxes! {
 
     // Below are boxes that are defined manually in boxes/ *.rs
     AvcSampleEntry, b"avc1" => avc1;
-    AvcConfigurationBox, b"avcC";
+    AvcConfigurationBox, b"avcC" => avcc;
 
     AacSampleEntry, b"mp4a" => mp4a;
     ESDescriptorBox, b"esds";

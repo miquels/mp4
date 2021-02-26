@@ -170,6 +170,10 @@ pub struct DebugOpts {
     pub track: Option<u32>,
 
     #[structopt(short, long)]
+    /// Show the HLS master playlist.
+    pub hls: bool,
+
+    #[structopt(short, long)]
     /// Show the samples for a track.
     pub samples: bool,
 
@@ -523,6 +527,12 @@ fn boxes(opts: BoxesOpts) -> Result<()> {
 fn debug(opts: DebugOpts) -> Result<()> {
     let mut reader = Mp4File::open(&opts.input)?;
     let mp4 = MP4::read(&mut reader)?;
+
+    if opts.hls {
+        let hls = mp4lib::stream::hls_master(&mp4);
+        print!("{}", hls);
+        return Ok(());
+    }
 
     if opts.samples {
         let track = match opts.track {

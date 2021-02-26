@@ -94,6 +94,9 @@ impl Display for AudioTrackInfo {
 pub struct VideoTrackInfo {
     pub codec_id:   String,
     pub codec_name: Option<String>,
+    pub width: u16,
+    pub height: u16,
+    pub frame_rate: f64,
 }
 
 impl Display for VideoTrackInfo {
@@ -164,7 +167,15 @@ pub fn track_info(mp4: &MP4) -> Vec<TrackInfo> {
 
         let stsd = stbl.sample_description();
         if let Some(avc1) = first_box!(stsd.entries, AvcSampleEntry) {
-            info.specific_info = SpecificTrackInfo::VideoTrackInfo(avc1.track_info());
+            let mut avc1_info = avc1.track_info();
+            if avc1_info.frame_rate == 0f64 {
+                let sample_count = stbl.sample_size().count;
+                let timescale = std::cmp::max(1000, mdhd.timescale) as f64;
+                let fr = sample_count as f64 / (mdhd.duration.0 as f64 / timescale);
+                log::debug!("track::track_info: avcc.framerate == 0, estimate: {}", fr);
+                avc1_info.frame_rate = fr;
+            }
+            info.specific_info = SpecificTrackInfo::VideoTrackInfo(avc1_info);
         } else if let Some(ac3) = first_box!(stsd.entries, Ac3SampleEntry) {
             info.specific_info = SpecificTrackInfo::AudioTrackInfo(ac3.track_info());
         } else if let Some(aac) = first_box!(stsd.entries, AacSampleEntry) {

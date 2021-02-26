@@ -53,6 +53,7 @@ pub mod pseudo;
 pub mod rewrite;
 pub(crate) mod sample_info;
 pub mod segment;
+pub mod stream;
 pub mod subtitle;
 pub mod track;
 

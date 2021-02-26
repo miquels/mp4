@@ -5,6 +5,7 @@
 
 use std::io;
 
+use crate::boxes::avcc::AvcConfigurationBox;
 use crate::boxes::prelude::*;
 use crate::track::VideoTrackInfo;
 
@@ -58,74 +59,24 @@ impl AvcSampleEntry {
     pub fn track_info(&self) -> VideoTrackInfo {
         let config = first_box!(self.boxes, AvcConfigurationBox);
         let codec_id = match config {
-            Some(ref a) => a.configuration.codec_id(),
+            Some(ref c) => c.configuration.codec_id(),
             None => "avc1.unknown".to_string(),
         };
         let codec_name = match config {
-            Some(ref a) => a.configuration.codec_name(),
+            Some(ref c) => c.configuration.codec_name(),
             None => "AVC",
         }.to_string();
+        let frame_rate = match config {
+            Some(ref c) => c.configuration.frame_rate().unwrap_or(Some(0f64)).unwrap_or(0f64),
+            None => 0f64,
+        };
         VideoTrackInfo {
             codec_id,
             codec_name: Some(codec_name.to_string()),
+            width: self.width,
+            height: self.height,
+            frame_rate,
         }
-    }
-}
-
-def_box! {
-    /// Box that contains AVC Decoder Configuration Record.
-    AvcConfigurationBox {
-        configuration: AvcDecoderConfigurationRecord,
-    },
-    fourcc => "avcC",
-    version => [],
-    impls => [ basebox, boxinfo, debug, fromtobytes ],
-}
-
-def_struct! {
-    /// AVC Decoder Configuration Record.
-    AvcDecoderConfigurationRecord,
-        configuration_version:  u8,
-        profile_idc:            u8,
-        constraint_set_flags:    u8,
-        level_idc:              u8,
-        data:                   Data,
-}
-
-impl AvcDecoderConfigurationRecord {
-    /// Return human name of codec, like "Baseline" or "High".
-    pub fn codec_name(&self) -> &'static str {
-        match self.profile_idc {
-            0x2c => "AVC CAVLC 4:4:4",
-            0x42 => "AVC Baseline",
-            0x4d => "AVC Main",
-            0x58 => "AVC Extended",
-            0x64 => "AVC High",
-            0x6e => "AVC High 10",
-            0x7a => "AVC High 4:2:2",
-            0xf4 => "AVC High 4:4:4",
-
-            0x53 => "AVC Scalable Baseline",
-            0x56 => "AVC Scalable High",
-
-            0x76 => "AVC Multiview High",
-            0x80 => "AVC Stereo High",
-            0x8a => "AVC Multiview Depth High",
-            _ => "AVC",
-        }
-    }
-
-    /// Return codec id as avc1.4d401f
-    pub fn codec_id(&self) -> String {
-        format!("avc1.{:02x}{:02x}{:02x}",
-                    self.profile_idc, self.constraint_set_flags, self.level_idc)
-    }
-}
-
-/// delegated to AvcDecoderConfigurationRecord::codec_id().
-impl std::fmt::Display for AvcDecoderConfigurationRecord {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.codec_id())
     }
 }
 
