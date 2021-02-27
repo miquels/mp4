@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::cmp;
 use std::fmt::Display;
 use std::fmt::Write;
+use std::io;
 
 use crate::mp4box::MP4;
 use crate::types::IsoLanguageCode;
@@ -169,4 +170,31 @@ pub fn hls_master(mp4: &MP4) -> String {
     }
 
     m
+}
+
+pub fn hls_track(mp4: &MP4, track_id: u32) -> io::Result<String> {
+
+    let track = mp4.movie().track_by_id(track_id).ok_or_else(|| ioerr!(NotFound, "track not found"))?;
+    let segments = crate::segment::track_to_segments(track, None)?;
+    let longest = segments.iter().fold(0u32, |l, s| std::cmp::max((s.duration + 0.5) as u32, l));
+    let independent = true;
+
+    let mut m = String::new();
+    m += "#EXTM3U\n";
+    m += "# Created by mp4lib.rs\n";
+    m += "#\n";
+    m += "#EXT-X-VERSION:6\n";
+    if independent {
+        m += "#EXT-X-INDEPENDENT-SEGMENTS\n";
+    }
+    m += &format!("EXT-X-TARGETDURATION:{}\n", longest);
+    m += "#EXT-X-MEDIA-SEQUENCE:0\n";
+    m += &format!(r#"#EXT-X-MAP:URI="t.{}.init"\n"#, track_id);
+
+    for seg in &segments {
+        m += &format!("#EXTINF:{},\nt.1.{}-{}.mp4\n", seg.duration, seg.start_sample, seg.end_sample);
+    }
+    m += "#EXT-X-ENDLIST\n";
+
+    Ok(m)
 }

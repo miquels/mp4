@@ -529,8 +529,12 @@ fn debug(opts: DebugOpts) -> Result<()> {
     let mp4 = MP4::read(&mut reader)?;
 
     if opts.hls {
-        let hls = mp4lib::stream::hls_master(&mp4);
-        print!("{}", hls);
+        let m3u = if let Some(track) = opts.track {
+            mp4lib::stream::hls_track(&mp4, track)?
+        } else {
+            mp4lib::stream::hls_master(&mp4)
+        };
+        print!("{}", m3u);
         return Ok(());
     }
 

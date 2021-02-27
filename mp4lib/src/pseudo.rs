@@ -12,21 +12,21 @@
 //! The main use-case for this is a HTTP server that serves and rewrites
 //! files on-the-fly.
 //!
-use std::borrow::Borrow;
 use std::convert::TryInto;
 use std::fs;
 use std::hash::Hash;
 use std::io;
 use std::mem;
 use std::os::unix::fs::MetadataExt;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 use memmap::Mmap;
 use once_cell::sync::Lazy;
 
 use crate::boxes::*;
 use crate::io::{DataRef, Mp4File};
+use crate::lru_cache::LruCache;
 use crate::mp4box::{MP4Box, MP4};
 use crate::serialize::ToBytes;
 use crate::types::FourCC;
@@ -633,65 +633,3 @@ impl InitSection {
     }
 }
 
-
-struct LruCacheEntry<T> {
-    item:      T,
-    last_used: Instant,
-}
-
-struct LruCache<K, V> {
-    cache:      Mutex<lru::LruCache<K, LruCacheEntry<V>>>,
-    max_unused: Duration,
-}
-
-impl<K, V> LruCache<K, V>
-where
-    K: Hash + Eq,
-    V: Clone,
-{
-    fn new(max_unused: Duration) -> LruCache<K, V> {
-        LruCache {
-            cache: Mutex::new(lru::LruCache::unbounded()),
-            max_unused,
-        }
-    }
-
-    fn put(&self, item_key: K, item_value: V)
-    where
-        K: Hash + Eq + Clone,
-    {
-        let mut cache = self.cache.lock().unwrap();
-        cache.put(
-            item_key,
-            LruCacheEntry {
-                item:      item_value,
-                last_used: Instant::now(),
-            },
-        );
-    }
-
-    fn get<Q: ?Sized>(&self, item_key: &Q) -> Option<V>
-    where
-        lru::KeyRef<K>: Borrow<Q>,
-        Q: Hash + Eq,
-    {
-        let mut cache = self.cache.lock().unwrap();
-        cache.get_mut(item_key).map(|e| {
-            let v = e.item.clone();
-            e.last_used = Instant::now();
-            v
-        })
-    }
-
-    fn expire(&self) {
-        let mut cache = self.cache.lock().unwrap();
-        let now = Instant::now();
-        while let Some((_, peek)) = cache.peek_lru() {
-            if now.duration_since(peek.last_used) >= self.max_unused {
-                cache.pop_lru();
-            } else {
-                break;
-            }
-        }
-    }
-}

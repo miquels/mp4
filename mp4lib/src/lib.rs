@@ -48,6 +48,7 @@ pub mod boxes;
 pub mod debug;
 pub mod fragment;
 pub mod io;
+pub(crate) mod lru_cache;
 pub mod mp4box;
 pub mod pseudo;
 pub mod rewrite;
