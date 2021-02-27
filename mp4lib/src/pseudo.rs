@@ -25,8 +25,8 @@ use memmap::Mmap;
 use once_cell::sync::Lazy;
 
 use crate::boxes::*;
-use crate::io::{DataRef, Mp4File};
-use crate::lru_cache::LruCache;
+use crate::io::DataRef;
+use crate::lru_cache::{LruCache, open_mp4};
 use crate::mp4box::{MP4Box, MP4};
 use crate::serialize::ToBytes;
 use crate::types::FourCC;
@@ -194,22 +194,6 @@ impl std::fmt::Debug for Mp4Stream {
         dbg.field("etag", &self.etag());
         dbg.finish()
     }
-}
-
-fn open_mp4(path: &str) -> io::Result<Arc<MP4>> {
-    static MP4_FILES: Lazy<LruCache<String, Arc<MP4>>> = Lazy::new(|| LruCache::new(Duration::new(60, 0)));
-    let path = path.to_string();
-    let mp4 = match MP4_FILES.get(&path) {
-        Some(mp4) => mp4,
-        None => {
-            let mut reader = Mp4File::open(&path)?;
-            let mp4 = Arc::new(MP4::read(&mut reader)?);
-            MP4_FILES.put(path, mp4.clone());
-            mp4
-        },
-    };
-    MP4_FILES.expire();
-    Ok(mp4)
 }
 
 // One entry per sample.

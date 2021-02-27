@@ -5,9 +5,15 @@ use std::cmp;
 use std::fmt::Display;
 use std::fmt::Write;
 use std::io;
+use std::sync::Arc;
+use std::time::Duration;
 
+use once_cell::sync::Lazy;
+
+use crate::lru_cache::LruCache;
 use crate::mp4box::MP4;
-use crate::types::IsoLanguageCode;
+use crate::segment::Segment;
+use crate::types::{FourCC, IsoLanguageCode};
 use crate::track::SpecificTrackInfo;
 
 struct ExtXMedia {
@@ -172,10 +178,37 @@ pub fn hls_master(mp4: &MP4) -> String {
     m
 }
 
+fn track_to_segments(mp4: &MP4, track_id: u32, duration: Option<u32>) -> io::Result<Arc<Vec<Segment>>> {
+    static SEGMENTS: Lazy<LruCache<(String, u32), Arc<Vec<Segment>>>> = {
+        Lazy::new(|| LruCache::new(Duration::new(60, 0)))
+    };
+    let name = mp4.input_file.as_ref().ok_or_else(|| ioerr!(NotFound, "file not found"))?;
+    let key = (name.to_string(), track_id);
+    if let Some(segments) = SEGMENTS.get(&key) {
+        return Ok(segments);
+    }
+    let track = mp4.movie().track_by_id(track_id).ok_or_else(|| ioerr!(NotFound, "track not found"))?;
+    let segments = crate::segment::track_to_segments(track, duration)?;
+    let segments = Arc::new(segments);
+    SEGMENTS.put(key, segments.clone());
+    Ok(segments)
+}
+
 pub fn hls_track(mp4: &MP4, track_id: u32) -> io::Result<String> {
 
-    let track = mp4.movie().track_by_id(track_id).ok_or_else(|| ioerr!(NotFound, "track not found"))?;
-    let segments = crate::segment::track_to_segments(track, None)?;
+    let movie = mp4.movie();
+    let video_id = match movie.track_idx_by_handler(FourCC::new("vide")) {
+        Some(idx) => movie.tracks()[idx].track_id(),
+        None => return Err(ioerr!(NotFound, "mp4 file has no video track")),
+    };
+
+    let mut segments = track_to_segments(mp4, video_id, None)?;
+    if track_id != video_id {
+        let trak = movie.track_by_id(track_id).ok_or_else(|| ioerr!(NotFound, "track not found"))?;
+        let segs: &[Segment] = segments.as_ref();
+        segments = Arc::new(crate::segment::track_to_segments_timed(trak, segs)?);
+    }
+
     let longest = segments.iter().fold(0u32, |l, s| std::cmp::max((s.duration + 0.5) as u32, l));
     let independent = true;
 
@@ -187,11 +220,11 @@ pub fn hls_track(mp4: &MP4, track_id: u32) -> io::Result<String> {
     if independent {
         m += "#EXT-X-INDEPENDENT-SEGMENTS\n";
     }
-    m += &format!("EXT-X-TARGETDURATION:{}\n", longest);
+    m += &format!("#EXT-X-TARGETDURATION:{}\n", longest);
     m += "#EXT-X-MEDIA-SEQUENCE:0\n";
-    m += &format!(r#"#EXT-X-MAP:URI="t.{}.init"\n"#, track_id);
+    m += &format!("#EXT-X-MAP:URI=\"t.{}.init\"\n", track_id);
 
-    for seg in &segments {
+    for seg in segments.iter() {
         m += &format!("#EXTINF:{},\nt.1.{}-{}.mp4\n", seg.duration, seg.start_sample, seg.end_sample);
     }
     m += "#EXT-X-ENDLIST\n";
