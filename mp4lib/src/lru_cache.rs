@@ -10,7 +10,7 @@ use once_cell::sync::Lazy;
 use crate::io::Mp4File;
 use crate::mp4box::MP4;
 
-/// A cached version of [`MP4File::open`](crate::io::MP4File::open) and
+/// A cached version of [`Mp4File::open`](crate::io::Mp4File::open) and
 /// [`MP4::read`](crate::MP4::read).
 pub fn open_mp4(path: impl Into<String>) -> io::Result<Arc<MP4>> {
     static MP4_FILES: Lazy<LruCache<String, Arc<MP4>>> = Lazy::new(|| LruCache::new(Duration::new(60, 0)));
