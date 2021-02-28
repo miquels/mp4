@@ -75,7 +75,7 @@ impl Display for ExtXStreamInf {
         }
         write!(f, r#"CODECS="{}","#, codecs)?;
         write!(f, r#"RESOLUTION={}x{},"#, self.resolution.0, self.resolution.1)?;
-        write!(f, r#"FRAME-RATE="{:.03}","#, self.frame_rate)?;
+        write!(f, r#"FRAME-RATE={:.03},"#, self.frame_rate)?;
         write!(f, "\n{}\n", self.uri)
     }
 }
@@ -208,7 +208,8 @@ pub fn hls_track(mp4: &MP4, track_id: u32) -> io::Result<String> {
         None => return Err(ioerr!(NotFound, "mp4 file has no video track")),
     };
 
-    let mut segments = track_to_segments(mp4, video_id, None)?;
+    let seg_duration = None; // Some(4000);
+    let mut segments = track_to_segments(mp4, video_id, seg_duration)?;
     if track_id != video_id {
         let segs: &[Segment] = segments.as_ref();
         segments = Arc::new(crate::segment::track_to_segments_timed(trak, segs)?);
@@ -224,7 +225,7 @@ pub fn hls_track(mp4: &MP4, track_id: u32) -> io::Result<String> {
     };
 
     let longest = segments.iter().fold(0u32, |l, s| std::cmp::max((s.duration + 0.5) as u32, l));
-    let independent = true;
+    let independent = seg_duration.is_none();
 
     let mut m = String::new();
     m += "#EXTM3U\n";
