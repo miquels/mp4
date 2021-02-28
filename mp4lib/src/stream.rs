@@ -9,10 +9,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use once_cell::sync::Lazy;
+use scan_fmt::scan_fmt;
 
+use crate::fragment::FragmentSource;
 use crate::lru_cache::LruCache;
+use crate::io::MemBuffer;
 use crate::mp4box::MP4;
 use crate::segment::Segment;
+use crate::serialize::ToBytes;
 use crate::types::{FourCC, IsoLanguageCode};
 use crate::track::SpecificTrackInfo;
 
@@ -71,7 +75,7 @@ impl Display for ExtXStreamInf {
         }
         write!(f, r#"CODECS="{}","#, codecs)?;
         write!(f, r#"RESOLUTION={}x{},"#, self.resolution.0, self.resolution.1)?;
-        write!(f, r#"FRAME-RATE="{}","#, self.frame_rate)?;
+        write!(f, r#"FRAME-RATE="{:.03}","#, self.frame_rate)?;
         write!(f, "\n{}\n", self.uri)
     }
 }
@@ -142,7 +146,7 @@ pub fn hls_master(mp4: &MP4) -> String {
             name: name,
             auto_select: true,
             default: true,
-            uri: format!("audio.{}.m3u8", track.id),
+            uri: format!("media.{}.m3u8", track.id),
         };
 
         let _ = write!(m, "{}", audio);
@@ -161,7 +165,7 @@ pub fn hls_master(mp4: &MP4) -> String {
             codecs: vec![ info.codec_id.clone() ],
             resolution: (info.width, info.height),
             frame_rate: info.frame_rate,
-            uri: format!("video.{}.m3u8", track.id),
+            uri: format!("media.{}.m3u8", track.id),
             .. ExtXStreamInf::default()
         };
         for (audio_codec, audio_bw) in audio_codecs.iter() {
@@ -197,6 +201,8 @@ fn track_to_segments(mp4: &MP4, track_id: u32, duration: Option<u32>) -> io::Res
 pub fn hls_track(mp4: &MP4, track_id: u32) -> io::Result<String> {
 
     let movie = mp4.movie();
+    let trak = movie.track_by_id(track_id).ok_or_else(|| ioerr!(NotFound, "track not found"))?;
+
     let video_id = match movie.track_idx_by_handler(FourCC::new("vide")) {
         Some(idx) => movie.tracks()[idx].track_id(),
         None => return Err(ioerr!(NotFound, "mp4 file has no video track")),
@@ -204,10 +210,18 @@ pub fn hls_track(mp4: &MP4, track_id: u32) -> io::Result<String> {
 
     let mut segments = track_to_segments(mp4, video_id, None)?;
     if track_id != video_id {
-        let trak = movie.track_by_id(track_id).ok_or_else(|| ioerr!(NotFound, "track not found"))?;
         let segs: &[Segment] = segments.as_ref();
         segments = Arc::new(crate::segment::track_to_segments_timed(trak, segs)?);
     }
+
+    let handler_type = trak.media().handler().handler_type;
+    let (prefix, suffix) = match &handler_type.to_be_bytes()[..] {
+        b"vide" => ('v', "mp4"),
+        b"soun" => ('a', "m4a"),
+        b"sbtl" => ('s', "mp4"),
+        b"subt" => ('s', "mp4"),
+        _ => return Err(ioerr!(InvalidInput, "unknown handler type {}", handler_type)),
+    };
 
     let longest = segments.iter().fold(0u32, |l, s| std::cmp::max((s.duration + 0.5) as u32, l));
     let independent = true;
@@ -222,12 +236,52 @@ pub fn hls_track(mp4: &MP4, track_id: u32) -> io::Result<String> {
     }
     m += &format!("#EXT-X-TARGETDURATION:{}\n", longest);
     m += "#EXT-X-MEDIA-SEQUENCE:0\n";
-    m += &format!("#EXT-X-MAP:URI=\"t.{}.init\"\n", track_id);
+    m += &format!("#EXT-X-MAP:URI=\"init.{}.mp4\"\n", track_id);
 
-    for seg in segments.iter() {
-        m += &format!("#EXTINF:{},\nt.1.{}-{}.mp4\n", seg.duration, seg.start_sample, seg.end_sample);
+    for (seq, seg) in segments.iter().enumerate() {
+        m += &format!("#EXTINF:{},\n{}/c.{}.{}.{}-{}.{}\n", seg.duration, prefix, track_id, seq, seg.start_sample, seg.end_sample, suffix);
     }
     m += "#EXT-X-ENDLIST\n";
 
     Ok(m)
+}
+
+/// Translates the tail of an URL into a fMP4 init section or fragment.
+///
+/// - init.TRACK_ID.mp4 => initialization segment for track TRACK_ID.
+///
+/// - a/t.TRACK_ID.SEQUENCE.FROM_SAMPLE.TO_SAMPLE.m4a => audio moof + mdat
+/// - v/t.TRACK_ID.SEQUENCE.FROM_SAMPLE.TO_SAMPLE.mp4 => video moof + mdat
+///
+/// Returns (mime-type, data).
+pub fn fragment_from_uri(mp4: &MP4, url_tail: &str) -> io::Result<(&'static str, Vec<u8>)> {
+
+    if let Ok(track_id) = scan_fmt!(url_tail, "init.{}.mp4{e}", u32) {
+        let init = crate::fragment::media_init_section(&mp4, &[ track_id ]);
+        let mut buffer = MemBuffer::new();
+        init.write(&mut buffer)?;
+        return Ok(("video/mp4", buffer.into_vec()));
+    }
+
+    match scan_fmt!(url_tail, "{[vas]}/c.{}.{}.{}-{}.", char, u32, u32, u32, u32) {
+        Ok((tp, track_id, seq_id, start_sample, end_sample)) => {
+            let mime = match tp {
+                'v' => "video/mp4",
+                'a' => "audio/mp4",
+                's' => "application/mp4",
+                _ => unreachable!(),
+            };
+            let fs = FragmentSource {
+                src_track_id: track_id,
+                dst_track_id: 1,
+                from_sample:  start_sample,
+                to_sample:    end_sample,
+            };
+            let frag = crate::fragment::movie_fragment(&mp4, seq_id, &[ fs ])?;
+            let mut buffer = MemBuffer::new();
+            frag.to_bytes(&mut buffer)?;
+            Ok((mime, buffer.into_vec()))
+        },
+        Err(_) => Err(ioerr!(NotFound, "not found")),
+    }
 }

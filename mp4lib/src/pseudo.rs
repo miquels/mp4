@@ -75,7 +75,7 @@ impl Mp4Stream {
         // every `read_at` the part we need. This is supposing that mapping
         // really large files is more expensive than mapping parts of it
         // multiple times. Is that actually true? XXX TESTME
-        let mmap = if meta.len() > 750_000_000 {
+        let mmap = if meta.len() < 750_000_000 && tracks.len() > 0 {
             Some(unsafe { Mmap::map(&file)? })
         } else {
             None
@@ -110,6 +110,11 @@ impl Mp4Stream {
             pos: 0,
             mmap,
         })
+    }
+
+    /// Return the pathname of the open file.
+    pub fn path(&self) -> &str {
+        &self.key.path
     }
 
     /// Returns the size of the (virtual) file.

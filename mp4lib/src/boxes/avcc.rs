@@ -548,6 +548,7 @@ impl TimingInfo {
 
     /// Framerate in frames / sec.
     pub fn frame_rate(&self) -> f64 {
+        log::trace!("avcc: TimingInfo: {:?}", self);
         (self.time_scale as f64 / (self.num_units_in_tick as f64)) / 2.0
     }
 }

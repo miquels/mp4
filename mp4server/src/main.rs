@@ -1,13 +1,16 @@
-use std::io::ErrorKind;
+use std::io::{self, ErrorKind};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::ops::Bound;
 use std::str::FromStr;
 
 use anyhow::Result;
 use bytes::Bytes;
-use headers::{ContentLength, ContentRange, ETag, HeaderMapExt, IfMatch, IfNoneMatch, IfModifiedSince, IfUnmodifiedSince, IfRange, LastModified, Range};
+use headers::{ContentLength, ContentRange, ETag, HeaderMapExt, IfMatch, IfNoneMatch, IfModifiedSince, IfUnmodifiedSince, IfRange, LastModified, Range, Origin};
 use http::{HeaderMap, HeaderValue, Method, Response};
+use once_cell::sync::Lazy;
 use percent_encoding::percent_decode_str;
+use regex::Regex;
+use scan_fmt::scan_fmt;
 use structopt::StructOpt;
 use tokio::task;
 use warp::Filter;
@@ -79,10 +82,17 @@ async fn serve(opts: ServeOpts) -> Result<()> {
         .and_then(
             |dir: String, method: Method, headers: HeaderMap, tail: warp::path::Tail, query: String| {
                 async move {
-                    Ok::<_, warp::Rejection>(mp4stream(dir, method, headers, tail.as_str(), query).await)
+                    let resp = match hls(&dir, &method, &headers, tail.as_str(), &query).await {
+                        Some(resp) => resp,
+                        None => mp4stream(&dir, &method, &headers, tail.as_str(), &query).await,
+                    };
+                    Ok::<_, warp::Rejection>(resp)
                 }
             },
         );
+
+    let log = warp::log("mp4");
+    let data = data.with(log);
 
     let addr = IpAddr::V6(Ipv6Addr::from(0u128));
 
@@ -120,29 +130,104 @@ fn error(code: u16, text: impl Into<String>) -> http::Response<hyper::Body> {
         .unwrap()
 }
 
-async fn mp4stream(
-    dir: String,
-    method: Method,
-    req_headers: HeaderMap,
-    path: &str,
-    query: String,
-) -> http::Response<hyper::Body> {
+fn io_error(err: io::Error) -> http::Response<hyper::Body> {
+    if err.kind() == ErrorKind::NotFound {
+        error(404, "Not Found")
+    } else {
+        error(500, format!("{}", err))
+    }
+}
+
+fn decode_path(path: &str, method: &Method) -> Result<String, http::Response<hyper::Body>> {
     // Check method.
-    if method != Method::GET && method != Method::HEAD {
-        return error(405, "Method Not Allowed");
+    if method != &Method::GET && method != &Method::HEAD {
+        return Err(error(405, "Method Not Allowed"));
     }
 
     // Decode path and check for shenanigans
     let path = match percent_decode_str(path).decode_utf8() {
         Ok(path) => path,
-        Err(_) => return error(400, "Bad Request (path not utf-8)"),
+        Err(_) => return Err(error(400, "Bad Request (path not utf-8)")),
     };
     if path
         .split('/')
         .any(|elem| elem == "" || elem == "." || elem == "..")
     {
-        return error(400, "Bad Request (path elements invalid)");
+        return Err(error(400, "Bad Request (path elements invalid)"));
     }
+    Ok(path.to_string())
+}
+
+type RespBuilder = http::response::Builder;
+
+async fn open_mp4(
+    req_headers: &HeaderMap,
+    dir: &str,
+    path: &str,
+    tracks: &[u32],
+) -> Result<(Mp4Stream, ETag, LastModified, RespBuilder), http::Response<hyper::Body>> {
+
+    // Open mp4 file.
+    let path = format!("{}/{}", dir, path);
+    let result = task::block_in_place(move || Mp4Stream::open(path, tracks));
+    let strm = match result {
+        Ok(strm) => strm,
+        Err(e) => return Err(io_error(e)),
+    };
+
+    let mut response = http::Response::builder();
+
+    // add headers.
+    let resp_headers = response.headers_mut().unwrap();
+    let etag = ETag::from_str(&strm.etag()).unwrap();
+    let last_mod = LastModified::from(strm.modified());
+    resp_headers.typed_insert(etag.clone());
+    resp_headers.typed_insert(last_mod.clone());
+
+    // Check If-Match.
+    if let Some(im) = req_headers.typed_get::<IfMatch>() {
+        if !im.precondition_passes(&etag) {
+            return Err(error(412, "ETag does not match"));
+        }
+    } else {
+        // Check If-Unmodified-Since.
+        if let Some(iums) = req_headers.typed_get::<IfUnmodifiedSince>() {
+            if !iums.precondition_passes(strm.modified()) {
+                return Err(error(412, "resource was modified"));
+            }
+        }
+    }
+
+    // Check If-None-Match.
+    if let Some(inm) = req_headers.typed_get::<IfNoneMatch>() {
+        if !inm.precondition_passes(&etag) {
+            response = response.status(304);
+            return Err(response.body(hyper::Body::empty()).unwrap());
+        }
+    } else {
+        if let Some(ims) = req_headers.typed_get::<IfModifiedSince>() {
+            if !ims.is_modified(strm.modified()) {
+                response = response.status(304);
+                return Err(response.body(hyper::Body::empty()).unwrap());
+            }
+        }
+    }
+
+    Ok((strm, etag, last_mod, response))
+}
+
+async fn mp4stream(
+    dir: &str,
+    method: &Method,
+    req_headers: &HeaderMap,
+    path: &str,
+    query: &str,
+) -> http::Response<hyper::Body> {
+
+    let path = match decode_path(path, &method) {
+        Ok(path) => path,
+        Err(resp) => return resp,
+    };
 
     // Decode query.
     let mut tracks = Vec::new();
@@ -162,58 +247,12 @@ async fn mp4stream(
         }
     }
 
-    // Open mp4 file.
-    let path = format!("{}/{}", dir, path);
-    let result = task::block_in_place(move || Mp4Stream::open(path, tracks));
-    let mut strm = match result {
+    let (mut strm, etag, last_mod, mut response) = match open_mp4(&req_headers, &dir, &path, &tracks[..]).await {
         Ok(strm) => strm,
-        Err(e) => {
-            if e.kind() == ErrorKind::NotFound {
-                return error(404, "Not Found");
-            } else {
-                return error(500, format!("{}", e));
-            }
-        },
+        Err(resp) => return resp,
     };
-
-    let mut response = http::Response::builder();
-    let mut status = 200;
-
-    // add headers.
     let resp_headers = response.headers_mut().unwrap();
-    let etag = ETag::from_str(&strm.etag()).unwrap();
-    let last_mod = LastModified::from(strm.modified());
-    resp_headers.typed_insert(etag.clone());
-    resp_headers.typed_insert(last_mod.clone());
-
-    // Check If-Match.
-    if let Some(im) = req_headers.typed_get::<IfMatch>() {
-        if !im.precondition_passes(&etag) {
-            return error(412, "ETag does not match");
-        }
-    } else {
-        // Check If-Unmodified-Since.
-        if let Some(iums) = req_headers.typed_get::<IfUnmodifiedSince>() {
-            if !iums.precondition_passes(strm.modified()) {
-                return error(412, "resource was modified");
-            }
-        }
-    }
-
-    // Check If-None-Match.
-    if let Some(inm) = req_headers.typed_get::<IfNoneMatch>() {
-        if !inm.precondition_passes(&etag) {
-            response = response.status(304);
-            return response.body(hyper::Body::empty()).unwrap();
-        }
-    } else {
-        if let Some(ims) = req_headers.typed_get::<IfModifiedSince>() {
-            if !ims.is_modified(strm.modified()) {
-                response = response.status(304);
-                return response.body(hyper::Body::empty()).unwrap();
-            }
-        }
-    }
+    let mut status = 200;
 
     // Check ranges.
     let mut start = 0;
@@ -245,7 +284,7 @@ async fn mp4stream(
     response = response.status(status);
 
     // if HEAD quit now
-    if method == Method::HEAD {
+    if method == &Method::HEAD {
         return response.body(hyper::Body::empty()).unwrap();
     }
 
@@ -270,4 +309,86 @@ async fn mp4stream(
     });
 
     response.body(body).unwrap()
+}
+
+
+async fn hls(
+    dir: &str,
+    method: &Method,
+    req_headers: &HeaderMap,
+    path: &str,
+    _query: &str,
+) -> Option<http::Response<hyper::Body>> {
+
+    static RE: Lazy<Regex> = Lazy::new(|| {
+        Regex::new(r#"^(?x)
+            (.*\.mp4)/(
+                master.m3u8|
+                media.\d+\.m3u8|
+                init\.\d+\.mp4|
+                [asv]/c\.\d+\.\d+.*
+            )$"#).unwrap()
+    });
+
+    let path = match decode_path(path, &method) {
+        Ok(path) => path,
+        Err(resp) => return Some(resp),
+    };
+    let caps = RE.captures(&path)?;
+    let filename = caps.get(1)?.as_str();
+    let extra = caps.get(2)?.as_str();
+
+    let (strm, _, _, mut response) = match open_mp4(&req_headers, &dir, &filename, &[]).await {
+        Ok(strm) => strm,
+        Err(resp) => return Some(resp),
+    };
+
+    let mp4 = match mp4lib::lru_cache::open_mp4(strm.path()) {
+        Ok(mp4) => mp4,
+        Err(e) => return Some(io_error(e)),
+    };
+    
+    let (mime, body) = if extra.ends_with(".m3u8") {
+
+        let m3u8 = if extra == "master.m3u8" {
+            mp4lib::stream::hls_master(&mp4)
+        } else {
+            let track = match scan_fmt!(&extra, "media.{}.m3u8", u32) {
+                Ok(t) => t,
+                Err(_) => return Some(error(400, "invalid filename")),
+            };
+            match mp4lib::stream::hls_track(&mp4, track) {
+                Ok(t) => t,
+                Err(e) => return Some(io_error(e)),
+            }
+        };
+        ("application/x-mpegurl ", m3u8.into_bytes())
+
+    } else {
+
+        match mp4lib::stream::fragment_from_uri(&mp4, extra) {
+            Ok(t) => t,
+            Err(e) => return Some(io_error(e)),
+        }
+
+    };
+
+    let resp_headers = response.headers_mut().unwrap();
+    resp_headers.insert("content-type", HeaderValue::from_static(mime));
+    resp_headers.typed_insert(ContentLength(body.len() as u64));
+
+    if let Some(host) = req_headers.typed_get::<Origin>() {
+        resp_headers.insert("access-control-allow-origin", HeaderValue::from_str(&host.to_string()).unwrap());
+    } else {
+        resp_headers.insert("access-control-allow-origin", HeaderValue::from_static("*"));
+    }
+    resp_headers.insert("access-control-allow-headers", HeaderValue::from_static("if-match, if-unmodified-since, if-range, range"));
+    resp_headers.insert("access-control-expose-headers", HeaderValue::from_static("content-type, content-length, content-range"));
+
+    // if HEAD quit now
+    if method == &Method::HEAD {
+        return response.body(hyper::Body::empty()).ok();
+    }
+
+    response.body(body.into()).ok()
 }
