@@ -90,17 +90,21 @@ fn ptime(secs: f64, format: Format) -> String {
 
 fn cue(
     format: Format,
-    _sample: SampleInfo,
+    timescale: u32,
+    seq: u32,
+    sample: SampleInfo,
     subt: Tx3GTextSample,
-    count: u32,
-    start: f64,
-    end: f64,
 ) -> String {
     use std::fmt::Write;
     let eol = if format == Format::Vtt { "\n" } else { "\r\n" };
+
+    let starttime = sample.decode_time as f64 / (timescale as f64);
+    let endtime = starttime + (sample.duration as f64 / (timescale as f64));
+
     let mut cue = String::new();
-    let _ = write!(cue, "{}{}", count, eol);
-    let _ = write!(cue, "{} --> {}{}", ptime(start, format), ptime(end, format), eol);
+    let _ = write!(cue, "{}{}", seq, eol);
+    let _ = write!(cue, "{} --> {}{}", ptime(starttime, format), ptime(endtime, format), eol);
+
     for line in subt.text.split('\n') {
         if format == Format::Vtt {
             cue.push_str("- ");
@@ -127,8 +131,7 @@ pub fn subtitle_extract(
 ) -> io::Result<()> {
     let iter = track.sample_info_iter();
     let timescale = iter.timescale();
-    let mut prev_text = None;
-    let mut count = 1;
+    let mut seq = 1;
 
     if format == Format::Vtt {
         write!(output, "WEBVTT\n")?;
@@ -156,23 +159,13 @@ pub fn subtitle_extract(
             output.write(&data)?;
             continue;
         }
-        let endtime = sample.decode_time as f64 / (timescale as f64);
-        if let Some((subt, sample)) = prev_text.replace((subt, sample)) {
-            if subt.text.as_str() == "" {
-                continue;
-            }
-            let starttime = sample.decode_time as f64 / (timescale as f64);
-            let cue = cue(format, sample, subt, count, starttime, endtime);
-            write!(output, "{}{}", cue, eol)?;
-            count += 1;
+        if subt.text.as_str() == "" {
+            continue;
         }
+        let cue = cue(format, timescale, seq, sample, subt);
+        write!(output, "{}{}", cue, eol)?;
+        seq += 1;
     }
-    if let Some((subt, sample)) = prev_text.take() {
-        if subt.text.as_str() != "" {
-            let starttime = sample.decode_time as f64 / (timescale as f64);
-            let cue = cue(format, sample, subt, count, starttime, starttime + 5f64);
-            writeln!(output, "{}{}", cue, eol)?;
-        }
-    }
+
     Ok(())
 }
