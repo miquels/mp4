@@ -6,6 +6,7 @@ use std::str::FromStr;
 
 use crate::boxes::sbtl::Tx3GTextSample;
 use crate::boxes::*;
+use crate::fragment::FragmentSource;
 use crate::mp4box::BoxInfo;
 use crate::mp4box::MP4;
 use crate::serialize::FromBytes;
@@ -106,9 +107,9 @@ fn cue(
     let _ = write!(cue, "{} --> {}{}", ptime(starttime, format), ptime(endtime, format), eol);
 
     for line in subt.text.split('\n') {
-        if format == Format::Vtt {
-            cue.push_str("- ");
-        }
+        //if format == Format::Vtt {
+        //    cue.push_str("- ");
+        //}
         for c in line.chars() {
             match c {
                 '&' => cue.push_str("&amp;"),
@@ -169,3 +170,48 @@ pub fn subtitle_extract(
 
     Ok(())
 }
+
+/// Create a fragment containing the cue(s).
+///
+/// Outputs raw data. If this is to be sent in a CMAF container, it
+/// still needs to be wrapped by a moof + mdat.
+pub fn fragment(mp4: &MP4, format: Format, frag: &FragmentSource) -> io::Result<Vec<u8>> {
+
+    let track = mp4.movie().track_by_id(frag.src_track_id).ok_or_else(|| {
+        ioerr!(NotFound, "track not found")
+    })?;
+    let mut iter = track.sample_info_iter();
+    let timescale = iter.timescale();
+    let eol = if format == Format::Vtt { &b"\n"[..] } else { &b"\r\n"[..] };
+
+    let mut buffer = Vec::new();
+    let mut seq = frag.from_sample;
+    iter.seek(frag.from_sample)?;
+
+    for sample in iter {
+        let mut data = mp4.data_ref(sample.fpos, sample.size as u64);
+        match Tx3GTextSample::from_bytes(&mut data) {
+            Ok(subt) => {
+                if format == Format::Tx3g {
+                    buffer.extend_from_slice(&data[..]);
+                } else {
+                    buffer.extend_from_slice(b"WEBVTT");
+                    buffer.extend_from_slice(eol);
+                    if subt.text.len() > 0 {
+                        let cue = cue(format, timescale, seq, sample, subt);
+                        buffer.extend_from_slice(cue.as_bytes());
+                        buffer.extend_from_slice(eol);
+                    }
+                }
+            },
+            Err(_) => {},
+        }
+        seq += 1;
+        if seq > frag.to_sample {
+            break;
+        }
+    }
+
+    Ok(buffer)
+}
+

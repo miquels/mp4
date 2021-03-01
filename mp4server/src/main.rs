@@ -131,10 +131,10 @@ fn error(code: u16, text: impl Into<String>) -> http::Response<hyper::Body> {
 }
 
 fn io_error(err: io::Error) -> http::Response<hyper::Body> {
-    if err.kind() == ErrorKind::NotFound {
-        error(404, "Not Found")
-    } else {
-        error(500, format!("{}", err))
+    match err.kind() {
+        ErrorKind::NotFound => error(404, "Not Found"),
+        ErrorKind::InvalidInput => error(400, format!("{}", err)),
+        _ => error(500, format!("{}", err)),
     }
 }
 
@@ -326,6 +326,7 @@ async fn hls(
                 master.m3u8|
                 media.\d+\.m3u8|
                 init\.\d+\.mp4|
+                init\.\d+\.vtt|
                 [asv]/c\.\d+\.\d+.*
             )$"#).unwrap()
     });

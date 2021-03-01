@@ -34,18 +34,27 @@ pub struct Segment {
 pub fn track_to_segments(trak: &TrackBox, segment_duration: Option<u32>) -> io::Result<Vec<Segment>> {
     let media = trak.media();
     let table = media.media_info().sample_table();
+    let handler = media.handler();
 
     let timescale_ = media.media_header().timescale as f64;
     let timescale = timescale_ as f64;
     let comp_time_shift = trak.composition_time_shift().unwrap_or(0);
-    let segment_duration = segment_duration.map(|d| ((d as u64 * timescale_ as u64) / 1000) as u32);
+    let mut segment_duration = segment_duration.map(|d| ((d as u64 * timescale_ as u64) / 1000) as u32);
 
     let mut stts_iter = table.time_to_sample().iter();
     let mut ctss_iter = table.composition_time_to_sample().map(|ctts| ctts.iter());
     let mut stss_iter = match table.sync_samples() {
-        Some(stss) => stss.iter(),
-        None => return Err(ioerr!(InvalidData, "track {}: no SyncSampleBox")),
+        Some(stss) => Some(stss.iter()),
+        None => {
+            println!("subtitles");
+            if !handler.is_subtitle() {
+                return Err(ioerr!(InvalidData, "track {}: no SyncSampleBox"));
+            }
+            segment_duration = None;
+            None
+        },
     };
+    println!("stss_iter is {:?}", stss_iter.is_some());
 
     let mut segments = Vec::new();
     let mut cur_time = 0;
@@ -72,7 +81,14 @@ pub fn track_to_segments(trak: &TrackBox, segment_duration: Option<u32>) -> io::
 
         let do_next_seg = match segment_duration {
             Some(d) => cur_seg_duration >= d,
-            None => stss_iter.next().unwrap_or(false),
+            None => {
+                if let Some(stss_iter) = stss_iter.as_mut() {
+                    stss_iter.next().unwrap_or(false)
+                } else {
+                    // no stss iter? every sample is a sync sample.
+                    true
+                }
+            },
         };
         if do_next_seg || cur_sample == 1 {
             // A new segment starts here.

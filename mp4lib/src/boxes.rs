@@ -19,7 +19,6 @@ def_boxes! {
     CleanApertureBox, b"clap";
     ExtendedLanguageBox, b"elng";
     FileTypeBox, b"ftyp";
-    HandlerBox, b"hdlr";
     InitialObjectDescriptionBox, b"iods";
     MediaHeaderBox, b"mdhd";
     MetaBox, b"meta";
@@ -62,6 +61,7 @@ def_boxes! {
     EditBox, b"edts" => edts;
     EditListBox, b"elst";
 
+    HandlerBox, b"hdlr" => hdlr;
     MediaBox, b"mdia" => mdia;
     MediaDataBox, b"mdat" => mdat;
     MediaInformationBox, b"minf" => minf;

@@ -109,18 +109,6 @@ def_box! {
 }
 
 def_box! {
-    HandlerBox {
-        skip:       4,
-        handler_type:   FourCC,
-        skip:       12,
-        name:       ZString,
-    },
-    fourcc => "hdlr",
-    version => [0],
-    impls => [ boxinfo, debug, fromtobytes, fullbox ],
-}
-
-def_box! {
     ExtendedLanguageBox {
         language:   ZString,
     },
