@@ -413,28 +413,28 @@ fn mediainfo(opts: MediainfoOpts) -> Result<()> {
 fn dump(opts: DumpOpts) -> Result<()> {
     let mut reader = Mp4File::open(&opts.input)?;
     let mp4 = MP4::read(&mut reader)?;
-    let movie = mp4.movie();
 
     let infh = reader.file();
-
-    let tracks = movie.tracks();
-    let track = match movie.track_idx_by_id(opts.track) {
-        Some(idx) => &tracks[idx],
-        None => return Err(anyhow!("dump: track id {} not found", opts.track)),
-    };
-
     let stdout = io::stdout();
     let mut handle = BufWriter::with_capacity(128000, stdout.lock());
-
-    // tracks.
     let mut buffer = Vec::new();
-    for sample_info in track.sample_info_iter() {
-        let sz = sample_info.size as usize;
-        if buffer.len() < sz {
-            buffer.resize(sz, 0);
+
+    if let Some(movie) = mp4lib::first_box!(mp4, MovieBox) {
+        let tracks = movie.tracks();
+        let track = match movie.track_idx_by_id(opts.track) {
+            Some(idx) => &tracks[idx],
+            None => return Err(anyhow!("dump: track id {} not found", opts.track)),
+        };
+
+        // tracks.
+        for sample_info in track.sample_info_iter() {
+            let sz = sample_info.size as usize;
+            if buffer.len() < sz {
+                buffer.resize(sz, 0);
+            }
+            infh.read_exact_at(&mut buffer[..sz], sample_info.fpos)?;
+            handle.write_all(&buffer[..sz])?;
         }
-        infh.read_exact_at(&mut buffer[..sz], sample_info.fpos)?;
-        handle.write_all(&buffer[..sz])?;
     }
 
     let dfl_sample_size = 0;
