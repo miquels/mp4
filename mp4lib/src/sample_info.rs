@@ -111,7 +111,9 @@ impl<'a> SampleInfoIterator<'a> {
         // calculate file position.
         let idx = self.cur_chunk.saturating_sub(1) as usize;
         self.fpos = self.chunk_offset.entries.get(idx);
-        self.fpos += self.stsz_iter.add_sizes(chunk_info.first_sample, to_sample);
+        if to_sample > 1 {
+            self.fpos += self.stsz_iter.add_sizes(chunk_info.first_sample, to_sample - 1);
+        }
 
         self.pending.take();
 
