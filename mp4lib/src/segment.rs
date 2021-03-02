@@ -70,7 +70,7 @@ pub fn track_to_segments(trak: &TrackBox, segment_duration: Option<u32>) -> io::
             Some((d, _)) => d,
             None => {
                 // No more samples, we're done. Finish the last segment.
-                if cur_segment.start_sample > 0 {
+                if cur_segment.start_sample > 0 && cur_seg_duration > 0 {
                     cur_segment.end_sample = cur_sample - 1;
                     cur_segment.duration = cur_seg_duration as f64 / timescale;
                     segments.push(cur_segment.clone());

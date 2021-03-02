@@ -92,7 +92,7 @@ fn ptime(secs: f64, format: Format) -> String {
 fn cue(
     format: Format,
     timescale: u32,
-    seq: u32,
+    seq: Option<u32>,
     sample: SampleInfo,
     subt: Tx3GTextSample,
 ) -> String {
@@ -101,9 +101,14 @@ fn cue(
 
     let starttime = sample.decode_time as f64 / (timescale as f64);
     let endtime = starttime + (sample.duration as f64 / (timescale as f64));
-
     let mut cue = String::new();
-    let _ = write!(cue, "{}{}", seq, eol);
+
+    if let Some(seq) = seq {
+        let _ = write!(cue, "{}{}", seq, eol);
+    } else {
+        let _ = write!(cue, "{}", eol);
+    }
+
     let _ = write!(cue, "{} --> {}{}", ptime(starttime, format), ptime(endtime, format), eol);
 
     for line in subt.text.split('\n') {
@@ -163,7 +168,7 @@ pub fn subtitle_extract(
         if subt.text.as_str() == "" {
             continue;
         }
-        let cue = cue(format, timescale, seq, sample, subt);
+        let cue = cue(format, timescale, Some(seq), sample, subt);
         write!(output, "{}{}", cue, eol)?;
         seq += 1;
     }
@@ -195,10 +200,11 @@ pub fn fragment(mp4: &MP4, format: Format, frag: &FragmentSource) -> io::Result<
                 if format == Format::Tx3g {
                     buffer.extend_from_slice(&data[..]);
                 } else {
-                    buffer.extend_from_slice(b"WEBVTT");
-                    buffer.extend_from_slice(eol);
+                    if format == Format::Vtt {
+                        buffer.extend_from_slice(b"WEBVTT\n\n");
+                    }
                     if subt.text.len() > 0 {
-                        let cue = cue(format, timescale, seq, sample, subt);
+                        let cue = cue(format, timescale, None, sample, subt);
                         buffer.extend_from_slice(cue.as_bytes());
                         buffer.extend_from_slice(eol);
                     }

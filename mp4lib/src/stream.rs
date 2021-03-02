@@ -25,6 +25,7 @@ struct ExtXMedia {
     type_:   &'static str,
     group_id:   String,
     name:       String,
+    channels:   Option<u16>,
     language:   Option<&'static str>,
     auto_select: bool,
     default:    bool,
@@ -35,13 +36,16 @@ impl Display for ExtXMedia {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "#EXT-X-MEDIA:TYPE={},", self.type_)?;
         write!(f, r#"GROUP-ID="{}","#, self.group_id)?;
+        if let Some(ref channels) = self.channels {
+            write!(f, r#"CHANNELS="{}","#, channels)?;
+        }
         if let Some(ref lang) = self.language {
             write!(f, r#"LANGUAGE="{}","#, lang)?;
         }
         write!(f, r#"NAME="{}","#, self.name)?;
-        write!(f, r#"AUTOSELECT="{}","#, if self.auto_select { "YES" } else { "NO" })?;
-        write!(f, r#"DEFAULT="{}","#, if self.default { "YES" } else { "NO" })?;
-        write!(f, r#"URI="{}","#, self.uri)?;
+        write!(f, r#"AUTOSELECT={},"#, if self.auto_select { "YES" } else { "NO" })?;
+        write!(f, r#"DEFAULT={},"#, if self.default { "YES" } else { "NO" })?;
+        write!(f, r#"URI="{}""#, self.uri)?;
         write!(f, "\n")
     }
 }
@@ -85,23 +89,26 @@ impl Display for ExtXStreamInf {
     }
 }
 
-fn lang(lang: IsoLanguageCode) -> (&'static str, &'static str) {
+fn lang(lang: IsoLanguageCode) -> (Option<&'static str>, &'static str) {
     match lang.to_string().as_str() {
-        "eng" => ("en", "English"),
-        "dut" => ("nl", "Nederlands"),
-        "fra" => ("fr", "Français"),
-        "ger" => ("de", "German"),
-        "spa" => ("es", "Español"),
-        "afr" => ("za", "Afrikaans"),
+        "eng" => (Some("en"), "English"),
+        "dut" => (Some("nl"), "Nederlands"),
+        "nld" => (Some("nl"), "Nederlands"),
+        "fra" => (Some("fr"), "Français"),
+        "fre" => (Some("fr"), "Français"),
+        "ger" => (Some("de"), "German"),
+        "spa" => (Some("es"), "Español"),
+        "afr" => (Some("za"), "Afrikaans"),
+        "zaf" => (Some("za"), "Afrikaans"),
         other => {
             if let Some(lang) = isolang::Language::from_639_3(other) {
                 if let Some(short) = lang.to_639_1() {
-                    (short, lang.to_name())
+                    (Some(short), lang.to_name())
                 } else {
-                    ("--", "Und")
+                    (None, "Und")
                 }
             } else {
-                ("--", "Und")
+                (None, "Und")
             }
         }
     }
@@ -147,7 +154,8 @@ pub fn hls_master(mp4: &MP4) -> String {
         let audio = ExtXMedia {
             type_: "AUDIO",
             group_id: format!("audio/{}", info.codec_id),
-            language: Some(lang),
+            language: lang,
+            channels: Some(info.channel_count + info.lfe_channel as u16),
             name: name,
             auto_select: true,
             default: false,
@@ -174,9 +182,10 @@ pub fn hls_master(mp4: &MP4) -> String {
         let sub = ExtXMedia {
             type_: "SUBTITLES",
             group_id: "subs".to_string(),
-            language: Some(lang),
+            language: lang,
+            channels: None,
             name: name.to_string(),
-            auto_select: false,
+            auto_select: true,
             default: false,
             uri: format!("media.{}.m3u8", track.id),
         };
@@ -272,23 +281,22 @@ pub fn hls_track(mp4: &MP4, track_id: u32) -> io::Result<String> {
 
     let mut m = String::new();
     m += "#EXTM3U\n";
-    m += "# Created by mp4lib.rs\n";
-    m += "#\n";
     m += "#EXT-X-VERSION:6\n";
-    m += "#EXT-X-PLAYLIST-TYPE:VOD\n";
-    if independent || !handler.is_video() {
+    m += "## Created by mp4lib.rs\n";
+    if independent || handler.is_audio() {
         m += "#EXT-X-INDEPENDENT-SEGMENTS\n";
     }
     m += &format!("#EXT-X-TARGETDURATION:{}\n", longest);
-    m += "#EXT-X-MEDIA-SEQUENCE:0\n";
-    if handler.is_subtitle() {
-        m += &format!("#EXT-X-MAP:URI=\"init.{}.vtt\"\n", track_id);
-    } else {
+    m += "#EXT-X-PLAYLIST-TYPE:VOD\n";
+    if !handler.is_subtitle() {
         m += &format!("#EXT-X-MAP:URI=\"init.{}.mp4\"\n", track_id);
     }
 
     for (seq, seg) in segments.iter().enumerate() {
-        m += &format!("#EXTINF:{},\n{}/c.{}.{}.{}-{}.{}\n", seg.duration, prefix, track_id, seq + 1, seg.start_sample, seg.end_sample, suffix);
+        // Skip segments that are < 0.1 ms.
+        if seg.duration.partial_cmp(&0.0001) == Some(std::cmp::Ordering::Greater) {
+            m += &format!("#EXTINF:{},\n{}/c.{}.{}.{}-{}.{}\n", seg.duration, prefix, track_id, seq + 1, seg.start_sample, seg.end_sample, suffix);
+        }
     }
     m += "#EXT-X-ENDLIST\n";
 

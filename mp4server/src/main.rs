@@ -140,7 +140,7 @@ fn io_error(err: io::Error) -> http::Response<hyper::Body> {
 
 fn decode_path(path: &str, method: &Method) -> Result<String, http::Response<hyper::Body>> {
     // Check method.
-    if method != &Method::GET && method != &Method::HEAD {
+    if method != &Method::GET && method != &Method::HEAD && method != &Method::OPTIONS {
         return Err(error(405, "Method Not Allowed"));
     }
 
@@ -343,6 +343,20 @@ async fn hls(
         Ok(strm) => strm,
         Err(resp) => return Some(resp),
     };
+    let resp_headers = response.headers_mut().unwrap();
+
+    if let Some(host) = req_headers.typed_get::<Origin>() {
+        resp_headers.insert("access-control-allow-origin", HeaderValue::from_str(&host.to_string()).unwrap());
+    } else {
+        resp_headers.insert("access-control-allow-origin", HeaderValue::from_static("*"));
+    }
+    resp_headers.insert("access-control-allow-headers", HeaderValue::from_static("if-match, if-unmodified-since, if-range, range"));
+    resp_headers.insert("access-control-expose-headers", HeaderValue::from_static("content-type, content-length, content-range"));
+
+    // if OPTIONS quit now
+    if method == &Method::OPTIONS {
+        return response.status(204).body(hyper::Body::empty()).ok();
+    }
 
     let mp4 = match mp4lib::lru_cache::open_mp4(strm.path()) {
         Ok(mp4) => mp4,
@@ -374,17 +388,8 @@ async fn hls(
 
     };
 
-    let resp_headers = response.headers_mut().unwrap();
     resp_headers.insert("content-type", HeaderValue::from_static(mime));
     resp_headers.typed_insert(ContentLength(body.len() as u64));
-
-    if let Some(host) = req_headers.typed_get::<Origin>() {
-        resp_headers.insert("access-control-allow-origin", HeaderValue::from_str(&host.to_string()).unwrap());
-    } else {
-        resp_headers.insert("access-control-allow-origin", HeaderValue::from_static("*"));
-    }
-    resp_headers.insert("access-control-allow-headers", HeaderValue::from_static("if-match, if-unmodified-since, if-range, range"));
-    resp_headers.insert("access-control-expose-headers", HeaderValue::from_static("content-type, content-length, content-range"));
 
     // if HEAD quit now
     if method == &Method::HEAD {
