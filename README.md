@@ -7,15 +7,12 @@ This repository contains 3 rust crates:
 A library to read, modify, and write MP4 files. It can also rewrite MP4 files
 on-the-fly for use in streaming servers.
 
-- split tracks into fragments (CMAF chunks)
-- generate media initialization section
-- generate HLS manifest
 - remap MP4 file to have MovieBox at the front
 - interleave tracks
-
-### HLS
-
-Support for building HLS manifests, and generation fragments (CMAF segments).
+- split tracks into media segments
+- generate media initialization section
+- generate HLS manifest
+- extract subtitles and rewrite from TX3G to WebVTT or SRT format.
 
 ## [`mp4cli`](mp4cli/)
 
@@ -48,7 +45,7 @@ https://your.server/path/file.mp4?track=1&track=3
 This serves `file.mp4` remapped to have the MovieBox at the start, and to only
 contain tracks `1` and `3` which are interleaved with a 500ms interval.
 
-Useful when you are building a video player that doesn't want the overhead of
+Useful when you are building a video player and you don't want the overhead of
 HLS streaming, but you want to be able to switch audio tracks, and show
 subtitles.
 
@@ -60,9 +57,9 @@ no subtitles, while if you serve a HLS playlist, you can pick and
 choose using the player's UI.
 
 ```
-https://your.server/path/file.mp4/hls.m3u8
+https://your.server/path/file.mp4/main.m3u8
 ```
-The serves a HLS playlist. In it, there references to playlists for individual
+This serves the main HLS playlist. In it, there references to playlists for individual
 video/audio/subtitle tracks. Those refer to media segments.
 
 - track playlist: `file.mp4/media.TRACK_ID.m3u8`
