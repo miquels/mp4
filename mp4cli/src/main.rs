@@ -170,7 +170,7 @@ pub struct DebugOpts {
     pub track: Option<u32>,
 
     #[structopt(short, long)]
-    /// Show the HLS master playlist.
+    /// Generate HLS playlist.
     pub hls: bool,
 
     #[structopt(short, long)]

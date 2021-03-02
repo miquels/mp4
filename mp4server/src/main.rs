@@ -323,7 +323,7 @@ async fn hls(
     static RE: Lazy<Regex> = Lazy::new(|| {
         Regex::new(r#"^(?x)
             (.*\.mp4)/(
-                master.m3u8|
+                main.m3u8|
                 media.\d+\.m3u8|
                 init\.\d+\.mp4|
                 init\.\d+\.vtt|
@@ -365,7 +365,7 @@ async fn hls(
     
     let (mime, body) = if extra.ends_with(".m3u8") {
 
-        let m3u8 = if extra == "master.m3u8" {
+        let m3u8 = if extra == "main.m3u8" {
             mp4lib::stream::hls_master(&mp4)
         } else {
             let track = match scan_fmt!(&extra, "media.{}.m3u8", u32) {
