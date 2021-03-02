@@ -7,10 +7,11 @@
 //! not valid CMAF (but will probably work with HLS and DASH).
 //!
 use std::convert::TryInto;
+use std::fs;
 use std::io;
 
 use crate::boxes::*;
-use crate::io::CountBytes;
+use crate::io::{CountBytes, DataRef};
 use crate::mp4box::{MP4Box, MP4};
 use crate::serialize::{BoxBytes, ToBytes};
 use crate::types::*;
@@ -327,7 +328,6 @@ fn default_or<A, B>(dfl: &Option<A>, val: B) -> Option<B> {
 /// the same composition time.
 pub fn movie_fragment(mp4: &MP4, seq_num: u32, source: &[FragmentSource]) -> io::Result<Vec<MP4Box>> {
     let movie = mp4.movie();
-    let data_ref = mp4.data_ref(0, 0);
     let mut mdat = MediaDataBox::default();
 
     // Create moof and push movie fragment header.
@@ -351,7 +351,7 @@ pub fn movie_fragment(mp4: &MP4, seq_num: u32, source: &[FragmentSource]) -> io:
             src.from_sample,
             src.to_sample,
             src.dst_track_id,
-            data_ref,
+            mp4.data_ref.clone(),
             &mut mdat,
         )?;
         moof.boxes.push(traf.to_mp4box());
@@ -380,19 +380,41 @@ pub fn movie_fragment(mp4: &MP4, seq_num: u32, source: &[FragmentSource]) -> io:
     Ok(boxes)
 }
 
+fn readahead(file: &fs::File, offset: u64, len: u64) {
+    use std::os::unix::io::AsRawFd;
+    unsafe {
+        libc::posix_fadvise(
+            file.as_raw_fd(),
+            offset as libc::off_t,
+            len as libc::off_t,
+            libc::POSIX_FADV_WILLNEED
+        );
+    }
+}
+
 // Build a TrackFragmentBox.
 fn track_fragment(
     track: &TrackBox,
     from: u32,
     to: u32,
     new_track_id: u32,
-    data_ref: &[u8],
+    data_ref: DataRef,
     mdat: &mut MediaDataBox,
 ) -> io::Result<TrackFragmentBox> {
+
     // Seek to 'from' and peek at the first sample.
     let mut samples = track.sample_info_iter();
     samples.seek(from)?;
-    let first_sample = samples.clone().next().ok_or(ioerr!(UnexpectedEof))?;
+    let sample_count = to - from + 1;
+    let samples: Vec<_> = samples.take(sample_count as usize).collect();
+    if samples.len() == 0 {
+        return Err(ioerr!(UnexpectedEof));
+    }
+    let first_sample = samples[0].clone();
+
+    // Readahead.
+    let end = samples[samples.len()-1].fpos;
+    readahead(data_ref.file.as_ref(), samples[0].fpos, end + 1_000_000);
 
     // Track fragment.
     let mut traf = TrackFragmentBox::default();
@@ -435,8 +457,7 @@ fn track_fragment(
         entries: ArrayUnsized::<TrackRunEntry>::new(),
     };
 
-    let sample_count = to - from + 1;
-    for sample in samples.take(sample_count as usize) {
+    for sample in &samples {
         // Add entry info
         let entry = TrackRunEntry {
             sample_duration:                default_or(&dfl.sample_duration, sample.duration),
@@ -452,7 +473,7 @@ fn track_fragment(
         // Add entry mediadata.
         let start = sample.fpos as usize;
         let end = (sample.fpos + sample.size as u64) as usize;
-        mdat.data.push(&data_ref[start..end]);
+        mdat.data.push(&data_ref.mmap[start..end]);
     }
 
     traf.boxes.push(trun.to_mp4box());

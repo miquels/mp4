@@ -131,7 +131,7 @@ impl BoxBytes for Mp4File {
 /// read-only.
 pub struct DataRef<N = (), T = u8> {
     pub(crate) mmap:  Arc<Mmap>,
-    file:             Arc<fs::File>,
+    pub(crate)file:   Arc<fs::File>,
     start:            usize,
     end:              usize,
     num_entries_type: std::marker::PhantomData<N>,
