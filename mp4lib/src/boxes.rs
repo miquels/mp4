@@ -16,6 +16,7 @@ use crate::mp4box::{BoxHeader, GenericBox};
 
 def_boxes! {
     BaseMediaInformationHeaderBox, b"gmhd";
+    BtrtBox, b"btrt";
     CleanApertureBox, b"clap";
     ExtendedLanguageBox, b"elng";
     FileTypeBox, b"ftyp";

@@ -206,6 +206,17 @@ impl Default for TrackExtendsBox {
 }
 
 def_box! {
+    BtrtBox {
+        decoding_buffer_size: u32,
+        max_bitrate: u32,
+        avg_bitrate: u32,
+    },
+    fourcc => "btrt",
+    version => [],
+    impls => [ basebox, boxinfo, debug, fromtobytes ],
+}
+
+def_box! {
     SegmentTypeBox {
         major_brand:        FourCC,
         minor_version:      u32,
