@@ -176,6 +176,16 @@ pub fn track_info(mp4: &MP4) -> Vec<TrackInfo> {
                 avc1_info.frame_rate = fr;
             }
             info.specific_info = SpecificTrackInfo::VideoTrackInfo(avc1_info);
+        } else if let Some(hevc) = first_box!(stsd.entries, HEVCSampleEntry) {
+            let mut hevc_info = hevc.track_info();
+            if hevc_info.frame_rate == 0f64 {
+                let sample_count = stbl.sample_size().count;
+                let timescale = std::cmp::max(1000, mdhd.timescale) as f64;
+                let fr = sample_count as f64 / (mdhd.duration.0 as f64 / timescale);
+                log::debug!("track::track_info: hvcc.framerate == 0, estimate: {}", fr);
+                hevc_info.frame_rate = fr;
+            }
+            info.specific_info = SpecificTrackInfo::VideoTrackInfo(hevc_info);
         } else if let Some(ac3) = first_box!(stsd.entries, Ac3SampleEntry) {
             info.specific_info = SpecificTrackInfo::AudioTrackInfo(ac3.track_info());
         } else if let Some(aac) = first_box!(stsd.entries, AacSampleEntry) {

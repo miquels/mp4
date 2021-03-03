@@ -72,6 +72,9 @@ def_boxes! {
     Skip, b"skip";
     Wide, b"wide";
 
+    HEVCSampleEntry, b"hvc1" => hvc1;
+    HEVCConfigurationBox, b"hvcC";
+
     ProgressiveDownloadInfoBox, b"pdin" => pdin;
 
     SampleDescriptionBox, b"stsd" => stsd;

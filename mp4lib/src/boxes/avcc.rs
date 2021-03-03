@@ -108,18 +108,19 @@ impl std::fmt::Display for AvcDecoderConfigurationRecord {
 //
 // We only decode the SequenceParamerteSets, for now.
 //
-#[derive(Debug)]
-struct ParameterSet<'a> {
+#[derive(Debug, Default)]
+pub(crate) struct ParameterSet<'a> {
     sps: Vec<&'a [u8]>,
     _pps: Vec<&'a [u8]>,
     _length_size_minus_one: u8,
+    h265: bool,
 }
 
 impl<'a> ParameterSet<'a> {
-    fn parse(data: &'a [u8]) -> io::Result<ParameterSet<'a>> {
+    pub(crate) fn parse(data: &'a [u8]) -> io::Result<ParameterSet<'a>> {
 
         if data.len() < 2 {
-            return Err(ioerr!(UnexpectedEof, "ParameterSet::parse: EOF"));
+            return Err(ioerr!(UnexpectedEof, "ParameterSet::parse: EOF (1)"));
         }
 
         let nalu_length_size_minus_one = data[0] & 0b00000011;
@@ -129,12 +130,12 @@ impl<'a> ParameterSet<'a> {
         let mut sps_items = Vec::new();
         for _ in 0 .. number_of_sps_nalus {
             if idx + 2 >= data.len() {
-                return Err(ioerr!(UnexpectedEof, "ParameterSet::parse: EOF"));
+                return Err(ioerr!(UnexpectedEof, "ParameterSet::parse: EOF (2)"));
             }
             let sps_length = u16::from_be_bytes([data[idx], data[idx + 1]]) as usize;
             idx += 2;
             if idx + sps_length > data.len() {
-                return Err(ioerr!(UnexpectedEof, "ParameterSet::parse: EOF"));
+                return Err(ioerr!(UnexpectedEof, "ParameterSet::parse: EOF (3)"));
             }
             let sps = &data[idx .. idx + sps_length];
             sps_items.push(sps);
@@ -142,7 +143,7 @@ impl<'a> ParameterSet<'a> {
         }
 
         if idx >= data.len() {
-            return Err(ioerr!(UnexpectedEof, "ParameterSet::parse: EOF"));
+            return Err(ioerr!(UnexpectedEof, "ParameterSet::parse: EOF (4)"));
         }
         let number_of_pps_nalus = data[idx];
         idx += 1;
@@ -150,12 +151,12 @@ impl<'a> ParameterSet<'a> {
         let mut pps_items = Vec::new();
         for _ in 0 .. number_of_pps_nalus {
             if idx + 2 >= data.len() {
-                return Err(ioerr!(UnexpectedEof, "ParameterSet::parse: EOF"));
+                return Err(ioerr!(UnexpectedEof, "ParameterSet::parse: EOF (5)"));
             }
             let pps_length = u16::from_be_bytes([data[idx], data[idx + 1]]) as usize;
             idx += 2;
             if idx + pps_length > data.len() {
-                return Err(ioerr!(UnexpectedEof, "ParameterSet::parse: EOF"));
+                return Err(ioerr!(UnexpectedEof, "ParameterSet::parse: EOF (6)"));
             }
             let pps = &data[idx .. idx + pps_length];
             pps_items.push(pps);
@@ -166,22 +167,70 @@ impl<'a> ParameterSet<'a> {
             sps: sps_items,
             _pps: pps_items,
             _length_size_minus_one: nalu_length_size_minus_one,
+            h265: false,
         })
     }
 
+    // This works, but the SPS in h.264 is not the same as the SPS in h.265.
+    // So we can't decode the SPS yet.
+    #[allow(dead_code)]
+    pub(crate) fn parse_hevc(data: &'a [u8]) -> io::Result<ParameterSet<'a>> {
+
+        if data.len() < 2 {
+            return Err(ioerr!(UnexpectedEof, "ParameterSet::parse_hevc: EOF (1)"));
+        }
+
+        let mut set = ParameterSet::default();
+        set.h265 = true;
+        let num_arrays = data[0];
+        let mut idx: usize = 1;
+
+        for _ in 0 .. num_arrays {
+            if idx + 3 >= data.len() {
+                return Err(ioerr!(UnexpectedEof, "ParameterSet::parse_hevc: EOF (2)"));
+            }
+            let nalu_type = data[idx] & 0x3f;
+            let num_nalus = u16::from_be_bytes([data[idx + 1], data[idx + 2]]) as usize;
+            idx += 3;
+            for _ in 0 .. num_nalus {
+                if idx + 2 >= data.len() {
+                    return Err(ioerr!(UnexpectedEof, "ParameterSet::parse_hevc: EOF (3)"));
+                }
+                let nalu_len = u16::from_be_bytes([data[idx], data[idx + 1]]) as usize;
+                idx += 2;
+                if idx + nalu_len > data.len() {
+                    return Err(ioerr!(UnexpectedEof, "ParameterSet::parse_hevc: EOF (4)"));
+                }
+                let nalu = &data[idx .. idx + nalu_len];
+                match nalu_type {
+                    33 => set.sps.push(nalu),
+                    34 => set._pps.push(nalu),
+                    _ => {},
+                }
+                idx += nalu_len;
+            }
+        }
+
+        Ok(set)
+    }
+
     // Decode the SequenceParametersSets.
-    fn sequence_parameters_sets(&self) -> io::Result<Vec<SeqParameterSet>> {
+    pub(crate) fn sequence_parameters_sets(&self) -> io::Result<Vec<SeqParameterSet>> {
         let mut v = Vec::new();
         for sps in &self.sps {
             if sps.len() < 4 {
                 continue;
             }
-            let nal_unit_type = sps[0] & 0x1f;
-            if nal_unit_type != 7 {
-                // Not a SeqParameterSet NAL.
-                continue;
+            let mut idx = 0;
+            if !self.h265 {
+                let nal_unit_type = sps[0] & 0x1f;
+                if nal_unit_type != 7 {
+                    // Not a SeqParameterSet NAL.
+                    continue;
+                }
+                idx += 1;
             }
-            let mut reader = BitReader::new(&sps[1..]);
+            let mut reader = BitReader::new(&sps[idx..]);
             let parsed = SeqParameterSet::read(&mut reader)?;
             v.push(parsed);
         }
