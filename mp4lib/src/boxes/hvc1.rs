@@ -5,6 +5,7 @@
 
 use std::io;
 
+use crate::bitreader::BitReader;
 use crate::boxes::prelude::*;
 use crate::track::VideoTrackInfo;
 
@@ -204,6 +205,95 @@ impl HEVCDecoderConfigurationRecord {
             15343|15344|15345 => 59.94,
             other => (other as f64) / 256.0,
         }
+    }
+}
+
+// The hvcC 'data' member consists of arrays of ParameterSets.
+//
+// The timing information we need to get an accurate framerate
+// is hidden either in SPS:VUI (Sequence ParameterSet) or in
+// VPS (Video Parameter Set).
+//
+#[derive(Debug, Default)]
+pub(crate) struct ParameterSet<'a> {
+    vps: Vec<&'a [u8]>,
+    sps: Vec<&'a [u8]>,
+}
+
+impl<'a> ParameterSet<'a> {
+    #[allow(dead_code)]
+    pub(crate) fn parse(data: &'a [u8]) -> io::Result<ParameterSet<'a>> {
+
+        if data.len() < 2 {
+            return Err(ioerr!(UnexpectedEof, "ParameterSet::parse_hevc: EOF (1)"));
+        }
+
+        let mut set = ParameterSet::default();
+        let num_arrays = data[0];
+        let mut idx: usize = 1;
+
+        for _ in 0 .. num_arrays {
+            if idx + 3 >= data.len() {
+                return Err(ioerr!(UnexpectedEof, "ParameterSet::parse_hevc: EOF (2)"));
+            }
+            let nalu_type = data[idx] & 0x3f;
+            let num_nalus = u16::from_be_bytes([data[idx + 1], data[idx + 2]]) as usize;
+            idx += 3;
+            for _ in 0 .. num_nalus {
+                if idx + 2 >= data.len() {
+                    return Err(ioerr!(UnexpectedEof, "ParameterSet::parse_hevc: EOF (3)"));
+                }
+                let nalu_len = u16::from_be_bytes([data[idx], data[idx + 1]]) as usize;
+                idx += 2;
+                if idx + nalu_len > data.len() {
+                    return Err(ioerr!(UnexpectedEof, "ParameterSet::parse_hevc: EOF (4)"));
+                }
+                // FIXME: unescape, so 00 00 03 01 -> 00 00 01
+                let nalu = &data[idx .. idx + nalu_len];
+                match nalu_type {
+                    32 => set.vps.push(nalu),
+                    33 => set.sps.push(nalu),
+                    _ => {},
+                }
+                idx += nalu_len;
+            }
+        }
+
+        Ok(set)
+    }
+
+    // Decode the SequenceParametersSets.
+    #[allow(dead_code)]
+    pub(crate) fn sequence_parameters_sets(&self) -> io::Result<Vec<SeqParameterSet>> {
+        let mut v = Vec::new();
+        for sps in &self.sps {
+            if sps.len() < 4 {
+                continue;
+            }
+            // H.265 NALU header:
+            //
+            // int(1) forbidden_zero_bits (always 0)
+            // int(6) nal_unit_type
+            // int(6) nuh_reserved_zero_6bits
+            // int(3) nuh_temporal_id_plus1
+            //
+            // let's just skip it.
+            let mut reader = BitReader::new(&sps[2..]);
+            let parsed = SeqParameterSet::read(&mut reader)?;
+            v.push(parsed);
+        }
+        Ok(v)
+    }
+}
+
+/// H.265 SPS.
+pub struct SeqParameterSet;
+
+impl SeqParameterSet {
+    // TODO: implement h.265 VPS / SPS parser.
+    #[allow(dead_code)]
+    pub(crate) fn read(_reader: &mut BitReader) -> io::Result<SeqParameterSet> {
+        unimplemented!()
     }
 }
 

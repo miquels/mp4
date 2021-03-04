@@ -113,7 +113,6 @@ pub(crate) struct ParameterSet<'a> {
     sps: Vec<&'a [u8]>,
     _pps: Vec<&'a [u8]>,
     _length_size_minus_one: u8,
-    h265: bool,
 }
 
 impl<'a> ParameterSet<'a> {
@@ -167,51 +166,7 @@ impl<'a> ParameterSet<'a> {
             sps: sps_items,
             _pps: pps_items,
             _length_size_minus_one: nalu_length_size_minus_one,
-            h265: false,
         })
-    }
-
-    // This works, but the SPS in h.264 is not the same as the SPS in h.265.
-    // So we can't decode the SPS yet.
-    #[allow(dead_code)]
-    pub(crate) fn parse_hevc(data: &'a [u8]) -> io::Result<ParameterSet<'a>> {
-
-        if data.len() < 2 {
-            return Err(ioerr!(UnexpectedEof, "ParameterSet::parse_hevc: EOF (1)"));
-        }
-
-        let mut set = ParameterSet::default();
-        set.h265 = true;
-        let num_arrays = data[0];
-        let mut idx: usize = 1;
-
-        for _ in 0 .. num_arrays {
-            if idx + 3 >= data.len() {
-                return Err(ioerr!(UnexpectedEof, "ParameterSet::parse_hevc: EOF (2)"));
-            }
-            let nalu_type = data[idx] & 0x3f;
-            let num_nalus = u16::from_be_bytes([data[idx + 1], data[idx + 2]]) as usize;
-            idx += 3;
-            for _ in 0 .. num_nalus {
-                if idx + 2 >= data.len() {
-                    return Err(ioerr!(UnexpectedEof, "ParameterSet::parse_hevc: EOF (3)"));
-                }
-                let nalu_len = u16::from_be_bytes([data[idx], data[idx + 1]]) as usize;
-                idx += 2;
-                if idx + nalu_len > data.len() {
-                    return Err(ioerr!(UnexpectedEof, "ParameterSet::parse_hevc: EOF (4)"));
-                }
-                let nalu = &data[idx .. idx + nalu_len];
-                match nalu_type {
-                    33 => set.sps.push(nalu),
-                    34 => set._pps.push(nalu),
-                    _ => {},
-                }
-                idx += nalu_len;
-            }
-        }
-
-        Ok(set)
     }
 
     // Decode the SequenceParametersSets.
@@ -222,14 +177,13 @@ impl<'a> ParameterSet<'a> {
                 continue;
             }
             let mut idx = 0;
-            if !self.h265 {
-                let nal_unit_type = sps[0] & 0x1f;
-                if nal_unit_type != 7 {
-                    // Not a SeqParameterSet NAL.
-                    continue;
-                }
-                idx += 1;
+            let nal_unit_type = sps[0] & 0x1f;
+            if nal_unit_type != 7 {
+                // Not a SeqParameterSet NAL.
+                continue;
             }
+            idx += 1;
+            // FIXME: unescape, so 00 00 03 01 -> 00 00 01
             let mut reader = BitReader::new(&sps[idx..]);
             let parsed = SeqParameterSet::read(&mut reader)?;
             v.push(parsed);
