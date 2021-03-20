@@ -61,7 +61,7 @@ pub fn media_init_section(mp4: &MP4, tracks: &[u32]) -> MP4 {
                     continue;
                 }
                 new_track_id += 1;
-                let track_box = fmp4_track(track, new_track_id);
+                let track_box = fmp4_track(movie, track, new_track_id);
                 movie_boxes.push(MP4Box::TrackBox(track_box));
                 let trex_box = track_extends(track, new_track_id);
                 mvex_boxes.push(MP4Box::TrackExtendsBox(trex_box));
@@ -110,7 +110,7 @@ fn track_extends(trak: &TrackBox, track_id: u32) -> TrackExtendsBox {
 }
 
 // Build a new TrackBox.
-fn fmp4_track(trak: &TrackBox, track_id: u32) -> TrackBox {
+fn fmp4_track(movie: &MovieBox, trak: &TrackBox, track_id: u32) -> TrackBox {
     let mut boxes = Vec::new();
 
     // add TrackHeaderBox.
@@ -223,7 +223,9 @@ fn fmp4_track(trak: &TrackBox, track_id: u32) -> TrackBox {
     // And add media to the track.
     boxes.push(MP4Box::MediaBox(MediaBox { boxes: media_boxes }));
 
-    TrackBox { boxes }
+    let movie_timescale = movie.movie_header().timescale;
+
+    TrackBox { movie_timescale, boxes }
 }
 
 // Some values are constant for the entire trackfragment, or even the

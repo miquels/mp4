@@ -11,7 +11,7 @@ def_box! {
     },
     fourcc => "moov",
     version => [],
-    impls => [ basebox, boxinfo, debug, fromtobytes ],
+    impls => [ basebox, boxinfo, debug ],
 }
 
 impl MovieBox {
@@ -108,3 +108,27 @@ impl MovieBox {
     }
 }
 
+impl FromBytes for MovieBox {
+    fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<MovieBox> {
+        let mut reader = BoxReader::new(stream)?;
+        let mut boxes = Vec::<MP4Box>::from_bytes(&mut reader)?;
+        if let Some(movie_header) = first_box!(&boxes, MovieHeaderBox) {
+            let timescale = movie_header.timescale;
+            for trak in iter_box_mut!(&mut boxes, TrackBox) {
+                trak.movie_timescale = timescale;
+            }
+        }
+        Ok(MovieBox {
+            boxes,
+        })
+    }
+    fn min_size() -> usize { 8 }
+}
+
+impl ToBytes for MovieBox {
+    fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
+        let mut writer = BoxWriter::new(stream, self)?;
+        self.boxes.to_bytes(&mut writer)?;
+        writer.finalize()
+    }
+}
