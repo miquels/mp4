@@ -1,10 +1,11 @@
 //! On the fly HLS / DASH packaging.
 //!
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::cmp;
 use std::fmt::Display;
 use std::fmt::Write;
 use std::io;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,7 +19,7 @@ use crate::mp4box::MP4;
 use crate::segment::Segment;
 use crate::serialize::ToBytes;
 use crate::subtitle::Format;
-use crate::types::{FourCC, IsoLanguageCode};
+use crate::types::FourCC;
 use crate::track::SpecificTrackInfo;
 
 struct ExtXMedia {
@@ -89,33 +90,62 @@ impl Display for ExtXStreamInf {
     }
 }
 
-fn lang(lang: IsoLanguageCode) -> (Option<&'static str>, &'static str) {
-    match lang.to_string().as_str() {
-        "eng" => (Some("en"), "English"),
-        "dut" => (Some("nl"), "Nederlands"),
-        "nld" => (Some("nl"), "Nederlands"),
-        "fra" => (Some("fr"), "Français"),
-        "fre" => (Some("fr"), "Français"),
-        "ger" => (Some("de"), "German"),
-        "spa" => (Some("es"), "Español"),
-        "afr" => (Some("za"), "Afrikaans"),
-        "zaf" => (Some("za"), "Afrikaans"),
-        other => {
-            if let Some(lang) = isolang::Language::from_639_3(other) {
-                if let Some(short) = lang.to_639_1() {
-                    (Some(short), lang.to_name())
-                } else {
-                    (None, "Und")
-                }
-            } else {
-                (None, "Und")
-            }
-        }
+fn lang(lang: &str) -> (Option<&'static str>, &'static str) {
+
+    // shortcut for known language tags, with localized name.
+    match lang {
+        "en"|"eng"       => return (Some("en"), "English"),
+        "nl"|"dut"|"nld" => return (Some("nl"), "Nederlands"),
+        "fr"|"fra"|"fre" => return (Some("fr"), "Français"),
+        "de"|"ger"       => return (Some("de"), "German"),
+        "es"|"spa"       => return (Some("es"), "Español"),
+        "za"|"afr"|"zaf" => return (Some("za"), "Afrikaans"),
+        _ => {},
+    }
+
+    use isolang::Language;
+
+    // first look up 2-letter or 3-letter language code.
+    let language = match lang.len() {
+        2 => Language::from_639_1(lang),
+        3 => Language::from_639_3(lang),
+        _ => return (None, "Undetermined"),
+    };
+
+    // Did we succeed?
+    let language = match language {
+        Some(l) => l,
+        None => return (None, "Undetermined"),
+    };
+
+    // use 2-letter code if it exists, otherwise 3-letter code.
+    let code = language.to_639_1().unwrap_or(language.to_639_3());
+
+    (Some(code), language.to_name())
+}
+
+fn lang_from_path(path: &str) -> &str {
+    let fields: Vec<_> = path.split('.').collect();
+    if fields.len() < 3 {
+        return "und";
+    }
+    let mut idx = fields.len() - 2;
+    if fields[idx] == "forced" || fields[idx] == "sdh" {
+        idx -= 1;
+    }
+    if idx > 0 {
+        fields[idx]
+    } else {
+        "und"
     }
 }
 
 /// Generate a HLS playlist.
-pub fn hls_master(mp4: &MP4) -> String {
+///
+/// You can pass in external subtitles using the `subs` argument.
+/// The subtitle path needs to be relative, just a filename, and
+/// the file needs to be in the same subdir as the mp4 file.
+pub fn hls_master(mp4: &MP4, subs: &[ &str ]) -> String {
 
     let mut m = String::new();
     m += "#EXTM3U\n";
@@ -145,7 +175,7 @@ pub fn hls_master(mp4: &MP4) -> String {
             audio_codecs.insert(info.codec_id.clone(), avg_bw);
         }
 
-        let (lang, name) = lang(track.language);
+        let (lang, name) = lang(&track.language.to_string());
         let mut name = name.to_string();
         if info.channel_count >= 3 {
             name += &format!(" ({}.{})", info.channel_count, info.lfe_channel as u8);
@@ -166,18 +196,54 @@ pub fn hls_master(mp4: &MP4) -> String {
     }
 
     // Subtitle tracks.
-    let mut has_subs = false;
+    let mut sublang = HashSet::new();
+
+    for sub in subs {
+        // look up language and language code.
+        let language = lang_from_path(sub);
+        let (lang, name) = lang(language);
+
+        // no duplicates.
+        if sublang.contains(name) {
+            continue;
+        }
+
+        if sublang.is_empty() {
+            m += "\n# SUBTITLES\n";
+        }
+        sublang.insert(name.to_string());
+
+        let sub = ExtXMedia {
+            type_: "SUBTITLES",
+            group_id: "subs".to_string(),
+            language: lang,
+            channels: None,
+            name: name.to_string(),
+            auto_select: true,
+            default: false,
+            uri: format!("/e/{}/playlist.m3u8", sub),
+        };
+
+        let _ = write!(m, "{}", sub);
+    }
+
     for track in crate::track::track_info(mp4).iter() {
         match &track.specific_info {
             SpecificTrackInfo::SubtitleTrackInfo(_) => {},
             _ => continue,
         }
-        if !has_subs {
-            m += "\n# SUBTITLES\n";
-            has_subs = true;
+
+        let (lang, name) = lang(&track.language.to_string());
+
+        // no duplicates.
+        if sublang.contains(name) {
+            continue;
         }
 
-        let (lang, name) = lang(track.language);
+        if sublang.is_empty() {
+            m += "\n# SUBTITLES\n";
+        }
+        sublang.insert(name.to_string());
 
         let sub = ExtXMedia {
             type_: "SUBTITLES",
@@ -208,7 +274,7 @@ pub fn hls_master(mp4: &MP4) -> String {
             resolution: (info.width, info.height),
             frame_rate: info.frame_rate,
             uri: format!("media.{}.m3u8", track.id),
-            subtitles: has_subs,
+            subtitles: sublang.len() > 0,
             .. ExtXStreamInf::default()
         };
         for (audio_codec, audio_bw) in audio_codecs.iter() {
@@ -311,10 +377,12 @@ pub fn hls_track(mp4: &MP4, track_id: u32) -> io::Result<String> {
 /// - a/c.TRACK_ID.SEQUENCE.FROM_SAMPLE.TO_SAMPLE.m4a => audio moof + mdat
 /// - v/c.TRACK_ID.SEQUENCE.FROM_SAMPLE.TO_SAMPLE.mp4 => video moof + mdat
 /// - s/c.TRACK_ID.SEQUENCE.FROM_SAMPLE.TO_SAMPLE.vtt => webvtt fragment
+/// - e/PATH/TO/EXTERNAL/SUBTITLES/FILE/format.EXT
 ///
 /// Returns (mime-type, data).
 pub fn fragment_from_uri(mp4: &MP4, url_tail: &str) -> io::Result<(&'static str, Vec<u8>)> {
 
+    // initialization section.
     if let Ok((track_id, ext)) = scan_fmt!(url_tail, "init.{}.{}{e}", u32, String) {
         match ext.as_str() {
             "mp4" => {
@@ -329,6 +397,29 @@ pub fn fragment_from_uri(mp4: &MP4, url_tail: &str) -> io::Result<(&'static str,
             },
             _ => return Err(ioerr!(InvalidData, "Bad request")),
         }
+    }
+
+    // external file.
+    if url_tail.starts_with("e/") {
+
+        // if url_tail ends in /format.VTT|SRT|..>, then strip it off and
+        // pass that as the format. Otherwise, pass url_tail as the format.
+        // subtitles::external only looks at the extension anyway.
+        let mut filename = &url_tail[1..];
+        let format = filename.rfind("/format.").map(|idx| {
+            let fmt = &filename[idx+1..];
+            filename = &filename[..idx];
+            fmt
+        }).unwrap_or(filename);
+
+        // Find the dirname of the mp4 file and add the subtitle filename.
+        let path_ref = mp4.input_file.as_ref();
+        let mut path = match path_ref.and_then(|f| Path::new(f).parent()) {
+            Some(path) => path.to_path_buf(),
+            None => return Err(ioerr!(NotFound, "no base directory for {}", filename)),
+        };
+        path.push(filename);
+        return crate::subtitle::external(path.to_str().unwrap(), format);
     }
 
     match scan_fmt!(url_tail, "{[vas]}/c.{}.{}.{}-{}.", char, u32, u32, u32, u32) {

@@ -1,8 +1,11 @@
 //! Subtitle handling.
 //!
-use std::io;
-use std::io::Write;
+use std::fs;
+use std::io::{self, BufRead, Read, Seek, Write};
+use std::mem;
 use std::str::FromStr;
+
+use scan_fmt::scan_fmt;
 
 use crate::boxes::sbtl::Tx3GTextSample;
 use crate::boxes::*;
@@ -23,6 +26,10 @@ pub enum Format {
 impl FromStr for Format {
     type Err = io::Error;
     fn from_str(format: &str) -> Result<Self, Self::Err> {
+        let mut format = format;
+        if let Some(idx) = format.rfind(".") {
+            format = &format[idx + 1 ..];
+        }
         match format {
             "vtt" => Ok(Format::Vtt),
             "srt" => Ok(Format::Srt),
@@ -221,3 +228,298 @@ pub fn fragment(mp4: &MP4, format: Format, frag: &FragmentSource) -> io::Result<
     Ok(buffer)
 }
 
+/// Read an external subtitle file.
+///
+/// Input and output formats can be webvtt and srt, format will be
+/// converted if needed. Output character set is always utf-8.
+pub fn external(path: &str, to_format: &str) -> io::Result<(&'static str, Vec<u8>)> {
+
+    // see if input and output formats are supported.
+    let infmt = Format::from_str(path)?;
+    let outfmt = Format::from_str(to_format)?;
+    let (eol, mime) = match outfmt {
+        Format::Srt => ("\r\n", "text/plain; charset=utf-8"),
+        Format::Vtt => ("\n", "text/vtt; charset=utf-8"),
+        other => return Err(ioerr!(InvalidData, "unsupported input format {:?}", other)),
+    };
+
+    // open subtitle file.
+    let mut stf = SubtitleFile::open(path, infmt)?;
+
+    // shortcut for vtt -> vtt.
+    if infmt == Format::Vtt && outfmt == Format::Vtt {
+        let mut buf = Vec::new();
+        let mut rdr = stf.file.into_inner();
+        rdr.read_to_end(&mut buf)?;
+        return Ok((mime, buf))
+    }
+
+    let mut buf = String::new();
+    if outfmt == Format::Vtt {
+        buf.push_str("WEBVTT\n\n");
+    }
+
+    let mut seq = 1;
+    while let Some(sample) = stf.next() {
+
+        // sequence and timestamps.
+        use std::fmt::Write;
+        let _ = write!(buf, "{}.", seq);
+        seq += 1;
+        format_time(&mut buf, outfmt, sample.start);
+        buf.push_str(" --> ");
+        format_time(&mut buf, outfmt, sample.start + sample.duration);
+        buf.push_str(eol);
+
+        // text.
+        if outfmt == Format::Srt {
+            for c in sample.text.chars() {
+                if c == '\n' {
+                    buf.push_str("\r\n");
+                } else {
+                    buf.push(c);
+                }
+            }
+        } else {
+            buf.push_str(&sample.text);
+        }
+        if !buf.ends_with(eol) {
+            buf.push_str(eol);
+        }
+        buf.push_str(eol);
+    }
+
+    Ok((mime, buf.into_bytes()))
+}
+
+struct SubtitleSample {
+    start:    u32,
+    duration: u32,
+    text:     String,
+}
+
+struct SubtitleFile {
+    file:   io::BufReader<fs::File>,
+    buf:    Vec<u8>,
+    is_utf8:    bool,
+}
+
+impl SubtitleFile {
+    fn open(path: &str, format: Format) -> io::Result<SubtitleFile> {
+        let mut file = fs::File::open(path)?;
+        match format {
+            Format::Vtt|Format::Srt => {},
+            other => return Err(ioerr!(InvalidData, "unsupported input format {:?}", other)),
+        }
+
+        // skip UTF-8 BOM.
+        let mut buf = [0u8; 3];
+        let mut is_bom = true;
+        if let Ok(_) = file.read_exact(&mut buf) {
+            if &buf[..] == &[ 0xef_u8, 0xbb, 0xbf ] {
+                is_bom = true;
+            }
+        }
+        if !is_bom {
+            file.seek(io::SeekFrom::Start(0))?;
+        }
+
+        Ok(SubtitleFile {
+            file:   io::BufReader::new(file),
+            buf:    Vec::new(),
+            is_utf8: true,
+        })
+    }
+
+    fn read_line(&mut self, line: &mut String) -> io::Result<usize> {
+
+        let start_len = line.len();
+
+        // read next line and change CRLF -> LF.
+        // we re-use the read buffer.
+        let mut buf = mem::replace(&mut self.buf, Vec::new());
+        buf.truncate(0);
+        let len = self.file.read_until(b'\n', &mut buf)?;
+        if len == 0 {
+            return Ok(0);
+        }
+        if buf.ends_with(b"\r\n") {
+            let len = buf.len();
+            buf.truncate(len - 1);
+            buf[len - 2] = b'\n';
+        }
+        mem::swap(&mut buf, &mut self.buf);
+
+        // Convert to utf-8.
+        if self.is_utf8 {
+            match std::str::from_utf8(&self.buf) {
+                Ok(l) => line.push_str(l),
+                Err(_) => self.is_utf8 = false,
+            }
+        }
+        if !self.is_utf8 {
+            // It's not utf-8, so pretend it's latin-1.
+            self.buf.iter().for_each(|&b| line.push(b as char));
+        }
+
+        Ok(line.len() - start_len)
+    }
+
+    fn next(&mut self) -> Option<SubtitleSample> {
+        let mut line = String::new();
+
+        loop {
+            // Find the first line with ts --> ts.
+            let (start, duration) = loop {
+                line.truncate(0);
+                let sz = self.read_line(&mut line).ok()?;
+                if sz == 0 {
+                    return None;
+                }
+                if let Some(ts) = parse_times(&line) {
+                    break ts;
+                }
+            };
+            if duration == 0 {
+                continue;
+            }
+
+            // Now read the next lines until we see an empty line.
+            line.truncate(0);
+            loop {
+                let start_len = line.len();
+                let sz = self.read_line(&mut line).ok()?;
+                if sz == 0 {
+                    break;
+                }
+                if &line[start_len..] == "\n" {
+                    line.truncate(start_len);
+                    break;
+                }
+            }
+
+            // return cue if it had content, otherwise loop again.
+            if line.len() > 0 {
+                let text = remove_unsupported_tags(line);
+                return Some(SubtitleSample {
+                    start,
+                    duration,
+                    text,
+                });
+            }
+        }
+    }
+}
+
+// parse 04:02.500 --> 04:05.000
+fn parse_times(line: &str) -> Option<(u32, u32)> {
+    let mut fields = line.split_whitespace();
+    let f1 = fields.next()?;
+    let f2 = fields.next()?;
+    let f3 = fields.next()?;
+    if f2 != "-->" {
+        return None;
+    }
+    let t1 = parse_time(f1)?;
+    let t2 = std::cmp::max(parse_time(f3)?, t1);
+    Some((t1, t2 - t1))
+}
+
+// parse 04:02.500
+fn parse_time(time: &str) -> Option<u32> {
+
+    // Split in [hh:]mm:ss and subseconds.
+    let mut fields = if time.contains(".") {
+        time.split('.')
+    } else {
+        time.split(',')
+    };
+    let time = fields.next()?;
+    let ms = fields.next().map(|f| f.parse::<u32>().ok()).flatten()?;
+
+    // hh:mm::ss
+    if let Ok((h, m, s)) = scan_fmt!(time, "{}:{}:{}{e}", u32, u32, u32) {
+        if h > 24 || m > 60 || s > 60 {
+            return None;
+        } else {
+            return Some(1000 * (h * 24 * 60 + m * 60 + s) + ms);
+        }
+    }
+
+    // mm:ss
+    if let Ok((m, s)) = scan_fmt!(time, "{}:{}{e}", u32, u32) {
+        if m > 60 || s > 60 {
+            return None;
+        } else {
+            return Some(1000 * (m * 60 + s) + ms);
+        }
+    }
+
+    None
+}
+
+fn format_time(line: &mut String, format: Format, mut time: u32) {
+    use std::fmt::Write;
+    let ms = time % 1000;
+    time /= 1000;
+    let s = time % 60;
+    time /= 60;
+    let m = time % 60;
+    time /= 60;
+    let h = time;
+    let sep = if format == Format::Srt { ',' } else { '.' };
+    let _ = write!(line, "{:02}:{:02}:{:02}{}{:03}", h, m, s, sep, ms);
+}
+
+// remove all tags except <i>, </i>, <b>, </b>, <u>, </u>.
+fn remove_unsupported_tags(line: impl Into<String>) -> String {
+    let line = line.into();
+    if !line.contains("<") && !line.contains(">") {
+        return line;
+    }
+    let mut r = String::new();
+    let mut iter = line.chars();
+    while let Some(c) = iter.next() {
+        if c == '<' {
+            let tag = parse_tag(&mut iter);
+            match tag.as_str() {
+                "i"|"/i"|"b"|"/b"|"u"|"/u" => {
+                    r.push('<');
+                    r.push_str(&tag);
+                    r.push('>');
+                },
+                _ => {},
+            }
+            continue;
+        }
+        r.push(c);
+    }
+    r
+}
+
+fn parse_tag(iter: &mut std::str::Chars) -> String {
+    let mut r = String::new();
+    while let Some(c) = iter.next() {
+        if c == '>' {
+            if let Some(idx) = r.find('.') {
+                r.truncate(idx);
+            }
+            if let Some(idx) = r.find(|c: char| c.is_whitespace()) {
+                r.truncate(idx);
+            }
+            return r;
+        }
+        if c == '\'' || c == '"' {
+            r.push(c);
+            while let Some(d) = iter.next() {
+                r.push(d);
+                if d == c {
+                    break;
+                }
+            }
+            continue;
+        }
+        r.push(c);
+    }
+    r
+}
