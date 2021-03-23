@@ -134,6 +134,16 @@ impl Mp4Stream {
         format!("\"{:08x}.{:08x}.{}\"", secs, self.inode, self.size)
     }
 
+    #[doc(hidden)]
+    pub fn inode(&self) -> u64 {
+        self.inode
+    }
+
+    #[doc(hidden)]
+    pub fn file(&self) -> &fs::File {
+        &self.file
+    }
+
     /// Read data and advance file position.
     pub fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let n = self.read_at(buf, self.pos)?;

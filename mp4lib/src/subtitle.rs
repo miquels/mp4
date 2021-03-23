@@ -264,7 +264,7 @@ pub fn external(path: &str, to_format: &str) -> io::Result<(&'static str, Vec<u8
 
         // sequence and timestamps.
         use std::fmt::Write;
-        let _ = write!(buf, "{}.", seq);
+        let _ = write!(buf, "{}{}", seq, eol);
         seq += 1;
         format_time(&mut buf, outfmt, sample.start);
         buf.push_str(" --> ");
@@ -290,6 +290,16 @@ pub fn external(path: &str, to_format: &str) -> io::Result<(&'static str, Vec<u8
     }
 
     Ok((mime, buf.into_bytes()))
+}
+
+pub fn duration(fspath: &str) -> io::Result<f64> {
+    let format = Format::from_str(fspath).map_err(|e| ioerr!(InvalidData, "{}: {}", fspath, e))?;
+    let mut stf = SubtitleFile::open(fspath, format)?;
+    let mut duration = 0;
+    while let Some(sample) = stf.next() {
+        duration = std::cmp::max(duration, sample.start + sample.duration);
+    }
+    Ok(duration as f64 / 1000_f64)
 }
 
 struct SubtitleSample {
@@ -442,7 +452,7 @@ fn parse_time(time: &str) -> Option<u32> {
         if h > 24 || m > 60 || s > 60 {
             return None;
         } else {
-            return Some(1000 * (h * 24 * 60 + m * 60 + s) + ms);
+            return Some(1000 * (h * 3600 + m * 60 + s) + ms);
         }
     }
 

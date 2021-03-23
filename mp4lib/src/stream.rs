@@ -145,7 +145,7 @@ fn lang_from_path(path: &str) -> &str {
 /// You can pass in external subtitles using the `subs` argument.
 /// The subtitle path needs to be relative, just a filename, and
 /// the file needs to be in the same subdir as the mp4 file.
-pub fn hls_master(mp4: &MP4, subs: &[ &str ]) -> String {
+pub fn hls_master(mp4: &MP4, subs: Option<&Vec<String>>) -> String {
 
     let mut m = String::new();
     m += "#EXTM3U\n";
@@ -198,33 +198,36 @@ pub fn hls_master(mp4: &MP4, subs: &[ &str ]) -> String {
     // Subtitle tracks.
     let mut sublang = HashSet::new();
 
-    for sub in subs {
-        // look up language and language code.
-        let language = lang_from_path(sub);
-        let (lang, name) = lang(language);
+    if let Some(subs) = subs {
+        for sub in subs {
+            // look up language and language code.
+            let language = lang_from_path(sub);
+            let (lang, name) = lang(language);
 
-        // no duplicates.
-        if sublang.contains(name) {
-            continue;
+            // no duplicates.
+            if sublang.contains(name) {
+                continue;
+            }
+
+            if sublang.is_empty() {
+                m += "\n# SUBTITLES\n";
+            }
+            sublang.insert(name.to_string());
+
+            let dotdot = if sub.starts_with("/") { "" } else { "../" };
+            let sub = ExtXMedia {
+                type_: "SUBTITLES",
+                group_id: "subs".to_string(),
+                language: lang,
+                channels: None,
+                name: name.to_string(),
+                auto_select: true,
+                default: false,
+                uri: format!("{}{}:media.m3u8", dotdot, sub),
+            };
+
+            let _ = write!(m, "{}", sub);
         }
-
-        if sublang.is_empty() {
-            m += "\n# SUBTITLES\n";
-        }
-        sublang.insert(name.to_string());
-
-        let sub = ExtXMedia {
-            type_: "SUBTITLES",
-            group_id: "subs".to_string(),
-            language: lang,
-            channels: None,
-            name: name.to_string(),
-            auto_select: true,
-            default: false,
-            uri: format!("/e/{}/playlist.m3u8", sub),
-        };
-
-        let _ = write!(m, "{}", sub);
     }
 
     for track in crate::track::track_info(mp4).iter() {
@@ -349,6 +352,7 @@ pub fn hls_track(mp4: &MP4, track_id: u32) -> io::Result<String> {
     m += "#EXTM3U\n";
     m += "#EXT-X-VERSION:6\n";
     m += "## Created by mp4lib.rs\n";
+    m += "#\n";
     if independent || handler.is_audio() {
         m += "#EXT-X-INDEPENDENT-SEGMENTS\n";
     }
@@ -367,6 +371,23 @@ pub fn hls_track(mp4: &MP4, track_id: u32) -> io::Result<String> {
     m += "#EXT-X-ENDLIST\n";
 
     Ok(m)
+}
+
+pub fn hls_subtitle(path: &str, duration: f64) -> String {
+    let duration = (duration+ 0.5).round();
+    let mut m = String::new();
+    let dotslash = if path.contains(":") { "./" } else { "" };
+    m += "#EXTM3U\n";
+    m += "#EXT-X-VERSION:6\n";
+    m += "## Created by mp4lib.rs\n";
+    m += "#\n";
+    m += &format!("#EXT-X-TARGETDURATION:{}\n", duration);
+    m += "#EXT-X-PLAYLIST-TYPE:VOD\n";
+    m += &format!("#EXTINF:{}\n", duration);
+    m += dotslash;
+    m += path;
+    m += "\n#EXT-X-ENDLIST\n";
+    m
 }
 
 /// Translates the tail of an URL into a fMP4 init section or fragment.
@@ -405,7 +426,7 @@ pub fn fragment_from_uri(mp4: &MP4, url_tail: &str) -> io::Result<(&'static str,
         // if url_tail ends in /format.VTT|SRT|..>, then strip it off and
         // pass that as the format. Otherwise, pass url_tail as the format.
         // subtitles::external only looks at the extension anyway.
-        let mut filename = &url_tail[1..];
+        let mut filename = &url_tail[2..];
         let format = filename.rfind("/format.").map(|idx| {
             let fmt = &filename[idx+1..];
             filename = &filename[..idx];
