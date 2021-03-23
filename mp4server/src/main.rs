@@ -590,7 +590,7 @@ async fn hls(req: &Request) -> Result<Option<Response>, Error> {
 async fn segment(req: &Request) -> Result<Option<Response>, Error> {
 
     let e = &req.extra;
-    if !e.starts_with("a/") && !e.starts_with("v/") && !e.starts_with("s/") && !e.starts_with("e/") {
+    if !e.starts_with("a/") && !e.starts_with("v/") && !e.starts_with("s/") && !e.starts_with("init.") {
         return Ok(None);
     }
 
