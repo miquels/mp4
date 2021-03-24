@@ -31,6 +31,8 @@ struct ExtXMedia {
     language:    Option<&'static str>,
     auto_select: bool,
     default:     bool,
+    forced:      bool,
+    sdh:         bool,
     uri:         String,
 }
 
@@ -41,10 +43,16 @@ impl Display for ExtXMedia {
         if let Some(ref channels) = self.channels {
             write!(f, r#"CHANNELS="{}","#, channels)?;
         }
+        write!(f, r#"NAME="{}","#, self.name)?;
         if let Some(ref lang) = self.language {
             write!(f, r#"LANGUAGE="{}","#, lang)?;
         }
-        write!(f, r#"NAME="{}","#, self.name)?;
+        if self.forced {
+            write!(f, r#"FORCED=YES,"#)?;
+        }
+        if self.sdh {
+            write!(f, r#"CHARACTERISTICS="public.accessibility.describes-music-and-sound","#)?;
+        }
         write!(
             f,
             r#"AUTOSELECT={},"#,
@@ -128,20 +136,36 @@ fn lang(lang: &str) -> (Option<&'static str>, &'static str) {
     (Some(code), language.to_name())
 }
 
-fn lang_from_path(path: &str) -> &str {
-    let fields: Vec<_> = path.split('.').collect();
+fn subtitle_info_from_name(name: &str) -> (String, bool, bool) {
+    let mut forced = false;
+    let mut sdh = false;
+    let mut lang = "und".to_string();
+
+    let fields: Vec<_> = name.split('.').collect();
     if fields.len() < 3 {
-        return "und";
+        return (lang, sdh, forced);
     }
+
     let mut idx = fields.len() - 2;
-    if fields[idx] == "forced" || fields[idx] == "sdh" {
-        idx -= 1;
+    while idx > 0 {
+        if fields[idx].eq_ignore_ascii_case("forced") {
+            forced = true;
+            idx -= 1;
+            continue;
+        }
+        if fields[idx].eq_ignore_ascii_case("sdh") {
+            sdh = true;
+            idx -= 1;
+            continue;
+        }
+        break;
     }
+
     if idx > 0 {
-        fields[idx]
-    } else {
-        "und"
+        lang = fields[idx].to_string();
     }
+
+    (lang, sdh, forced)
 }
 
 /// Generate a HLS playlist.
@@ -192,6 +216,8 @@ pub fn hls_master(mp4: &MP4, subs: Option<&Vec<String>>) -> String {
             name:        name,
             auto_select: true,
             default:     false,
+            forced:      false,
+            sdh:         false,
             uri:         format!("media.{}.m3u8", track.id),
         };
 
@@ -205,8 +231,8 @@ pub fn hls_master(mp4: &MP4, subs: Option<&Vec<String>>) -> String {
     if let Some(subs) = subs {
         for sub in subs {
             // look up language and language code.
-            let language = lang_from_path(sub);
-            let (lang, name) = lang(language);
+            let (language, sdh, forced) = subtitle_info_from_name(sub);
+            let (lang, name) = lang(&language);
 
             // no duplicates.
             if sublang.contains(name) {
@@ -228,6 +254,8 @@ pub fn hls_master(mp4: &MP4, subs: Option<&Vec<String>>) -> String {
                 name:        name.to_string(),
                 auto_select: true,
                 default:     false,
+                forced,
+                sdh,
                 uri:         format!("{}{}:media.m3u8", dotdot, sub),
             };
 
@@ -242,7 +270,12 @@ pub fn hls_master(mp4: &MP4, subs: Option<&Vec<String>>) -> String {
         }
 
         let (lang, name) = lang(&track.language.to_string());
-        let name = track.name.as_ref().map(|n| n.0.clone()).unwrap_or(name.to_string());
+        let (name, forced) = if let Some(ref name) = track.name {
+            let forced = name.0.to_lowercase().contains("forced");
+            (name.0.to_string(), forced)
+        } else {
+            (name.to_string(), false)
+        };
 
         // skip if we already have an external subtitle track file.
         if sublang.contains(&name) {
@@ -262,6 +295,8 @@ pub fn hls_master(mp4: &MP4, subs: Option<&Vec<String>>) -> String {
             name:        name.to_string(),
             auto_select: true,
             default:     false,
+            forced,
+            sdh:         false,
             uri:         format!("media.{}.m3u8", track.id),
         };
 
