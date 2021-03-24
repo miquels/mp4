@@ -297,8 +297,10 @@ pub fn hls_master(mp4: &MP4, subs: Option<&Vec<String>>) -> String {
 }
 
 fn track_to_segments(mp4: &MP4, track_id: u32, duration: Option<u32>) -> io::Result<Arc<Vec<Segment>>> {
-    static SEGMENTS: Lazy<LruCache<(String, u32), Arc<Vec<Segment>>>> =
-        { Lazy::new(|| LruCache::new(Duration::new(60, 0))) };
+    #[rustfmt::skip]
+    static SEGMENTS: Lazy<LruCache<(String, u32), Arc<Vec<Segment>>>> = {
+        Lazy::new(|| LruCache::new(Duration::new(60, 0)))
+    };
     let name = mp4
         .input_file
         .as_ref()
@@ -512,8 +514,10 @@ fn movie_fragment(
     fs: FragmentSource,
     range: Option<Range<u64>>,
 ) -> io::Result<(Vec<u8>, u64)> {
-    static FRAGMENTS: Lazy<LruCache<FragmentKey, Arc<Vec<u8>>>> =
-        { Lazy::new(|| LruCache::new(Duration::new(60, 0))) };
+    #[rustfmt::skip]
+    static FRAGMENTS: Lazy<LruCache<FragmentKey, Arc<Vec<u8>>>> = {
+        Lazy::new(|| LruCache::new(Duration::new(60, 0)))
+    };
 
     // Remap usize range to u64.
     let range = if let Some(range) = range {

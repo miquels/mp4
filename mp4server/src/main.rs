@@ -13,7 +13,7 @@ use anyhow::Result;
 use bytes::Bytes;
 use headers::{
     ContentLength, ContentRange, ETag, HeaderMapExt, IfMatch, IfModifiedSince, IfNoneMatch, IfRange,
-    IfUnmodifiedSince, LastModified, Origin, Range,
+    IfUnmodifiedSince, LastModified, Origin, Range, AcceptRanges,
 };
 use http::{HeaderMap, HeaderValue, Method, StatusCode};
 use percent_encoding::percent_decode_str;
@@ -399,7 +399,7 @@ impl FileServer {
 
         // Check If-None-Match.
         if let Some(inm) = req.headers.typed_get::<IfNoneMatch>() {
-            if !inm.precondition_passes(&self.etag_hdr) {
+            if inm.precondition_passes(&self.etag_hdr) {
                 return Err(Error::new(304, "Match"));
             }
         } else {
@@ -414,39 +414,58 @@ impl FileServer {
     }
 
     // build initial response headers.
-    fn build_response(&self, req: &Request, cors: bool, range: bool) -> Result<RespBuilder, Error> {
-        // build initial response.
+    fn build_response(&self, req: &Request, cors: bool, range: bool) -> RespBuilder {
+
         let mut response = http::Response::builder();
         let resp_headers = response.headers_mut().unwrap();
+
         resp_headers.typed_insert(self.etag_hdr.clone());
         resp_headers.typed_insert(self.lastmod_hdr.clone());
-
-        if !cors {
-            return Ok(response);
+        if range {
+            resp_headers.typed_insert(AcceptRanges::bytes());
         }
 
-        if let Some(host) = req.headers.typed_get::<Origin>() {
-            resp_headers.insert(
-                "access-control-allow-origin",
-                HeaderValue::from_str(&host.to_string()).unwrap(),
-            );
-        } else {
-            resp_headers.insert("access-control-allow-origin", HeaderValue::from_static("*"));
+        if cors {
+            cors_headers(req, &mut response, range);
         }
 
-        let (aca, ace) = if range {
-            (
-                "if-match, if-unmodified-since, if-range, range",
-                "content-type, content-length, content-range",
-            )
-        } else {
-            ("if-none-match, if-modified-since", "content-type, content-length")
-        };
-        resp_headers.insert("access-control-allow-headers", HeaderValue::from_static(aca));
-        resp_headers.insert("access-control-expose-headers", HeaderValue::from_static(ace));
-
-        Ok(response)
+        response
     }
+}
+
+fn cors_headers(req: &Request, response: &mut RespBuilder, range: bool) {
+    let resp_headers = response.headers_mut().unwrap();
+
+    if let Some(host) = req.headers.typed_get::<Origin>() {
+        resp_headers.insert(
+            "access-control-allow-origin",
+            HeaderValue::from_str(&host.to_string()).unwrap(),
+        );
+    } else {
+        resp_headers.insert("access-control-allow-origin", HeaderValue::from_static("*"));
+    }
+
+    let (aca, ace) = if range {
+        (
+            "if-match, if-unmodified-since, if-range, range",
+            "content-type, content-length, content-range",
+        )
+    } else {
+        ("if-none-match, if-modified-since", "content-type, content-length")
+    };
+    resp_headers.insert("access-control-allow-headers", HeaderValue::from_static(aca));
+    resp_headers.insert("access-control-expose-headers", HeaderValue::from_static(ace));
+}
+
+fn options(req: &Request, cors: bool, range: bool) -> Response {
+    let mut response = http::Response::builder().status(204);
+    let resp_headers = response.headers_mut().unwrap();
+
+    resp_headers.insert("allow", HeaderValue::from_static("get, head, options"));
+    if cors {
+        cors_headers(req, &mut response, range);
+    }
+    response.body(hyper::Body::empty()).unwrap()
 }
 
 async fn mp4pseudo(req: &Request) -> Result<Option<Response>, Error> {
@@ -461,13 +480,19 @@ async fn mp4pseudo(req: &Request) -> Result<Option<Response>, Error> {
         },
         None => return Ok(None),
     };
+
+    // if OPTIONS quit now
+    if req.method == Method::OPTIONS {
+        return Ok(Some(options(req, false, false)));
+    }
+
     let mut mp4stream = mp4lib::pseudo::Mp4Stream::open(&req.fpath, tracks)?;
 
     // use FileServer for conditionals and initial response.
     let fs = FileServer::from_mp4stream(&mp4stream);
     fs.check_conditionals(req)?;
 
-    let mut response = fs.build_response(req, false, false)?;
+    let mut response = fs.build_response(req, false, false);
     let resp_headers = response.headers_mut().unwrap();
     let mut status = 200;
 
@@ -548,6 +573,11 @@ async fn hls(req: &Request) -> Result<Option<Response>, Error> {
         return Ok(None);
     }
 
+    // if OPTIONS quit now
+    if req.method == Method::OPTIONS {
+        return Ok(Some(options(req, true, false)));
+    }
+
     // use FileServer for conditionals and initial response.
     let fs = FileServer::open(&req.fpath).await?;
 
@@ -562,13 +592,8 @@ async fn hls(req: &Request) -> Result<Option<Response>, Error> {
     };
 
     fs.check_conditionals(req)?;
-    let mut response = fs.build_response(req, true, false)?;
+    let mut response = fs.build_response(req, true, false);
     let resp_headers = response.headers_mut().unwrap();
-
-    // if OPTIONS quit now
-    if req.method == Method::OPTIONS {
-        return Err(Error::new(204, ""));
-    }
 
     // open and parse mp4 file.
     let mp4 = mp4lib::lru_cache::open_mp4(&req.fpath)?;
@@ -597,16 +622,16 @@ async fn segment(req: &Request) -> Result<Option<Response>, Error> {
         return Ok(None);
     }
 
+    // if OPTIONS quit now
+    if req.method == Method::OPTIONS {
+        return Ok(Some(options(req, true, true)));
+    }
+
     // use FileServer for conditionals and initial response.
     let fs = FileServer::open(&req.fpath).await?;
     fs.check_conditionals(req)?;
-    let mut response = fs.build_response(req, true, true)?;
+    let mut response = fs.build_response(req, true, true);
     let resp_headers = response.headers_mut().unwrap();
-
-    // if OPTIONS quit now
-    if req.method == Method::OPTIONS {
-        return Err(Error::new(204, ""));
-    }
 
     // open and parse mp4 file.
     let mp4 = mp4lib::lru_cache::open_mp4(&req.fpath)?;
@@ -643,15 +668,15 @@ async fn subtitle(req: &Request) -> Result<Option<Response>, Error> {
         return Ok(None);
     }
 
-    let fs = FileServer::open(&req.fpath).await?;
-    fs.check_conditionals(req)?;
-    let mut response = fs.build_response(req, true, false)?;
-    let resp_headers = response.headers_mut().unwrap();
-
     // if OPTIONS quit now
     if req.method == Method::OPTIONS {
-        return Err(Error::new(204, ""));
+        return Ok(Some(options(req, true, false)));
     }
+
+    let fs = FileServer::open(&req.fpath).await?;
+    fs.check_conditionals(req)?;
+    let mut response = fs.build_response(req, true, false);
+    let resp_headers = response.headers_mut().unwrap();
 
     let (mime, body) = if req.extra.ends_with(".m3u8") {
         let duration = task::block_in_place(|| mp4lib::subtitle::duration(&fs.path))?;
@@ -678,6 +703,12 @@ async fn subtitle(req: &Request) -> Result<Option<Response>, Error> {
 }
 
 async fn serve_file(req: &Request) -> Result<Response, Error> {
+
+    // if OPTIONS quit now
+    if req.method == Method::OPTIONS {
+        return Ok(options(req, true, false));
+    }
+
     if req.sep != "" {
         return Err(Error::new(415, "Unsupported media type"));
     }
@@ -685,7 +716,7 @@ async fn serve_file(req: &Request) -> Result<Response, Error> {
     let fs = FileServer::open(&req.fpath).await?;
     fs.check_conditionals(req)?;
 
-    let mut response = fs.build_response(req, false, false)?;
+    let mut response = fs.build_response(req, false, false);
     let resp_headers = response.headers_mut().unwrap();
     let mut status = 200;
 
