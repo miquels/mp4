@@ -1,9 +1,10 @@
+use std::cmp;
 use std::collections::HashMap;
 use std::fmt::{self, Display};
 use std::fs;
 use std::io::{self, ErrorKind};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
-use std::ops::Bound;
+use std::ops::{self, Bound};
 use std::os::unix::fs::{FileExt, MetadataExt};
 use std::str::FromStr;
 use std::time::SystemTime;
@@ -298,7 +299,7 @@ impl Request {
     }
 
     // parse the Range: and If-Range: headers.
-    fn parse_range(&self, fs: &FileServer) -> Result<Option<ContentRange>, Error> {
+    fn parse_range(&self, fs: &FileServer) -> Result<Option<ops::Range<u64>>, Error> {
         if let Some(range) = self.headers.typed_get::<Range>() {
             let do_range = match self.headers.typed_get::<IfRange>() {
                 Some(if_range) => !if_range.is_modified(Some(&fs.etag_hdr), Some(&fs.lastmod_hdr)),
@@ -311,10 +312,10 @@ impl Request {
                 }
                 let start = bound(ranges[0].0, None);
                 let end = bound(ranges[0].1, Some(fs.size));
-                match ContentRange::bytes(start .. end, fs.size) {
-                    Ok(cr) => return Ok(Some(cr)),
-                    Err(_) => return Err(Error::new(416, "invalid range")),
-                };
+                if start >= end || start >= fs.size {
+                    return Err(Error::new(416, "invalid range"));
+                }
+                return Ok(Some(ops::Range{ start: start, end: cmp::min(end, fs.size) }))
             }
         }
         Ok(None)
@@ -470,10 +471,10 @@ async fn mp4pseudo(req: &Request) -> Result<Option<Response>, Error> {
     let mut start = 0;
     let mut end = fs.size;
     if let Some(range) = req.parse_range(&fs)? {
-        if let Some((b, e)) = range.bytes_range() {
-            start = b;
-            end = e + 1;
-            resp_headers.typed_insert(range);
+        if let Ok(cr) = ContentRange::bytes(range.clone(), fs.size) {
+            start = range.start;
+            end = range.end;
+            resp_headers.typed_insert(cr);
             status = 206;
         }
     }
@@ -597,7 +598,7 @@ async fn segment(req: &Request) -> Result<Option<Response>, Error> {
     // use FileServer for conditionals and initial response.
     let fs = FileServer::open(&req.fpath).await?;
     fs.check_conditionals(req)?;
-    let mut response = fs.build_response(req, true, false)?;
+    let mut response = fs.build_response(req, true, true)?;
     let resp_headers = response.headers_mut().unwrap();
 
     // if OPTIONS quit now
@@ -608,9 +609,21 @@ async fn segment(req: &Request) -> Result<Option<Response>, Error> {
     // open and parse mp4 file.
     let mp4 = mp4lib::lru_cache::open_mp4(&req.fpath)?;
 
-    let (mime, body) = mp4lib::stream::fragment_from_uri(&mp4, &req.extra)?;
+    let range = req.parse_range(&fs)?;
+    let (mime, body, size) = mp4lib::stream::fragment_from_uri(&mp4, &req.extra, range.clone())?;
     resp_headers.insert("content-type", HeaderValue::from_static(mime));
     resp_headers.typed_insert(ContentLength(body.len() as u64));
+
+    if let Some(mut range) = range {
+        // adjust range to what we actually got.
+        range.end = range.start + body.len() as u64;
+        let cr = match ContentRange::bytes(range, size) {
+            Ok(cr) => cr,
+            Err(_) => return Err(Error::new(416, "Invalid Range")),
+        };
+        resp_headers.typed_insert(cr);
+        response = response.status(206);
+    }
 
     // if HEAD quit now
     if req.method == Method::HEAD {
@@ -675,10 +688,10 @@ async fn serve_file(req: &Request) -> Result<Response, Error> {
     let mut start = 0;
     let mut end = fs.size;
     if let Some(range) = req.parse_range(&fs)? {
-        if let Some((b, e)) = range.bytes_range() {
-            start = b;
-            end = e + 1;
-            resp_headers.typed_insert(range);
+        if let Ok(cr) = ContentRange::bytes(range.clone(), fs.size) {
+            start = range.start;
+            end = range.end;
+            resp_headers.typed_insert(cr);
             status = 206;
         }
     }

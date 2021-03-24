@@ -17,6 +17,7 @@ use crate::serialize::{BoxBytes, ToBytes};
 use crate::types::*;
 
 /// Passed to [`media_init_section`] and [`movie_fragment`].
+#[derive(Hash, PartialEq, Eq, Clone)]
 pub struct FragmentSource {
     pub src_track_id: u32,
     pub dst_track_id: u32,

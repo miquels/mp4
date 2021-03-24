@@ -78,6 +78,15 @@ where
         })
     }
 
+    pub fn remove<Q: ?Sized>(&self, item_key: &Q) -> Option<V>
+    where
+        lru::KeyRef<K>: Borrow<Q>,
+        Q: Hash + Eq,
+    {
+        let mut cache = self.cache.lock().unwrap();
+        cache.pop(item_key).map(|e| e.item)
+    }
+
     pub fn expire(&self) {
         let mut cache = self.cache.lock().unwrap();
         let now = Instant::now();

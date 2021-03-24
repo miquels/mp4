@@ -5,6 +5,7 @@ use std::cmp;
 use std::fmt::Display;
 use std::fmt::Write;
 use std::io;
+use std::ops::Range;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -401,7 +402,7 @@ pub fn hls_subtitle(path: &str, duration: f64) -> String {
 /// - e/PATH/TO/EXTERNAL/SUBTITLES/FILE/format.EXT
 ///
 /// Returns (mime-type, data).
-pub fn fragment_from_uri(mp4: &MP4, url_tail: &str) -> io::Result<(&'static str, Vec<u8>)> {
+pub fn fragment_from_uri(mp4: &MP4, url_tail: &str, range: Option<Range<u64>>) -> io::Result<(&'static str, Vec<u8>, u64)> {
 
     // initialization section.
     if let Ok((track_id, ext)) = scan_fmt!(url_tail, "init.{}.{}{e}", u32, String) {
@@ -410,11 +411,14 @@ pub fn fragment_from_uri(mp4: &MP4, url_tail: &str) -> io::Result<(&'static str,
                 let init = crate::fragment::media_init_section(&mp4, &[ track_id ]);
                 let mut buffer = MemBuffer::new();
                 init.write(&mut buffer)?;
-                return Ok(("video/mp4", buffer.into_vec()));
+                let data = buffer.into_vec();
+                let size = data.len() as u64;
+                return Ok(("video/mp4", data, size));
             },
             "vtt" => {
                 let buffer = b"WEBVTT\n\n";
-                return Ok(("text/vtt", buffer.to_vec()));
+                let size = buffer.len() as u64;
+                return Ok(("text/vtt", buffer.to_vec(), size));
             },
             _ => return Err(ioerr!(InvalidData, "Bad request")),
         }
@@ -440,7 +444,9 @@ pub fn fragment_from_uri(mp4: &MP4, url_tail: &str) -> io::Result<(&'static str,
             None => return Err(ioerr!(NotFound, "no base directory for {}", filename)),
         };
         path.push(filename);
-        return crate::subtitle::external(path.to_str().unwrap(), format);
+        let (mime, data) = crate::subtitle::external(path.to_str().unwrap(), format)?;
+        let size = data.len() as u64;
+        return Ok((mime, data, size));
     }
 
     match scan_fmt!(url_tail, "{[vas]}/c.{}.{}.{}-{}.", char, u32, u32, u32, u32) {
@@ -457,17 +463,91 @@ pub fn fragment_from_uri(mp4: &MP4, url_tail: &str) -> io::Result<(&'static str,
                 from_sample:  start_sample,
                 to_sample:    end_sample,
             };
-            let buffer = match typ {
-                's' => crate::subtitle::fragment(&mp4, Format::Vtt, &fs)?,
-                _ => {
-                    let frag = crate::fragment::movie_fragment(&mp4, seq_id, &[ fs ])?;
-                    let mut buffer = MemBuffer::new();
-                    frag.to_bytes(&mut buffer)?;
-                    buffer.into_vec()
-                }
+            let (buffer, size) = match typ {
+                's' => {
+                    let buffer = crate::subtitle::fragment(&mp4, Format::Vtt, &fs)?;
+                    let size = buffer.len() as u64;
+                    (buffer, size)
+                },
+                _ => movie_fragment(&mp4, seq_id, fs, range)?,
             };
-            Ok((mime, buffer))
+            Ok((mime, buffer, size))
         },
         Err(_) => Err(ioerr!(InvalidData, "bad request")),
+    }
+}
+
+#[derive(Hash, PartialEq, Eq, Clone)]
+struct FragmentKey {
+    file:   String,
+    source: FragmentSource,
+}
+
+fn movie_fragment(mp4: &MP4, seq_id: u32, fs: FragmentSource, range: Option<Range<u64>>) -> io::Result<(Vec<u8>, u64)> {
+    static FRAGMENTS: Lazy<LruCache<FragmentKey, Arc<Vec<u8>>>> = {
+        Lazy::new(|| LruCache::new(Duration::new(60, 0)))
+    };
+
+    // Remap usize range to u64.
+    let range = if let Some(range) = range {
+        if range.end >= usize::MAX as u64 {
+            return Err(ioerr!(InvalidData, "requested fragment too large"));
+        }
+        Some(Range{ start: range.start as usize, end: range.end as usize })
+    } else {
+        None
+    };
+
+    // See if we have the data in the cache.
+    let file = mp4.input_file.as_ref().map(|s| s.to_owned()).unwrap_or(String::new());
+    let key = FragmentKey {
+        file,
+        source: fs.clone(),
+    };
+    let mut cached = false;
+    let frag = mp4.input_file.as_ref().and_then(|_| FRAGMENTS.get(&key));
+    let data = if let Some(frag) = frag {
+        cached = true;
+        frag
+    } else {
+        // Not in the cache, so generate it.
+        let frag = crate::fragment::movie_fragment(&mp4, seq_id, &[ fs ])?;
+        let mut buffer = MemBuffer::new();
+        frag.to_bytes(&mut buffer)?;
+        Arc::new(buffer.into_vec())
+    };
+
+    // remap no range to full range.
+    let mut range = range.unwrap_or(Range { start: 0, end: data.len() });
+
+    // check for invalid range.
+    if range.start >= range.end || range.start >= data.len() {
+        return Err(ioerr!(InvalidData, "416 invalid range"));
+    }
+
+    // we might be able to satisfy part of the range.
+    if range.end > data.len() {
+        range.end = data.len();
+    }
+    let size = data.len() as u64;
+
+    // reached the end, remove from cache.
+    if range.end == data.len() && cached {
+        println!("removin from cache");
+        FRAGMENTS.remove(&key);
+    }
+    if range.start != 0 || range.end < data.len() {
+        // partial data from a range.
+        let partial = data[range].to_owned();
+        if !cached && key.file.len() > 0 {
+            // cache it for later.
+            println!("savin to cache");
+            FRAGMENTS.put(key, data);
+        }
+        Ok((partial, size))
+    } else {
+        // Try to unwrap the Arc, if noone else is using it we get it without cloning.
+        let data = Arc::try_unwrap(data).unwrap_or_else(|data| data.to_vec());
+        Ok((data, size))
     }
 }
