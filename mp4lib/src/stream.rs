@@ -226,7 +226,7 @@ pub fn hls_master(mp4: &MP4, subs: Option<&Vec<String>>) -> String {
 
     // Subtitle tracks.
     let mut sublang = HashSet::new();
-    let mut do_subtitle_header = true;
+    let mut subtitles = Vec::new();
 
     if let Some(subs) = subs {
         for sub in subs {
@@ -237,11 +237,6 @@ pub fn hls_master(mp4: &MP4, subs: Option<&Vec<String>>) -> String {
             // no duplicates.
             if sublang.contains(name) {
                 continue;
-            }
-
-            if do_subtitle_header {
-                m += "\n# SUBTITLES\n";
-                do_subtitle_header = false;
             }
             sublang.insert(name.to_string());
 
@@ -258,8 +253,7 @@ pub fn hls_master(mp4: &MP4, subs: Option<&Vec<String>>) -> String {
                 sdh,
                 uri:         format!("{}{}:media.m3u8", dotdot, sub),
             };
-
-            let _ = write!(m, "{}", sub);
+            subtitles.push(sub);
         }
     }
 
@@ -282,11 +276,6 @@ pub fn hls_master(mp4: &MP4, subs: Option<&Vec<String>>) -> String {
             continue;
         }
 
-        if do_subtitle_header {
-            m += "\n# SUBTITLES\n";
-            do_subtitle_header = false;
-        }
-
         let sub = ExtXMedia {
             type_:       "SUBTITLES",
             group_id:    "subs".to_string(),
@@ -299,8 +288,30 @@ pub fn hls_master(mp4: &MP4, subs: Option<&Vec<String>>) -> String {
             sdh:         false,
             uri:         format!("media.{}.m3u8", track.id),
         };
+        subtitles.push(sub);
+    }
 
-        let _ = write!(m, "{}", sub);
+    if subtitles.len() > 0 {
+        m += "\n# SUBTITLES\n";
+
+        // sort the subtitles so that 'sdh' and 'forced come after none-sdh/forced.
+        //
+        // this is because if we have multiple subtitles in the same language,
+        // and the player only shows one entry per language, we want to have
+        // the "normal" subtitles.
+        subtitles.sort_by(|a, b| {
+            if a.language != b.language {
+                return a.language.cmp(&b.language);
+            }
+            if a.sdh != b.sdh {
+                return a.sdh.cmp(&b.sdh);
+            }
+            a.forced.cmp(&b.forced)
+        });
+
+        for sub in &subtitles {
+            let _ = write!(m, "{}", sub);
+        }
     }
 
     // video track.
