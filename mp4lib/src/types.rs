@@ -353,7 +353,7 @@ impl Default for IsoLanguageCode {
 }
 
 /// Zero terminated ASCII string.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Serialize)]
 pub struct ZString(pub String);
 
 impl ZString {

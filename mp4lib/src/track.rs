@@ -20,6 +20,7 @@ pub struct TrackInfo {
     pub track_type:    String,
     pub duration:      Duration,
     pub size:          u64,
+    pub name:          Option<ZString>,
     pub language:      IsoLanguageCode,
     pub specific_info: SpecificTrackInfo,
 }
@@ -165,6 +166,10 @@ pub fn track_info(mp4: &MP4) -> Vec<TrackInfo> {
         let stbl = mdia.media_info().sample_table();
         info.size = stbl.sample_size().iter().fold(0, |acc: u64, sz| acc + sz as u64);
 
+        info.name = first_box!(track, UserDataBox)
+            .and_then(|b| first_box!(b, NameBox))
+            .map(|n| n.name.clone());
+
         let stsd = stbl.sample_description();
         if let Some(avc1) = first_box!(stsd.entries, AvcSampleEntry) {
             let mut avc1_info = avc1.track_info();
@@ -187,9 +192,17 @@ pub fn track_info(mp4: &MP4) -> Vec<TrackInfo> {
             }
             info.specific_info = SpecificTrackInfo::VideoTrackInfo(hevc_info);
         } else if let Some(ac3) = first_box!(stsd.entries, Ac3SampleEntry) {
-            info.specific_info = SpecificTrackInfo::AudioTrackInfo(ac3.track_info());
+            let mut ac3 = ac3.track_info();
+            if ac3.avg_bitrate.is_none() && info.duration.as_secs() > 0 {
+                ac3.avg_bitrate = Some((8 * info.size / info.duration.as_secs()) as u32);
+            }
+            info.specific_info = SpecificTrackInfo::AudioTrackInfo(ac3);
         } else if let Some(aac) = first_box!(stsd.entries, AacSampleEntry) {
-            info.specific_info = SpecificTrackInfo::AudioTrackInfo(aac.track_info());
+            let mut aac = aac.track_info();
+            if aac.avg_bitrate.is_none() && info.duration.as_secs() > 0 {
+                aac.avg_bitrate = Some((8 * info.size / info.duration.as_secs()) as u32);
+            }
+            info.specific_info = SpecificTrackInfo::AudioTrackInfo(aac);
         } else {
             let id = stsd
                 .entries

@@ -200,6 +200,7 @@ pub fn hls_master(mp4: &MP4, subs: Option<&Vec<String>>) -> String {
 
     // Subtitle tracks.
     let mut sublang = HashSet::new();
+    let mut do_subtitle_header = true;
 
     if let Some(subs) = subs {
         for sub in subs {
@@ -212,8 +213,9 @@ pub fn hls_master(mp4: &MP4, subs: Option<&Vec<String>>) -> String {
                 continue;
             }
 
-            if sublang.is_empty() {
+            if do_subtitle_header {
                 m += "\n# SUBTITLES\n";
+                do_subtitle_header = false;
             }
             sublang.insert(name.to_string());
 
@@ -240,16 +242,17 @@ pub fn hls_master(mp4: &MP4, subs: Option<&Vec<String>>) -> String {
         }
 
         let (lang, name) = lang(&track.language.to_string());
+        let name = track.name.as_ref().map(|n| n.0.clone()).unwrap_or(name.to_string());
 
-        // no duplicates.
-        if sublang.contains(name) {
+        // skip if we already have an external subtitle track file.
+        if sublang.contains(&name) {
             continue;
         }
 
-        if sublang.is_empty() {
+        if do_subtitle_header {
             m += "\n# SUBTITLES\n";
+            do_subtitle_header = false;
         }
-        sublang.insert(name.to_string());
 
         let sub = ExtXMedia {
             type_:       "SUBTITLES",
