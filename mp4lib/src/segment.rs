@@ -158,7 +158,6 @@ pub fn track_to_segments_timed(trak: &TrackBox, timing_segments: &[Segment]) -> 
             },
         };
 
-
         // calculate composition time of this sample.
         let tm = cur_time as i64 + (delta as i64) - (comp_time_shift as i64);
         let tm = std::cmp::max(0, tm);

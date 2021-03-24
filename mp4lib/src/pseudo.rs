@@ -26,7 +26,7 @@ use once_cell::sync::Lazy;
 
 use crate::boxes::*;
 use crate::io::DataRef;
-use crate::lru_cache::{LruCache, open_mp4};
+use crate::lru_cache::{open_mp4, LruCache};
 use crate::mp4box::{MP4Box, MP4};
 use crate::serialize::ToBytes;
 use crate::types::FourCC;
@@ -377,7 +377,7 @@ impl MdatMapping {
             Some(mmap) => (0, mmap),
             None => {
                 let start = entries[0].mdat_offset;
-                let end = entries[entries.len()-1].mdat_offset + entries[entries.len()-1].size;
+                let end = entries[entries.len() - 1].mdat_offset + entries[entries.len() - 1].size;
                 let data = unsafe {
                     memmap::MmapOptions::new()
                         .offset(start)
@@ -386,7 +386,7 @@ impl MdatMapping {
                 }?;
                 holder.replace(data);
                 (start, holder.as_ref().unwrap())
-            }
+            },
         };
 
         // and copy.
@@ -631,4 +631,3 @@ impl InitSection {
         (chunks, mapping)
     }
 }
-

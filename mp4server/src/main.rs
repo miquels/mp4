@@ -11,7 +11,10 @@ use std::time::SystemTime;
 
 use anyhow::Result;
 use bytes::Bytes;
-use headers::{ContentLength, ContentRange, ETag, HeaderMapExt, IfMatch, IfNoneMatch, IfModifiedSince, IfUnmodifiedSince, IfRange, LastModified, Range, Origin};
+use headers::{
+    ContentLength, ContentRange, ETag, HeaderMapExt, IfMatch, IfModifiedSince, IfNoneMatch, IfRange,
+    IfUnmodifiedSince, LastModified, Origin, Range,
+};
 use http::{HeaderMap, HeaderValue, Method, StatusCode};
 use percent_encoding::percent_decode_str;
 use scan_fmt::scan_fmt;
@@ -128,14 +131,17 @@ async fn route_request(req: Request) -> Result<Response, Error> {
 // HTTP error type.
 #[derive(Debug)]
 struct Error {
-    status:     StatusCode,
-    message:    String,
+    status:  StatusCode,
+    message: String,
 }
 
 impl Error {
     fn new(status: u16, message: impl Display) -> Error {
         let status = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-        Error { status: status.into(), message: message.to_string() }
+        Error {
+            status:  status.into(),
+            message: message.to_string(),
+        }
     }
 }
 
@@ -218,13 +224,13 @@ fn bound(bound: std::ops::Bound<u64>, max: Option<u64>) -> u64 {
 }
 
 struct Request {
-    method: Method,
-    path:   String,
-    sep:    &'static str,
-    extra:  String,
-    params: HashMap<String, String>,
+    method:  Method,
+    path:    String,
+    sep:     &'static str,
+    extra:   String,
+    params:  HashMap<String, String>,
     headers: HeaderMap,
-    fpath:  String,
+    fpath:   String,
 }
 
 impl Request {
@@ -236,7 +242,6 @@ impl Request {
         query: String,
         headers: HeaderMap,
     ) -> Result<Request, Error> {
-
         let mut path = decode_path(&path, &method)?;
         let mut extra = String::new();
         let mut sep = "";
@@ -244,7 +249,7 @@ impl Request {
         // A path to an mp4 file can be followed by /extra/data.
         if let Some(idx) = path.rfind(".mp4/") {
             if path.len() > idx + 5 {
-                extra.push_str(&path[idx + 5 ..]);
+                extra.push_str(&path[idx + 5..]);
                 path.truncate(idx + 4);
                 sep = "/";
             }
@@ -256,10 +261,10 @@ impl Request {
         // - subtitles.vtt:media.m3u8
         //
         if extra == "" {
-            for ext in &[ ".srt:", ".vtt:" ] {
+            for ext in &[".srt:", ".vtt:"] {
                 if let Some(idx) = path.rfind(ext) {
                     if path.len() > idx + 5 {
-                        extra.push_str(&path[idx + 5 ..]);
+                        extra.push_str(&path[idx + 5..]);
                         path.truncate(idx + 4);
                         sep = ":";
                         break;
@@ -315,7 +320,10 @@ impl Request {
                 if start >= end || start >= fs.size {
                     return Err(Error::new(416, "invalid range"));
                 }
-                return Ok(Some(ops::Range{ start: start, end: cmp::min(end, fs.size) }))
+                return Ok(Some(ops::Range {
+                    start: start,
+                    end:   cmp::min(end, fs.size),
+                }));
             }
         }
         Ok(None)
@@ -323,16 +331,15 @@ impl Request {
 }
 
 struct FileServer {
-    path:   String,
-    file:   fs::File,
-    modified:   SystemTime,
-    size:   u64,
-    etag_hdr:   ETag,
+    path:        String,
+    file:        fs::File,
+    modified:    SystemTime,
+    size:        u64,
+    etag_hdr:    ETag,
     lastmod_hdr: LastModified,
 }
 
 impl FileServer {
-
     // Open file.
     async fn open(path: impl Into<String>) -> io::Result<FileServer> {
         // open file.
@@ -365,18 +372,17 @@ impl FileServer {
 
     fn from_mp4stream(strm: &Mp4Stream) -> FileServer {
         FileServer {
-            path:       strm.path().to_owned(),
-            file:       strm.file().try_clone().unwrap(),
-            modified:   strm.modified(),
-            size:       strm.size(),
-            etag_hdr:   ETag::from_str(&strm.etag()).unwrap(),
+            path:        strm.path().to_owned(),
+            file:        strm.file().try_clone().unwrap(),
+            modified:    strm.modified(),
+            size:        strm.size(),
+            etag_hdr:    ETag::from_str(&strm.etag()).unwrap(),
             lastmod_hdr: LastModified::from(strm.modified()),
         }
     }
 
     // check conditionals
     fn check_conditionals(&self, req: &Request) -> Result<(), Error> {
-
         // Check If-Match.
         if let Some(im) = req.headers.typed_get::<IfMatch>() {
             if !im.precondition_passes(&self.etag_hdr) {
@@ -409,7 +415,6 @@ impl FileServer {
 
     // build initial response headers.
     fn build_response(&self, req: &Request, cors: bool, range: bool) -> Result<RespBuilder, Error> {
-
         // build initial response.
         let mut response = http::Response::builder();
         let resp_headers = response.headers_mut().unwrap();
@@ -423,8 +428,8 @@ impl FileServer {
         if let Some(host) = req.headers.typed_get::<Origin>() {
             resp_headers.insert(
                 "access-control-allow-origin",
-                HeaderValue::from_str(&host.to_string()
-            ).unwrap());
+                HeaderValue::from_str(&host.to_string()).unwrap(),
+            );
         } else {
             resp_headers.insert("access-control-allow-origin", HeaderValue::from_static("*"));
         }
@@ -444,8 +449,7 @@ impl FileServer {
     }
 }
 
-async fn mp4pseudo(req: &Request) -> Result<Option<Response>, Error> { 
-
+async fn mp4pseudo(req: &Request) -> Result<Option<Response>, Error> {
     // get tracks, then open mp4stream.
     let tracks = match req.params.get("track") {
         Some(val) => {
@@ -540,7 +544,6 @@ async fn lookup_subtitles(mp4path: &str, subs: &mut Vec<String>) -> io::Result<(
 // - media.<TRACK_ID>.m3u8
 //
 async fn hls(req: &Request) -> Result<Option<Response>, Error> {
-
     if !req.extra.ends_with(".m3u8") {
         return Ok(None);
     }
@@ -589,7 +592,6 @@ async fn hls(req: &Request) -> Result<Option<Response>, Error> {
 }
 
 async fn segment(req: &Request) -> Result<Option<Response>, Error> {
-
     let e = &req.extra;
     if !e.starts_with("a/") && !e.starts_with("v/") && !e.starts_with("s/") && !e.starts_with("init.") {
         return Ok(None);
@@ -657,7 +659,10 @@ async fn subtitle(req: &Request) -> Result<Option<Response>, Error> {
         if !path.ends_with(".vtt") {
             path += ":into.vtt";
         }
-        ("application/x-mpegurl", mp4lib::stream::hls_subtitle(&path, duration).into_bytes())
+        (
+            "application/x-mpegurl",
+            mp4lib::stream::hls_subtitle(&path, duration).into_bytes(),
+        )
     } else {
         task::block_in_place(|| mp4lib::subtitle::external(&req.fpath, &req.extra))?
     };
@@ -697,7 +702,9 @@ async fn serve_file(req: &Request) -> Result<Response, Error> {
     }
 
     // Set Content-Type, Content-Length, and StatusCode.
-    let mime = mime_guess::from_path(&req.path).first_or_octet_stream().to_string();
+    let mime = mime_guess::from_path(&req.path)
+        .first_or_octet_stream()
+        .to_string();
 
     resp_headers.insert("content-type", HeaderValue::from_str(&mime).unwrap());
     resp_headers.typed_insert(ContentLength(end - start));

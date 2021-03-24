@@ -94,8 +94,8 @@ impl Display for AudioTrackInfo {
 pub struct VideoTrackInfo {
     pub codec_id:   String,
     pub codec_name: Option<String>,
-    pub width: u16,
-    pub height: u16,
+    pub width:      u16,
+    pub height:     u16,
     pub frame_rate: f64,
 }
 

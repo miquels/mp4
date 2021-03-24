@@ -226,7 +226,10 @@ fn fmp4_track(movie: &MovieBox, trak: &TrackBox, track_id: u32) -> TrackBox {
 
     let movie_timescale = movie.movie_header().timescale;
 
-    TrackBox { movie_timescale, boxes }
+    TrackBox {
+        movie_timescale,
+        boxes,
+    }
 }
 
 // Some values are constant for the entire trackfragment, or even the
@@ -302,7 +305,6 @@ impl SampleDefaults {
         }
     }
 }
-
 
 // SampleFlags has a lot of bits, but really all we know is 'is this a key frame'.
 // So ttransform that boolean into a 'SampleFlags'.
@@ -390,7 +392,7 @@ fn readahead(file: &fs::File, offset: u64, len: u64) {
             file.as_raw_fd(),
             offset as libc::off_t,
             len as libc::off_t,
-            libc::POSIX_FADV_WILLNEED
+            libc::POSIX_FADV_WILLNEED,
         );
     }
 }
@@ -404,7 +406,6 @@ fn track_fragment(
     data_ref: DataRef,
     mdat: &mut MediaDataBox,
 ) -> io::Result<TrackFragmentBox> {
-
     // Seek to 'from' and peek at the first sample.
     let mut samples = track.sample_info_iter();
     samples.seek(from)?;
@@ -416,7 +417,7 @@ fn track_fragment(
     let first_sample = samples[0].clone();
 
     // Readahead.
-    let end = samples[samples.len()-1].fpos;
+    let end = samples[samples.len() - 1].fpos;
     readahead(data_ref.file.as_ref(), samples[0].fpos, end + 1_000_000);
 
     // Track fragment.

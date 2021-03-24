@@ -28,7 +28,6 @@ pub fn open_mp4(path: impl Into<String>) -> io::Result<Arc<MP4>> {
     Ok(mp4)
 }
 
-
 struct LruCacheEntry<T> {
     item:      T,
     last_used: Instant,

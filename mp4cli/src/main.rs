@@ -197,7 +197,6 @@ pub struct DebugOpts {
     pub input: String,
 }
 
-
 fn main() -> Result<()> {
     let opts = MainOpts::from_args();
 

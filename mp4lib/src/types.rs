@@ -410,7 +410,6 @@ impl ToBytes for ZString {
     }
 }
 
-
 impl Display for ZString {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.as_str())

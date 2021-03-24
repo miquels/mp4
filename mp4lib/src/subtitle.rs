@@ -28,7 +28,7 @@ impl FromStr for Format {
     fn from_str(format: &str) -> Result<Self, Self::Err> {
         let mut format = format;
         if let Some(idx) = format.rfind(".") {
-            format = &format[idx + 1 ..];
+            format = &format[idx + 1..];
         }
         match format {
             "vtt" => Ok(Format::Vtt),
@@ -96,13 +96,7 @@ fn ptime(secs: f64, format: Format) -> String {
     format!("{:02}:{:02}:{:02}{}{:03}", tm, mins, secs, sep, millis)
 }
 
-fn cue(
-    format: Format,
-    timescale: u32,
-    seq: Option<u32>,
-    sample: SampleInfo,
-    subt: Tx3GTextSample,
-) -> String {
+fn cue(format: Format, timescale: u32, seq: Option<u32>, sample: SampleInfo, subt: Tx3GTextSample) -> String {
     use std::fmt::Write;
     let eol = if format == Format::Vtt { "\n" } else { "\r\n" };
 
@@ -116,7 +110,13 @@ fn cue(
         let _ = write!(cue, "{}", eol);
     }
 
-    let _ = write!(cue, "{} --> {}{}", ptime(starttime, format), ptime(endtime, format), eol);
+    let _ = write!(
+        cue,
+        "{} --> {}{}",
+        ptime(starttime, format),
+        ptime(endtime, format),
+        eol
+    );
 
     for line in subt.text.split('\n') {
         //if format == Format::Vtt {
@@ -188,13 +188,17 @@ pub fn subtitle_extract(
 /// Outputs raw data. If this is to be sent in a CMAF container, it
 /// still needs to be wrapped by a moof + mdat.
 pub fn fragment(mp4: &MP4, format: Format, frag: &FragmentSource) -> io::Result<Vec<u8>> {
-
-    let track = mp4.movie().track_by_id(frag.src_track_id).ok_or_else(|| {
-        ioerr!(NotFound, "track not found")
-    })?;
+    let track = mp4
+        .movie()
+        .track_by_id(frag.src_track_id)
+        .ok_or_else(|| ioerr!(NotFound, "track not found"))?;
     let mut iter = track.sample_info_iter();
     let timescale = iter.timescale();
-    let eol = if format == Format::Vtt { &b"\n"[..] } else { &b"\r\n"[..] };
+    let eol = if format == Format::Vtt {
+        &b"\n"[..]
+    } else {
+        &b"\r\n"[..]
+    };
 
     let mut buffer = Vec::new();
     let mut seq = frag.from_sample;
@@ -233,7 +237,6 @@ pub fn fragment(mp4: &MP4, format: Format, frag: &FragmentSource) -> io::Result<
 /// Input and output formats can be webvtt and srt, format will be
 /// converted if needed. Output character set is always utf-8.
 pub fn external(path: &str, to_format: &str) -> io::Result<(&'static str, Vec<u8>)> {
-
     // see if input and output formats are supported.
     let infmt = Format::from_str(path)?;
     let outfmt = Format::from_str(to_format)?;
@@ -251,7 +254,7 @@ pub fn external(path: &str, to_format: &str) -> io::Result<(&'static str, Vec<u8
         let mut buf = Vec::new();
         let mut rdr = stf.file.into_inner();
         rdr.read_to_end(&mut buf)?;
-        return Ok((mime, buf))
+        return Ok((mime, buf));
     }
 
     let mut buf = String::new();
@@ -261,7 +264,6 @@ pub fn external(path: &str, to_format: &str) -> io::Result<(&'static str, Vec<u8
 
     let mut seq = 1;
     while let Some(sample) = stf.next() {
-
         // sequence and timestamps.
         use std::fmt::Write;
         let _ = write!(buf, "{}{}", seq, eol);
@@ -309,16 +311,16 @@ struct SubtitleSample {
 }
 
 struct SubtitleFile {
-    file:   io::BufReader<fs::File>,
-    buf:    Vec<u8>,
-    is_utf8:    bool,
+    file:    io::BufReader<fs::File>,
+    buf:     Vec<u8>,
+    is_utf8: bool,
 }
 
 impl SubtitleFile {
     fn open(path: &str, format: Format) -> io::Result<SubtitleFile> {
         let mut file = fs::File::open(path)?;
         match format {
-            Format::Vtt|Format::Srt => {},
+            Format::Vtt | Format::Srt => {},
             other => return Err(ioerr!(InvalidData, "unsupported input format {:?}", other)),
         }
 
@@ -326,7 +328,7 @@ impl SubtitleFile {
         let mut buf = [0u8; 3];
         let mut is_bom = true;
         if let Ok(_) = file.read_exact(&mut buf) {
-            if &buf[..] == &[ 0xef_u8, 0xbb, 0xbf ] {
+            if &buf[..] == &[0xef_u8, 0xbb, 0xbf] {
                 is_bom = true;
             }
         }
@@ -335,14 +337,13 @@ impl SubtitleFile {
         }
 
         Ok(SubtitleFile {
-            file:   io::BufReader::new(file),
-            buf:    Vec::new(),
+            file:    io::BufReader::new(file),
+            buf:     Vec::new(),
             is_utf8: true,
         })
     }
 
     fn read_line(&mut self, line: &mut String) -> io::Result<usize> {
-
         let start_len = line.len();
 
         // read next line and change CRLF -> LF.
@@ -437,7 +438,6 @@ fn parse_times(line: &str) -> Option<(u32, u32)> {
 
 // parse 04:02.500
 fn parse_time(time: &str) -> Option<u32> {
-
     // Split in [hh:]mm:ss and subseconds.
     let mut fields = if time.contains(".") {
         time.split('.')
@@ -493,7 +493,7 @@ fn remove_unsupported_tags(line: impl Into<String>) -> String {
         if c == '<' {
             let tag = parse_tag(&mut iter);
             match tag.as_str() {
-                "i"|"/i"|"b"|"/b"|"u"|"/u" => {
+                "i" | "/i" | "b" | "/b" | "u" | "/u" => {
                     r.push('<');
                     r.push_str(&tag);
                     r.push('>');

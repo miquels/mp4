@@ -1,7 +1,7 @@
 //! On the fly HLS / DASH packaging.
 //!
-use std::collections::{HashMap, HashSet};
 use std::cmp;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 use std::fmt::Write;
 use std::io;
@@ -14,24 +14,24 @@ use once_cell::sync::Lazy;
 use scan_fmt::scan_fmt;
 
 use crate::fragment::FragmentSource;
-use crate::lru_cache::LruCache;
 use crate::io::MemBuffer;
+use crate::lru_cache::LruCache;
 use crate::mp4box::MP4;
 use crate::segment::Segment;
 use crate::serialize::ToBytes;
 use crate::subtitle::Format;
-use crate::types::FourCC;
 use crate::track::SpecificTrackInfo;
+use crate::types::FourCC;
 
 struct ExtXMedia {
-    type_:   &'static str,
-    group_id:   String,
-    name:       String,
-    channels:   Option<u16>,
-    language:   Option<&'static str>,
+    type_:       &'static str,
+    group_id:    String,
+    name:        String,
+    channels:    Option<u16>,
+    language:    Option<&'static str>,
     auto_select: bool,
-    default:    bool,
-    uri:        String,
+    default:     bool,
+    uri:         String,
 }
 
 impl Display for ExtXMedia {
@@ -45,7 +45,11 @@ impl Display for ExtXMedia {
             write!(f, r#"LANGUAGE="{}","#, lang)?;
         }
         write!(f, r#"NAME="{}","#, self.name)?;
-        write!(f, r#"AUTOSELECT={},"#, if self.auto_select { "YES" } else { "NO" })?;
+        write!(
+            f,
+            r#"AUTOSELECT={},"#,
+            if self.auto_select { "YES" } else { "NO" }
+        )?;
         write!(f, r#"DEFAULT={},"#, if self.default { "YES" } else { "NO" })?;
         write!(f, r#"URI="{}""#, self.uri)?;
         write!(f, "\n")
@@ -54,14 +58,14 @@ impl Display for ExtXMedia {
 
 #[derive(Default)]
 struct ExtXStreamInf {
-    audio:  Option<String>,
+    audio:         Option<String>,
     avg_bandwidth: Option<u64>,
-    bandwidth:  u64,
-    codecs: Vec<String>,
-    subtitles: bool,
-    resolution: (u16, u16),
-    frame_rate: f64,
-    uri: String,
+    bandwidth:     u64,
+    codecs:        Vec<String>,
+    subtitles:     bool,
+    resolution:    (u16, u16),
+    frame_rate:    f64,
+    uri:           String,
 }
 
 impl Display for ExtXStreamInf {
@@ -92,15 +96,14 @@ impl Display for ExtXStreamInf {
 }
 
 fn lang(lang: &str) -> (Option<&'static str>, &'static str) {
-
     // shortcut for known language tags, with localized name.
     match lang {
-        "en"|"eng"       => return (Some("en"), "English"),
-        "nl"|"dut"|"nld" => return (Some("nl"), "Nederlands"),
-        "fr"|"fra"|"fre" => return (Some("fr"), "Français"),
-        "de"|"ger"       => return (Some("de"), "German"),
-        "es"|"spa"       => return (Some("es"), "Español"),
-        "za"|"afr"|"zaf" => return (Some("za"), "Afrikaans"),
+        "en" | "eng" => return (Some("en"), "English"),
+        "nl" | "dut" | "nld" => return (Some("nl"), "Nederlands"),
+        "fr" | "fra" | "fre" => return (Some("fr"), "Français"),
+        "de" | "ger" => return (Some("de"), "German"),
+        "es" | "spa" => return (Some("es"), "Español"),
+        "za" | "afr" | "zaf" => return (Some("za"), "Afrikaans"),
         _ => {},
     }
 
@@ -147,7 +150,6 @@ fn lang_from_path(path: &str) -> &str {
 /// The subtitle path needs to be relative, just a filename, and
 /// the file needs to be in the same subdir as the mp4 file.
 pub fn hls_master(mp4: &MP4, subs: Option<&Vec<String>>) -> String {
-
     let mut m = String::new();
     m += "#EXTM3U\n";
     m += "# Created by mp4lib.rs\n";
@@ -183,14 +185,14 @@ pub fn hls_master(mp4: &MP4, subs: Option<&Vec<String>>) -> String {
         }
 
         let audio = ExtXMedia {
-            type_: "AUDIO",
-            group_id: format!("audio/{}", info.codec_id),
-            language: lang,
-            channels: Some(info.channel_count + info.lfe_channel as u16),
-            name: name,
+            type_:       "AUDIO",
+            group_id:    format!("audio/{}", info.codec_id),
+            language:    lang,
+            channels:    Some(info.channel_count + info.lfe_channel as u16),
+            name:        name,
             auto_select: true,
-            default: false,
-            uri: format!("media.{}.m3u8", track.id),
+            default:     false,
+            uri:         format!("media.{}.m3u8", track.id),
         };
 
         let _ = write!(m, "{}", audio);
@@ -217,14 +219,14 @@ pub fn hls_master(mp4: &MP4, subs: Option<&Vec<String>>) -> String {
 
             let dotdot = if sub.starts_with("/") { "" } else { "../" };
             let sub = ExtXMedia {
-                type_: "SUBTITLES",
-                group_id: "subs".to_string(),
-                language: lang,
-                channels: None,
-                name: name.to_string(),
+                type_:       "SUBTITLES",
+                group_id:    "subs".to_string(),
+                language:    lang,
+                channels:    None,
+                name:        name.to_string(),
                 auto_select: true,
-                default: false,
-                uri: format!("{}{}:media.m3u8", dotdot, sub),
+                default:     false,
+                uri:         format!("{}{}:media.m3u8", dotdot, sub),
             };
 
             let _ = write!(m, "{}", sub);
@@ -250,19 +252,18 @@ pub fn hls_master(mp4: &MP4, subs: Option<&Vec<String>>) -> String {
         sublang.insert(name.to_string());
 
         let sub = ExtXMedia {
-            type_: "SUBTITLES",
-            group_id: "subs".to_string(),
-            language: lang,
-            channels: None,
-            name: name.to_string(),
+            type_:       "SUBTITLES",
+            group_id:    "subs".to_string(),
+            language:    lang,
+            channels:    None,
+            name:        name.to_string(),
             auto_select: true,
-            default: false,
-            uri: format!("media.{}.m3u8", track.id),
+            default:     false,
+            uri:         format!("media.{}.m3u8", track.id),
         };
 
         let _ = write!(m, "{}", sub);
     }
-
 
     // video track.
     m += "\n# VIDEO\n";
@@ -274,17 +275,17 @@ pub fn hls_master(mp4: &MP4, subs: Option<&Vec<String>>) -> String {
         let avg_bw = track.size / cmp::max(1, track.duration.as_secs());
         let mut ext = ExtXStreamInf {
             bandwidth: avg_bw,
-            codecs: vec![ info.codec_id.clone() ],
+            codecs: vec![info.codec_id.clone()],
             resolution: (info.width, info.height),
             frame_rate: info.frame_rate,
             uri: format!("media.{}.m3u8", track.id),
             subtitles: sublang.len() > 0,
-            .. ExtXStreamInf::default()
+            ..ExtXStreamInf::default()
         };
         for (audio_codec, audio_bw) in audio_codecs.iter() {
             ext.audio = Some(format!("audio/{}", audio_codec));
             ext.bandwidth = avg_bw + audio_bw;
-            ext.codecs = vec![ info.codec_id.clone(), audio_codec.to_string() ];
+            ext.codecs = vec![info.codec_id.clone(), audio_codec.to_string()];
             let _ = write!(m, "{}", ext);
         }
         if audio_codecs.len() == 0 {
@@ -296,15 +297,20 @@ pub fn hls_master(mp4: &MP4, subs: Option<&Vec<String>>) -> String {
 }
 
 fn track_to_segments(mp4: &MP4, track_id: u32, duration: Option<u32>) -> io::Result<Arc<Vec<Segment>>> {
-    static SEGMENTS: Lazy<LruCache<(String, u32), Arc<Vec<Segment>>>> = {
-        Lazy::new(|| LruCache::new(Duration::new(60, 0)))
-    };
-    let name = mp4.input_file.as_ref().ok_or_else(|| ioerr!(NotFound, "file not found"))?;
+    static SEGMENTS: Lazy<LruCache<(String, u32), Arc<Vec<Segment>>>> =
+        { Lazy::new(|| LruCache::new(Duration::new(60, 0))) };
+    let name = mp4
+        .input_file
+        .as_ref()
+        .ok_or_else(|| ioerr!(NotFound, "file not found"))?;
     let key = (name.to_string(), track_id);
     if let Some(segments) = SEGMENTS.get(&key) {
         return Ok(segments);
     }
-    let track = mp4.movie().track_by_id(track_id).ok_or_else(|| ioerr!(NotFound, "track not found"))?;
+    let track = mp4
+        .movie()
+        .track_by_id(track_id)
+        .ok_or_else(|| ioerr!(NotFound, "track not found"))?;
     let segments = crate::segment::track_to_segments(track, duration)?;
     let segments = Arc::new(segments);
     SEGMENTS.put(key, segments.clone());
@@ -312,9 +318,10 @@ fn track_to_segments(mp4: &MP4, track_id: u32, duration: Option<u32>) -> io::Res
 }
 
 pub fn hls_track(mp4: &MP4, track_id: u32) -> io::Result<String> {
-
     let movie = mp4.movie();
-    let trak = movie.track_by_id(track_id).ok_or_else(|| ioerr!(NotFound, "track not found"))?;
+    let trak = movie
+        .track_by_id(track_id)
+        .ok_or_else(|| ioerr!(NotFound, "track not found"))?;
     let handler = trak.media().handler();
     let handler_type = handler.handler_type;
 
@@ -346,7 +353,9 @@ pub fn hls_track(mp4: &MP4, track_id: u32) -> io::Result<String> {
         _ => return Err(ioerr!(InvalidInput, "unknown handler type {}", handler_type)),
     };
 
-    let longest = segments.iter().fold(0u32, |l, s| std::cmp::max((s.duration + 0.5) as u32, l));
+    let longest = segments
+        .iter()
+        .fold(0u32, |l, s| std::cmp::max((s.duration + 0.5) as u32, l));
     let independent = seg_duration.is_none();
 
     let mut m = String::new();
@@ -366,7 +375,16 @@ pub fn hls_track(mp4: &MP4, track_id: u32) -> io::Result<String> {
     for (seq, seg) in segments.iter().enumerate() {
         // Skip segments that are < 0.1 ms.
         if seg.duration.partial_cmp(&0.0001) == Some(std::cmp::Ordering::Greater) {
-            m += &format!("#EXTINF:{},\n{}/c.{}.{}.{}-{}.{}\n", seg.duration, prefix, track_id, seq + 1, seg.start_sample, seg.end_sample, suffix);
+            m += &format!(
+                "#EXTINF:{},\n{}/c.{}.{}.{}-{}.{}\n",
+                seg.duration,
+                prefix,
+                track_id,
+                seq + 1,
+                seg.start_sample,
+                seg.end_sample,
+                suffix
+            );
         }
     }
     m += "#EXT-X-ENDLIST\n";
@@ -375,7 +393,7 @@ pub fn hls_track(mp4: &MP4, track_id: u32) -> io::Result<String> {
 }
 
 pub fn hls_subtitle(path: &str, duration: f64) -> String {
-    let duration = (duration+ 0.5).round();
+    let duration = (duration + 0.5).round();
     let mut m = String::new();
     let dotslash = if path.contains(":") { "./" } else { "" };
     m += "#EXTM3U\n";
@@ -402,13 +420,16 @@ pub fn hls_subtitle(path: &str, duration: f64) -> String {
 /// - e/PATH/TO/EXTERNAL/SUBTITLES/FILE/format.EXT
 ///
 /// Returns (mime-type, data).
-pub fn fragment_from_uri(mp4: &MP4, url_tail: &str, range: Option<Range<u64>>) -> io::Result<(&'static str, Vec<u8>, u64)> {
-
+pub fn fragment_from_uri(
+    mp4: &MP4,
+    url_tail: &str,
+    range: Option<Range<u64>>,
+) -> io::Result<(&'static str, Vec<u8>, u64)> {
     // initialization section.
     if let Ok((track_id, ext)) = scan_fmt!(url_tail, "init.{}.{}{e}", u32, String) {
         match ext.as_str() {
             "mp4" => {
-                let init = crate::fragment::media_init_section(&mp4, &[ track_id ]);
+                let init = crate::fragment::media_init_section(&mp4, &[track_id]);
                 let mut buffer = MemBuffer::new();
                 init.write(&mut buffer)?;
                 let data = buffer.into_vec();
@@ -426,16 +447,18 @@ pub fn fragment_from_uri(mp4: &MP4, url_tail: &str, range: Option<Range<u64>>) -
 
     // external file.
     if url_tail.starts_with("e/") {
-
         // if url_tail ends in /format.VTT|SRT|..>, then strip it off and
         // pass that as the format. Otherwise, pass url_tail as the format.
         // subtitles::external only looks at the extension anyway.
         let mut filename = &url_tail[2..];
-        let format = filename.rfind("/format.").map(|idx| {
-            let fmt = &filename[idx+1..];
-            filename = &filename[..idx];
-            fmt
-        }).unwrap_or(filename);
+        let format = filename
+            .rfind("/format.")
+            .map(|idx| {
+                let fmt = &filename[idx + 1..];
+                filename = &filename[..idx];
+                fmt
+            })
+            .unwrap_or(filename);
 
         // Find the dirname of the mp4 file and add the subtitle filename.
         let path_ref = mp4.input_file.as_ref();
@@ -483,23 +506,34 @@ struct FragmentKey {
     source: FragmentSource,
 }
 
-fn movie_fragment(mp4: &MP4, seq_id: u32, fs: FragmentSource, range: Option<Range<u64>>) -> io::Result<(Vec<u8>, u64)> {
-    static FRAGMENTS: Lazy<LruCache<FragmentKey, Arc<Vec<u8>>>> = {
-        Lazy::new(|| LruCache::new(Duration::new(60, 0)))
-    };
+fn movie_fragment(
+    mp4: &MP4,
+    seq_id: u32,
+    fs: FragmentSource,
+    range: Option<Range<u64>>,
+) -> io::Result<(Vec<u8>, u64)> {
+    static FRAGMENTS: Lazy<LruCache<FragmentKey, Arc<Vec<u8>>>> =
+        { Lazy::new(|| LruCache::new(Duration::new(60, 0))) };
 
     // Remap usize range to u64.
     let range = if let Some(range) = range {
         if range.end >= usize::MAX as u64 {
             return Err(ioerr!(InvalidData, "requested fragment too large"));
         }
-        Some(Range{ start: range.start as usize, end: range.end as usize })
+        Some(Range {
+            start: range.start as usize,
+            end:   range.end as usize,
+        })
     } else {
         None
     };
 
     // See if we have the data in the cache.
-    let file = mp4.input_file.as_ref().map(|s| s.to_owned()).unwrap_or(String::new());
+    let file = mp4
+        .input_file
+        .as_ref()
+        .map(|s| s.to_owned())
+        .unwrap_or(String::new());
     let key = FragmentKey {
         file,
         source: fs.clone(),
@@ -511,14 +545,17 @@ fn movie_fragment(mp4: &MP4, seq_id: u32, fs: FragmentSource, range: Option<Rang
         frag
     } else {
         // Not in the cache, so generate it.
-        let frag = crate::fragment::movie_fragment(&mp4, seq_id, &[ fs ])?;
+        let frag = crate::fragment::movie_fragment(&mp4, seq_id, &[fs])?;
         let mut buffer = MemBuffer::new();
         frag.to_bytes(&mut buffer)?;
         Arc::new(buffer.into_vec())
     };
 
     // remap no range to full range.
-    let mut range = range.unwrap_or(Range { start: 0, end: data.len() });
+    let mut range = range.unwrap_or(Range {
+        start: 0,
+        end:   data.len(),
+    });
 
     // check for invalid range.
     if range.start >= range.end || range.start >= data.len() {
