@@ -4,13 +4,15 @@ use std::cmp;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 use std::fmt::Write;
+use std::fs;
 use std::io;
 use std::ops::Range;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use once_cell::sync::Lazy;
+use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 use scan_fmt::scan_fmt;
 
 use crate::fragment::FragmentSource;
@@ -22,6 +24,21 @@ use crate::serialize::ToBytes;
 use crate::subtitle::Format;
 use crate::track::SpecificTrackInfo;
 use crate::types::FourCC;
+
+const PATH_ESCAPE: &AsciiSet = &CONTROLS
+    .add(b' ')
+    .add(b'<')
+    .add(b'>')
+    .add(b'&')
+    .add(b'%')
+    .add(b'#')
+    .add(b'$')
+    .add(b'+')
+    .add(b'=')
+    .add(b'\\')
+    .add(b'"')
+    .add(b'\'')
+    .add(b'?');
 
 struct ExtXMedia {
     type_:       &'static str,
@@ -168,12 +185,30 @@ fn subtitle_info_from_name(name: &str) -> (String, bool, bool) {
     (lang, sdh, forced)
 }
 
+fn lookup_subtitles(mp4path: Option<&String>) -> Vec<String> {
+    let mut subs = Vec::new();
+    if let Some(dir) = mp4path.and_then(|p| Path::new(p.as_str()).parent()) {
+        let _ = (|| {
+            for entry in fs::read_dir(dir)? {
+                let entry = entry?;
+                if let Some(filename) = entry.file_name().to_str() {
+                    if filename.ends_with(".srt") || filename.ends_with(".vtt") {
+                        subs.push(filename.to_string());
+                    }
+                }
+            }
+            Ok::<_, io::Error>(())
+        })();
+    }
+    subs
+}
+
 /// Generate a HLS playlist.
 ///
 /// You can pass in external subtitles using the `subs` argument.
 /// The subtitle path needs to be relative, just a filename, and
 /// the file needs to be in the same subdir as the mp4 file.
-pub fn hls_master(mp4: &MP4, subs: Option<&Vec<String>>) -> String {
+pub fn hls_master(mp4: &MP4, external_subs: bool) -> String {
     let mut m = String::new();
     m += "#EXTM3U\n";
     m += "# Created by mp4lib.rs\n";
@@ -228,8 +263,9 @@ pub fn hls_master(mp4: &MP4, subs: Option<&Vec<String>>) -> String {
     let mut sublang = HashSet::new();
     let mut subtitles = Vec::new();
 
-    if let Some(subs) = subs {
-        for sub in subs {
+    // External subtitles.
+    if external_subs {
+        for sub in lookup_subtitles(mp4.input_file.as_ref()).iter() {
             // look up language and language code.
             let (language, sdh, forced) = subtitle_info_from_name(sub);
             let (lang, name) = lang(&language);
@@ -240,8 +276,10 @@ pub fn hls_master(mp4: &MP4, subs: Option<&Vec<String>>) -> String {
             }
             sublang.insert(name.to_string());
 
-            let dotdot = if sub.starts_with("/") { "" } else { "../" };
-            let sub = ExtXMedia {
+            // FIXME: encode here, or when serializing to m3u8 ?
+            let sub = utf8_percent_encode(&sub, PATH_ESCAPE).to_string();
+
+            let subm = ExtXMedia {
                 type_:       "SUBTITLES",
                 group_id:    "subs".to_string(),
                 language:    lang,
@@ -251,12 +289,13 @@ pub fn hls_master(mp4: &MP4, subs: Option<&Vec<String>>) -> String {
                 default:     false,
                 forced,
                 sdh,
-                uri:         format!("{}{}:media.m3u8", dotdot, sub),
+                uri:         format!("./media.ext:{}:as.m3u8", sub),
             };
-            subtitles.push(sub);
+            subtitles.push(subm);
         }
     }
 
+    // Embedded subtitles.
     for track in crate::track::track_info(mp4).iter() {
         match &track.specific_info {
             SpecificTrackInfo::SubtitleTrackInfo(_) => {},
@@ -443,10 +482,16 @@ pub fn hls_track(mp4: &MP4, track_id: u32) -> io::Result<String> {
     Ok(m)
 }
 
-pub fn hls_subtitle(path: &str, duration: f64) -> String {
-    let duration = (duration + 0.5).round();
+fn hls_subtitle(dirname: &str, name: &str) -> io::Result<String> {
+    let path = join_path(dirname, name);
+    let duration = crate::subtitle::duration(&path)?;
+
+    let mut name = name.to_string();
+    if !name.ends_with(".vtt") {
+        name.push_str(":into.vtt");
+    }
+
     let mut m = String::new();
-    let dotslash = if path.contains(":") { "./" } else { "" };
     m += "#EXTM3U\n";
     m += "#EXT-X-VERSION:6\n";
     m += "## Created by mp4lib.rs\n";
@@ -454,13 +499,76 @@ pub fn hls_subtitle(path: &str, duration: f64) -> String {
     m += &format!("#EXT-X-TARGETDURATION:{}\n", duration);
     m += "#EXT-X-PLAYLIST-TYPE:VOD\n";
     m += &format!("#EXTINF:{}\n", duration);
-    m += dotslash;
-    m += path;
+    m += "/e/";
+    m += &utf8_percent_encode(&name, PATH_ESCAPE).to_string();
     m += "\n#EXT-X-ENDLIST\n";
-    m
+    Ok(m)
 }
 
-/// Translates the tail of an URL into a fMP4 init section or fragment.
+/// Translates the tail of an URL into a manifest (m3u8 playlist or dash mpd).
+/// 
+/// - master.m3u8                => HLS master playlist
+/// - media.<TRACK>.m3u8         => HLS track playlist
+/// - media.ext:NAME.EXT:as.m3u8 => external file
+///
+/// Returns (mime-type, data, data_fullsize).
+///
+pub fn manifest_from_uri(
+    mp4: &MP4,
+    url_tail: &str,
+    range: Option<Range<u64>>,
+) -> io::Result<(&'static str, Vec<u8>, u64)> {
+    let (mime, data) = manifest_from_uri_(mp4, url_tail)?;
+    let size = data.len() as u64;
+    if let Some(mut range) = range {
+        if range.start >= size {
+            return Err(ioerr!(InvalidData, "416 Invalid range"));
+        }
+        if range.end > size {
+            range.end = size;
+        }
+        if range.start > 0 && range.end != size {
+            let data = data[range.start as usize .. range.end as usize].to_vec();
+            return Ok((mime, data, size));
+        }
+    }
+    Ok((mime, data, size))
+}
+
+fn manifest_from_uri_(
+    mp4: &MP4,
+    url_tail: &str,
+) -> io::Result<(&'static str, Vec<u8>)> {
+
+    let data = if url_tail == "main.m3u8" || url_tail == "master.m3u8" {
+
+        // HLS master playlist.
+        hls_master(&mp4, true)
+    } else if let Ok(track) = scan_fmt!(url_tail, "media.{}.m3u8{e}", u32) {
+
+        // HLS media playlist.
+        hls_track(&mp4, track)?
+    } else if let Ok((name, _)) = scan_fmt!(url_tail, "media.ext:{}:{}.m3u8{e}", String, String) {
+
+        // external file next to .mp4.
+        if name.ends_with(".srt") || name.ends_with(".vtt") {
+
+            // subtitles.
+            let dirname = dirname(mp4.input_file.as_ref(), &name)?;
+            hls_subtitle(&dirname, &name)?
+        } else {
+
+            // unknown external file type.
+            return Err(ioerr!(InvalidData, "415 Unsupported Media Type"));
+        }
+    } else {
+        return Err(ioerr!(InvalidData, "415 Unsupported Media Type"));
+    };
+
+    Ok(("application/x-mpegurl", data.into_bytes()))
+}
+
+/// Translates the tail of an URL into an MP4 init segment or media segment.
 ///
 /// - init.TRACK_ID.mp4 => initialization segment for track TRACK_ID.
 /// - init.TRACK_ID.vtt => initialization segment for track TRACK_ID.
@@ -468,14 +576,15 @@ pub fn hls_subtitle(path: &str, duration: f64) -> String {
 /// - a/c.TRACK_ID.SEQUENCE.FROM_SAMPLE.TO_SAMPLE.m4a => audio moof + mdat
 /// - v/c.TRACK_ID.SEQUENCE.FROM_SAMPLE.TO_SAMPLE.mp4 => video moof + mdat
 /// - s/c.TRACK_ID.SEQUENCE.FROM_SAMPLE.TO_SAMPLE.vtt => webvtt fragment
-/// - e/PATH/TO/EXTERNAL/SUBTITLES/FILE/format.EXT
+/// - e/externalfile.ext[:into.ext] => external file next to mp4 (.srt, .vtt)
 ///
-/// Returns (mime-type, data).
-pub fn fragment_from_uri(
+/// Returns (mime-type, data, data_fullsize).
+pub fn media_from_uri(
     mp4: &MP4,
     url_tail: &str,
     range: Option<Range<u64>>,
 ) -> io::Result<(&'static str, Vec<u8>, u64)> {
+
     // initialization section.
     if let Ok((track_id, ext)) = scan_fmt!(url_tail, "init.{}.{}{e}", u32, String) {
         match ext.as_str() {
@@ -497,28 +606,16 @@ pub fn fragment_from_uri(
     }
 
     // external file.
-    if url_tail.starts_with("e/") {
-        // if url_tail ends in /format.VTT|SRT|..>, then strip it off and
-        // pass that as the format. Otherwise, pass url_tail as the format.
-        // subtitles::external only looks at the extension anyway.
-        let mut filename = &url_tail[2..];
-        let format = filename
-            .rfind("/format.")
-            .map(|idx| {
-                let fmt = &filename[idx + 1..];
-                filename = &filename[..idx];
-                fmt
-            })
-            .unwrap_or(filename);
+    if url_tail.starts_with("e/") && url_tail.ends_with(".vtt") {
+        // subtitles.
+        let mut iter = url_tail[2..].split(':');
+        let name = iter.next().unwrap();
+        let format = iter.next().unwrap_or(name);
 
-        // Find the dirname of the mp4 file and add the subtitle filename.
-        let path_ref = mp4.input_file.as_ref();
-        let mut path = match path_ref.and_then(|f| Path::new(f).parent()) {
-            Some(path) => path.to_path_buf(),
-            None => return Err(ioerr!(NotFound, "no base directory for {}", filename)),
-        };
-        path.push(filename);
-        let (mime, data) = crate::subtitle::external(path.to_str().unwrap(), format)?;
+        let dirname = dirname(mp4.input_file.as_ref(), name)?;
+        let path = join_path(dirname, name);
+
+        let (mime, data) = crate::subtitle::external(&path, format)?;
         let size = data.len() as u64;
         return Ok((mime, data, size));
     }
@@ -641,3 +738,20 @@ fn movie_fragment(
         Ok((data, size))
     }
 }
+
+fn dirname(ref_path: Option<&String>, name: &str) -> io::Result<String> {
+    if name.contains(":") || name.contains("/") || name.contains("\\") || name.contains("\0") {
+        return Err(ioerr!(InvalidInput, "400 invalid filename {}", name));
+    }
+    ref_path
+        .and_then(|p| Path::new(p).parent())
+        .and_then(|p| p.to_str().map(|p| p.to_string()))
+        .ok_or_else(|| ioerr!(InvalidInput, "400 no basedir for {}", name))
+}
+
+fn join_path(dir: impl Into<String>, name: &str) -> String {
+    let mut dir = PathBuf::from(dir.into());
+    dir.push(Path::new(name));
+    dir.to_str().unwrap().to_string()
+}
+

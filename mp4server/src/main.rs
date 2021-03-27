@@ -17,7 +17,6 @@ use headers::{
 };
 use http::{HeaderMap, HeaderValue, Method, StatusCode};
 use percent_encoding::percent_decode_str;
-use scan_fmt::scan_fmt;
 use structopt::StructOpt;
 use tokio::task;
 use warp::Filter;
@@ -119,11 +118,11 @@ async fn route_request(req: Request) -> Result<Response, Error> {
     if let Some(sub) = subtitle(&req).await? {
         return Ok(sub);
     }
-    if let Some(hls) = hls(&req).await? {
-        return Ok(hls);
+    if let Some(manifest) = manifest(&req).await? {
+        return Ok(manifest);
     }
-    if let Some(segment) = segment(&req).await? {
-        return Ok(segment);
+    if let Some(media) = media(&req).await? {
+        return Ok(media);
     }
     serve_file(&req).await
 }
@@ -331,7 +330,6 @@ impl Request {
 }
 
 struct FileServer {
-    path:        String,
     file:        fs::File,
     modified:    SystemTime,
     size:        u64,
@@ -361,7 +359,6 @@ impl FileServer {
         let lastmod_hdr = LastModified::from(modified);
 
         Ok(FileServer {
-            path,
             file,
             modified,
             size,
@@ -372,7 +369,6 @@ impl FileServer {
 
     fn from_mp4stream(strm: &Mp4Stream) -> FileServer {
         FileServer {
-            path:        strm.path().to_owned(),
             file:        strm.file().try_clone().unwrap(),
             modified:    strm.modified(),
             size:        strm.size(),
@@ -545,68 +541,51 @@ async fn mp4pseudo(req: &Request) -> Result<Option<Response>, Error> {
     Ok(response.body(body).ok())
 }
 
-async fn lookup_subtitles(mp4path: &str, subs: &mut Vec<String>) -> io::Result<()> {
-    let dir = match std::path::Path::new(mp4path).parent() {
-        Some(dir) => dir,
-        None => return Ok(()),
-    };
-    task::block_in_place(|| {
-        for entry in fs::read_dir(dir)? {
-            let entry = entry?;
-            if let Some(filename) = entry.file_name().to_str() {
-                if filename.ends_with(".srt") || filename.ends_with(".vtt") {
-                    subs.push(filename.to_string());
-                }
-            }
-        }
-        Ok::<_, io::Error>(())
-    })
-}
-
 // serve m3u8 playlist files:
 //
 // - master.m3u8 / main.m3u8
 // - media.<TRACK_ID>.m3u8
 //
-async fn hls(req: &Request) -> Result<Option<Response>, Error> {
+async fn manifest(req: &Request) -> Result<Option<Response>, Error> {
     if !req.extra.ends_with(".m3u8") {
         return Ok(None);
     }
 
     // if OPTIONS quit now
     if req.method == Method::OPTIONS {
-        return Ok(Some(options(req, true, false)));
+        return Ok(Some(options(req, true, true)));
     }
 
     // use FileServer for conditionals and initial response.
     let fs = FileServer::open(&req.fpath).await?;
 
-    let track = if req.extra == "main.m3u8" || req.extra == "master.m3u8" {
-        None
-    } else {
-        if let Ok(track) = scan_fmt!(&req.extra, "media.{}.m3u8{e}", u32) {
-            Some(track)
-        } else {
-            return Err(Error::new(404, "playlist not found"));
-        }
-    };
+    if req.extra != "main.m3u8" && req.extra != "master.m3u8" && !req.extra.starts_with("media.") {
+        return Err(Error::new(404, "playlist not found"));
+    }
 
     fs.check_conditionals(req)?;
-    let mut response = fs.build_response(req, true, false);
+    let mut response = fs.build_response(req, true, true);
     let resp_headers = response.headers_mut().unwrap();
 
     // open and parse mp4 file.
-    let mp4 = mp4lib::lru_cache::open_mp4(&req.fpath)?;
+    let mp4 = task::block_in_place(|| mp4lib::lru_cache::open_mp4(&req.fpath))?;
+    let range = req.parse_range(&fs)?;
 
-    let body = if let Some(track) = track {
-        mp4lib::stream::hls_track(&mp4, track)?
-    } else {
-        let mut subs = Vec::new();
-        let _ = lookup_subtitles(&fs.path, &mut subs).await;
-        mp4lib::stream::hls_master(&mp4, Some(&subs))
-    };
-    resp_headers.insert("content-type", HeaderValue::from_static("application/x-mpegurl"));
+    let (mime, body, size) = task::block_in_place(|| mp4lib::stream::manifest_from_uri(&mp4, &req.extra, range.clone()))?;
+
+    resp_headers.insert("content-type", HeaderValue::from_static(mime));
     resp_headers.typed_insert(ContentLength(body.len() as u64));
+
+    if let Some(mut range) = range {
+        // adjust range to what we actually got.
+        range.end = range.start + body.len() as u64;
+        let cr = match ContentRange::bytes(range, size) {
+            Ok(cr) => cr,
+            Err(_) => return Err(Error::new(416, "Invalid Range")),
+        };
+        resp_headers.typed_insert(cr);
+        response = response.status(206);
+    }
 
     // if HEAD quit now
     if req.method == Method::HEAD {
@@ -616,9 +595,9 @@ async fn hls(req: &Request) -> Result<Option<Response>, Error> {
     Ok(response.body(body.into()).ok())
 }
 
-async fn segment(req: &Request) -> Result<Option<Response>, Error> {
+async fn media(req: &Request) -> Result<Option<Response>, Error> {
     let e = &req.extra;
-    if !e.starts_with("a/") && !e.starts_with("v/") && !e.starts_with("s/") && !e.starts_with("init.") {
+    if !e.starts_with("a/") && !e.starts_with("v/") && !e.starts_with("s/") && !e.starts_with("e/") && !e.starts_with("init.") {
         return Ok(None);
     }
 
@@ -634,10 +613,10 @@ async fn segment(req: &Request) -> Result<Option<Response>, Error> {
     let resp_headers = response.headers_mut().unwrap();
 
     // open and parse mp4 file.
-    let mp4 = mp4lib::lru_cache::open_mp4(&req.fpath)?;
+    let mp4 = task::block_in_place(|| mp4lib::lru_cache::open_mp4(&req.fpath))?;
 
     let range = req.parse_range(&fs)?;
-    let (mime, body, size) = mp4lib::stream::fragment_from_uri(&mp4, &req.extra, range.clone())?;
+    let (mime, body, size) = task::block_in_place(|| mp4lib::stream::media_from_uri(&mp4, &req.extra, range.clone()))?;
     resp_headers.insert("content-type", HeaderValue::from_static(mime));
     resp_headers.typed_insert(ContentLength(body.len() as u64));
 
@@ -665,6 +644,7 @@ async fn subtitle(req: &Request) -> Result<Option<Response>, Error> {
         return Ok(None);
     }
     if req.extra == "" {
+        // let serve_file handle it.
         return Ok(None);
     }
 
@@ -678,19 +658,7 @@ async fn subtitle(req: &Request) -> Result<Option<Response>, Error> {
     let mut response = fs.build_response(req, true, false);
     let resp_headers = response.headers_mut().unwrap();
 
-    let (mime, body) = if req.extra.ends_with(".m3u8") {
-        let duration = task::block_in_place(|| mp4lib::subtitle::duration(&fs.path))?;
-        let mut path = fs.path.rsplit('/').next().unwrap().to_string();
-        if !path.ends_with(".vtt") {
-            path += ":into.vtt";
-        }
-        (
-            "application/x-mpegurl",
-            mp4lib::stream::hls_subtitle(&path, duration).into_bytes(),
-        )
-    } else {
-        task::block_in_place(|| mp4lib::subtitle::external(&req.fpath, &req.extra))?
-    };
+    let (mime, body) = task::block_in_place(|| mp4lib::subtitle::external(&req.fpath, &req.extra))?;
     resp_headers.insert("content-type", HeaderValue::from_static(mime));
     resp_headers.typed_insert(ContentLength(body.len() as u64));
 
