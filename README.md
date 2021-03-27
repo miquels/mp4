@@ -56,6 +56,9 @@ a standard MP4 file, you'll only get video, the first audio track, and
 no subtitles, while if you serve a HLS playlist, you can pick and
 choose using the player's UI.
 
+Both embedded subtitles (tx3g format) and external subtitles (.srt, .vtt)
+are supported and will be included.
+
 ```
 https://your.server/path/file.mp4/main.m3u8
 ```
@@ -63,10 +66,13 @@ This serves the main HLS playlist. In it, there references to playlists for indi
 video/audio/subtitle tracks. Those refer to media segments.
 
 - track playlist: `file.mp4/media.TRACK_ID.m3u8`
+- external subtitles playlist: `file.mp4/media.ext:FILENAME.EXT:as.m3u8`
 - media initialization section: `file.mp4/init.TRACK_ID.mp4`
+
 - video segments: `file.mp4/v/c.TRACK_ID.FROMSAMPLE-TOSAMPLE.mp4`
 - audio segments: `file.mp4/a/c.TRACK_ID.FROMSAMPLE-TOSAMPLE.m4a`
 - subtitle segments: `file.mp4/a/c.TRACK_ID.FROMSAMPLE-TOSAMPLE.m4a`
+- external subtitles: `file.mp4/e/FILENAME.EXT[:into.vtt]`
 
 # Copyright and License
 
