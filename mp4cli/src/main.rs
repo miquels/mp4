@@ -531,7 +531,7 @@ fn debug(opts: DebugOpts) -> Result<()> {
         let m3u = if let Some(track) = opts.track {
             mp4lib::stream::hls_track(&mp4, track)?
         } else {
-            mp4lib::stream::hls_master(&mp4, None)
+            mp4lib::stream::hls_master(&mp4, false)
         };
         print!("{}", m3u);
         return Ok(());
