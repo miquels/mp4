@@ -79,7 +79,12 @@ impl AvcDecoderConfigurationRecord {
         let seq_parameter_sets = parameter_sets.sequence_parameters_sets()?;
         for sps in &seq_parameter_sets {
             if let Some(t_inf) = sps.vui_parameters.as_ref().and_then(|v| v.timing_info.as_ref()) {
-                return Ok(Some(t_inf.frame_rate()));
+                let fr = t_inf.frame_rate();
+                if fr > 120.0 {
+                    log::warn!("AvcDecoderConfigurationRecord::frame_rate: impossible rate {}, ignoring", fr);
+                    return Ok(None);
+                }
+                return Ok(Some(fr));
             }
         }
         Ok(None)
