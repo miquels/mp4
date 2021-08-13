@@ -8,6 +8,9 @@ use std::io;
 
 use crate::boxes::*;
 
+const MAX_SEGMENT_SIZE: u32 = 7_200_000;
+const MAX_SEGMENT_APPEND: u32 = 800_000;
+
 /// A segment.
 ///
 /// Use the `SampleInfo` iterator to get per-sample information:
@@ -19,6 +22,46 @@ pub struct Segment {
     pub end_sample:   u32,
     pub start_time:   f64,
     pub duration:     f64,
+}
+
+#[derive(Default, Clone, Debug)]
+struct Segment_ {
+    start_sample: u32,
+    end_sample:   u32,
+    start_time:   f64,
+    duration:     f64,
+    size:         u32,
+    is_sync:      bool,
+}
+
+fn squish(s: Vec<Segment_>) -> Vec<Segment> {
+    let mut v = Vec::new();
+    let mut idx = 0;
+    while idx < s.len() {
+
+        // Create a new Segment struct from the Segment_ struct.
+        let st = &s[idx];
+        let mut sb = Segment {
+            start_sample: st.start_sample,
+            end_sample: st.end_sample,
+            start_time: st.start_time,
+            duration: st.duration,
+        };
+
+        // If the next segment is small, and non-sync, tack it onto this one.
+        if idx + 1 < s.len() {
+            let sn = &s[idx + 1];
+            if !sn.is_sync && sn.size < MAX_SEGMENT_APPEND {
+                sb.end_sample = sn.end_sample;
+                sb.duration += sn.duration;
+                idx += 1;
+            }
+        }
+
+        v.push(sb);
+        idx += 1;
+    }
+    v
 }
 
 /// Parse a track into segments, each starting at a sync sample.
@@ -43,6 +86,7 @@ pub fn track_to_segments(trak: &TrackBox, segment_duration: Option<u32>) -> io::
 
     let mut stts_iter = table.time_to_sample().iter();
     let mut ctss_iter = table.composition_time_to_sample().map(|ctts| ctts.iter());
+    let mut stsz_iter = table.sample_size().iter();
     let mut stss_iter = match table.sync_samples() {
         Some(stss) => Some(stss.iter()),
         None => {
@@ -59,7 +103,8 @@ pub fn track_to_segments(trak: &TrackBox, segment_duration: Option<u32>) -> io::
     let mut segments = Vec::new();
     let mut cur_time = 0;
     let mut cur_seg_duration = 0u32;
-    let mut cur_segment = Segment::default();
+    let mut cur_seg_size = 0u32;
+    let mut cur_segment = Segment_::default();
     cur_segment.start_sample = 1;
 
     for cur_sample in 1..=u32::MAX {
@@ -73,42 +118,56 @@ pub fn track_to_segments(trak: &TrackBox, segment_duration: Option<u32>) -> io::
                 if cur_segment.start_sample > 0 && cur_seg_duration > 0 {
                     cur_segment.end_sample = cur_sample - 1;
                     cur_segment.duration = cur_seg_duration as f64 / timescale;
+                    cur_segment.size = cur_seg_size;
                     segments.push(cur_segment.clone());
                 }
                 break;
             },
         };
 
+        let sample_size = stsz_iter.next().unwrap_or(0);
+
+        let mut is_sync = true;
         let do_next_seg = match segment_duration {
             Some(d) => cur_seg_duration >= d,
             None => {
-                if let Some(stss_iter) = stss_iter.as_mut() {
+                is_sync = if let Some(stss_iter) = stss_iter.as_mut() {
                     stss_iter.next().unwrap_or(false)
                 } else {
                     // no stss iter? every sample is a sync sample.
                     true
+                };
+                if cur_seg_size + sample_size > MAX_SEGMENT_SIZE {
+                    true
+                } else {
+                    is_sync
                 }
             },
         };
+
         if do_next_seg || cur_sample == 1 {
             // A new segment starts here.
             if cur_sample > 1 {
                 // Finish the previous segment and push it onto the vec.
                 cur_segment.end_sample = cur_sample - 1;
                 cur_segment.duration = cur_seg_duration as f64 / timescale;
+                cur_segment.size = cur_seg_size;
                 segments.push(cur_segment.clone());
             }
             cur_segment.start_sample = cur_sample;
             let tm = cur_time as i64 + (delta as i64) - (comp_time_shift as i64);
             let tm = std::cmp::max(0, tm);
             cur_segment.start_time = tm as f64 / timescale;
+            cur_segment.is_sync = is_sync;
             cur_seg_duration = 0;
+            cur_seg_size = 0;
         }
         cur_seg_duration += sample_duration;
+        cur_seg_size += sample_size;
         cur_time += sample_duration;
     }
 
-    Ok(segments)
+    Ok(squish(segments))
 }
 
 /// Parse a track into segments, based on a list of segment time/duration.
