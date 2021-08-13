@@ -239,6 +239,11 @@ pub fn hls_master(mp4: &MP4, external_subs: bool) -> String {
             SpecificTrackInfo::AudioTrackInfo(info) => info,
             _ => continue,
         };
+        // Skip empty tracks.
+        if track.duration.as_secs() == 0 {
+            continue;
+        }
+
         if audio_codecs.len() == 0 {
             m += "# AUDIO\n";
         }
@@ -316,6 +321,10 @@ pub fn hls_master(mp4: &MP4, external_subs: bool) -> String {
             SpecificTrackInfo::SubtitleTrackInfo(_) => {},
             _ => continue,
         }
+        // Skip empty tracks.
+        if track.duration.as_secs() == 0 {
+            continue;
+        }
 
         let (lang, name) = lang(&track.language.to_string());
         if !want_language(lang, &SUBTITLE_LANG) {
@@ -378,6 +387,10 @@ pub fn hls_master(mp4: &MP4, external_subs: bool) -> String {
             SpecificTrackInfo::VideoTrackInfo(info) => info,
             _ => continue,
         };
+        // Skip empty tracks.
+        if track.duration.as_secs() == 0 {
+            continue;
+        }
         let avg_bw = track.size / cmp::max(1, track.duration.as_secs());
         let mut ext = ExtXStreamInf {
             bandwidth: avg_bw,
