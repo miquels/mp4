@@ -25,6 +25,14 @@ use crate::subtitle::Format;
 use crate::track::SpecificTrackInfo;
 use crate::types::FourCC;
 
+const SUBTITLE_LANG: [&'static str; 5] = [
+    "en",
+    "nl",
+    "de",
+    "fr",
+    "es",
+];
+
 const PATH_ESCAPE: &AsciiSet = &CONTROLS
     .add(b' ')
     .add(b'<')
@@ -151,6 +159,13 @@ fn lang(lang: &str) -> (Option<&'static str>, &'static str) {
     let code = language.to_639_1().unwrap_or(language.to_639_3());
 
     (Some(code), language.to_name())
+}
+
+fn want_language(lang: Option<&str>, list: &[&str]) -> bool {
+    match lang {
+        Some(lang) => list.iter().any(|&e| e == lang),
+        None => true,
+    }
 }
 
 fn subtitle_info_from_name(name: &str) -> (String, bool, bool) {
@@ -303,6 +318,9 @@ pub fn hls_master(mp4: &MP4, external_subs: bool) -> String {
         }
 
         let (lang, name) = lang(&track.language.to_string());
+        if !want_language(lang, &SUBTITLE_LANG) {
+            continue;
+        }
         let (name, forced) = if let Some(ref name) = track.name {
             let forced = name.0.to_lowercase().contains("forced");
             (name.0.to_string(), forced)
