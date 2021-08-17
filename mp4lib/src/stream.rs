@@ -89,6 +89,25 @@ impl Display for ExtXMedia {
     }
 }
 
+// If there are entries with the same name, add #1, #2 etc to the name to make them unique.
+fn uniqify(media: &mut Vec<ExtXMedia>) {
+
+    let mut hm = HashMap::new();
+    for idx in 0 .. media.len() {
+        let e = hm.entry(&media[idx].name).or_insert(Vec::new());
+        e.push(idx);
+    }
+    let dups: Vec<_> = hm.drain().map(|e| e.1).filter(|v| v.len() > 1).collect();
+
+    for indexes in dups {
+        let mut n = 1;
+        for idx in indexes {
+            media[idx].name += &format!(" #{}", n);
+            n += 1;
+        }
+    }
+}
+
 #[derive(Default)]
 struct ExtXStreamInf {
     audio:         Option<String>,
@@ -232,6 +251,7 @@ pub fn hls_master(mp4: &MP4, external_subs: bool) -> String {
     m += "\n";
 
     let mut audio_codecs = HashMap::new();
+    let mut audio_tracks = Vec::new();
 
     // Audio tracks.
     for track in crate::track::track_info(mp4).iter() {
@@ -259,7 +279,9 @@ pub fn hls_master(mp4: &MP4, external_subs: bool) -> String {
 
         let (lang, name) = lang(&track.language.to_string());
         let mut name = name.to_string();
-        if info.channel_count >= 3 {
+        if let Some(ref handler_name) = track.name {
+            name += &format!(" - {}", handler_name);
+        } else if info.channel_count >= 3 {
             name += &format!(" ({}.{})", info.channel_count, info.lfe_channel as u8);
         }
 
@@ -275,7 +297,11 @@ pub fn hls_master(mp4: &MP4, external_subs: bool) -> String {
             sdh:         false,
             uri:         format!("media.{}.m3u8", track.id),
         };
+        audio_tracks.push(audio);
+    }
 
+    uniqify(&mut audio_tracks);
+    for audio in &audio_tracks {
         let _ = write!(m, "{}", audio);
     }
 
@@ -375,6 +401,7 @@ pub fn hls_master(mp4: &MP4, external_subs: bool) -> String {
             a.forced.cmp(&b.forced)
         });
 
+        uniqify(&mut subtitles);
         for sub in &subtitles {
             let _ = write!(m, "{}", sub);
         }
@@ -398,7 +425,7 @@ pub fn hls_master(mp4: &MP4, external_subs: bool) -> String {
             resolution: (info.width, info.height),
             frame_rate: info.frame_rate,
             uri: format!("media.{}.m3u8", track.id),
-            subtitles: sublang.len() > 0,
+            subtitles: subtitles.len() > 0,
             ..ExtXStreamInf::default()
         };
         for (audio_codec, audio_bw) in audio_codecs.iter() {
