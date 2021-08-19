@@ -557,7 +557,7 @@ fn hls_subtitle(dirname: &str, name: &str) -> io::Result<String> {
     m += &format!("#EXT-X-TARGETDURATION:{}\n", duration);
     m += "#EXT-X-PLAYLIST-TYPE:VOD\n";
     m += &format!("#EXTINF:{}\n", duration);
-    m += "/e/";
+    m += "e/";
     m += &utf8_percent_encode(&name, PATH_ESCAPE).to_string();
     m += "\n#EXT-X-ENDLIST\n";
     Ok(m)
