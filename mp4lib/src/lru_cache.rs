@@ -19,7 +19,13 @@ pub fn open_mp4(path: impl Into<String>) -> io::Result<Arc<MP4>> {
         Some(mp4) => mp4,
         None => {
             let mut reader = Mp4File::open(&path)?;
-            let mp4 = Arc::new(MP4::read(&mut reader)?);
+            let mut mp4 = MP4::read(&mut reader)?;
+            // TODO?: we probably should only do this for fragmented mp4,
+            // not for pseudo-streaming mp4.
+            for track in mp4.movie_mut().tracks_mut().iter_mut() {
+                track.initial_empty_edit_to_dwell();
+            }
+            let mp4 = Arc::new(mp4);
             MP4_FILES.put(path, mp4.clone());
             mp4
         },

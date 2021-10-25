@@ -67,7 +67,18 @@ impl TrackBox {
         if let Some(edts) = first_box!(&self.boxes, EditBox) {
             if let Some(elst) = edts.boxes.iter().next() {
                 if elst.entries.len() > 0 {
-                    return Some(&elst);
+                    return Some(elst);
+                }
+            }
+        }
+        None
+    }
+
+    fn edit_list_mut(&mut self) -> Option<&mut EditListBox> {
+        if let Some(edts) = first_box_mut!(&mut self.boxes, EditBox) {
+            if let Some(elst) = edts.boxes.iter_mut().next() {
+                if elst.entries.len() > 0 {
+                    return Some(elst);
                 }
             }
         }
@@ -76,20 +87,61 @@ impl TrackBox {
 
     /// Check the editlist to see if there's an initial composition time shift (see 8.6.1.3.1).
     ///
-    /// Return value is expressed in media timescale units.
+    /// If there are multiple edits, this will only return the offset from the
+    /// first edit. TODO: maybe we should return an error in that case.
+    ///
+    /// If there's an initial empty edit, it is ignored. Deal with it another way.
+    ///
+    /// Return value is expressed in movie timescale units.
     pub fn composition_time_shift(&self) -> Option<u32> {
         if let Some(elst) = self.edit_list() {
-            if elst.entries[0].media_time < 0 {
-                // This is an empty edit. Assume the easy case, that there is
-                // a single empty edit followed by the rest of the track.
-                let media_timescale = self.media().media_header().timescale as u64;
-                let segment_duration = elst.entries[0].segment_duration as u64;
-                let offset = (media_timescale * segment_duration / self.movie_timescale as u64) as u32;
-                return Some(offset);
+           for entry in &elst.entries {
+                if elst.entries[0].media_time > 0 {
+                    return Some(entry.media_time as u32);
+                }
             }
-            return Some(elst.entries[0].media_time as u32);
         }
         None
+    }
+
+
+    /// See if the track has an edit list. If so, check if there is an initial
+    /// empty edit. If so, delete that edit, and extend the duration of the
+    /// first sample with the length of the empty edit.
+    pub fn initial_empty_edit_to_dwell(&mut self) {
+        let edit = match self.edit_list_mut() {
+            Some(elst) => {
+                if elst.entries[0].media_time >= 0 {
+                    return;
+                }
+                elst.entries.vec.remove(0)
+            },
+            None => return,
+        };
+
+        let media_timescale = self.media().media_header().timescale as u64;
+        let segment_duration = edit.segment_duration as u64;
+        let offset = (media_timescale * segment_duration / self.movie_timescale as u64) as u32;
+
+        let stts = self
+            .media_mut()
+            .media_info_mut()
+            .sample_table_mut()
+            .time_to_sample_mut();
+
+        let entries = &mut stts.entries;
+        if entries.len() == 0 {
+            return;
+        }
+
+        if entries[0].count > 1 {
+            let entry = entries[0].clone();
+            entries.vec.insert(0, entry);
+            entries[0].count = 1;
+            entries[1].count -= 1;
+        }
+
+        entries[0].delta += offset;
     }
 
     /// Check if this track is valid (has header and media boxes).

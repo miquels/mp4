@@ -637,7 +637,7 @@ pub use doc_hidden::*;
 /// - `u32`: 4 bytes size.
 ///
 pub struct Array<N, T> {
-    vec:              Vec<T>,
+    pub(crate) vec:   Vec<T>,
     num_entries_type: std::marker::PhantomData<N>,
 }
 
