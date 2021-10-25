@@ -104,9 +104,22 @@ async fn serve(opts: ServeOpts) -> Result<()> {
     let log = warp::log("mp4");
     let data = data.with(log);
 
-    let addr = IpAddr::V6(Ipv6Addr::from(0u128));
+#[cfg(target_os = "freebsd")]
+    {
+        use std::net::Ipv4Addr;
+        let addrv4 = IpAddr::V4(Ipv4Addr::from(0u32));
+        let addrv6 = IpAddr::V6(Ipv6Addr::from(0u128));
+        tokio::join!(
+            warp::serve(data.clone()).run(SocketAddr::new(addrv4, opts.port)),
+            warp::serve(data).run(SocketAddr::new(addrv6, opts.port))
+        );
+    }
 
-    warp::serve(data).run(SocketAddr::new(addr, opts.port)).await;
+#[cfg(not(target_os = "freebsd"))]
+    {
+        let addr = IpAddr::V6(Ipv6Addr::from(0u128));
+        warp::serve(data).run(SocketAddr::new(addr, opts.port)).await;
+    }
 
     Ok(())
 }
