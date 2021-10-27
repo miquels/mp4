@@ -137,6 +137,9 @@ async fn route_request(req: Request) -> Result<Response, Error> {
     if let Some(media) = media(&req).await? {
         return Ok(media);
     }
+    if let Some(info) = info(&req).await? {
+        return Ok(info);
+    }
     serve_file(&req).await
 }
 
@@ -643,6 +646,40 @@ async fn media(req: &Request) -> Result<Option<Response>, Error> {
         resp_headers.typed_insert(cr);
         response = response.status(206);
     }
+
+    // if HEAD quit now
+    if req.method == Method::HEAD {
+        return Ok(response.body(hyper::Body::empty()).ok());
+    }
+
+    Ok(response.body(body.into()).ok())
+}
+
+async fn info(req: &Request) -> Result<Option<Response>, Error> {
+    if req.extra != "info" {
+        return Ok(None);
+    }
+
+    // if OPTIONS quit now
+    if req.method == Method::OPTIONS {
+        return Ok(Some(options(req, true, true)));
+    }
+
+    // use FileServer for conditionals and initial response.
+    let fs = FileServer::open(&req.fpath).await?;
+
+    fs.check_conditionals(req)?;
+    let mut response = fs.build_response(req, true, true);
+    let resp_headers = response.headers_mut().unwrap();
+
+    // open and parse mp4 file.
+    let mp4 = task::block_in_place(|| mp4lib::lru_cache::open_mp4(&req.fpath))?;
+
+    let info = mp4lib::track::track_info(&mp4);
+    let body = serde_json::to_string_pretty(&info).unwrap();
+
+    resp_headers.insert("content-type", HeaderValue::from_static("text/json"));
+    resp_headers.typed_insert(ContentLength(body.len() as u64));
 
     // if HEAD quit now
     if req.method == Method::HEAD {
