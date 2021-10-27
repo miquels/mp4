@@ -5,7 +5,7 @@
 use std::fmt::{self, Debug, Display};
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 
 use crate::boxes::*;
 use crate::mp4box::{BoxInfo, MP4};
@@ -18,9 +18,12 @@ pub use crate::sample_info::*;
 pub struct TrackInfo {
     pub id:            u32,
     pub track_type:    String,
+    #[serde(serialize_with = "seconds")]
     pub duration:      Duration,
     pub size:          u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub name:          Option<ZString>,
+    #[serde(serialize_with = "display")]
     pub language:      IsoLanguageCode,
     pub specific_info: SpecificTrackInfo,
 }
@@ -180,6 +183,7 @@ pub fn track_info(mp4: &MP4) -> Vec<TrackInfo> {
                 log::debug!("track::track_info: avcc.framerate == 0, estimate: {}", fr);
                 avc1_info.frame_rate = fr;
             }
+            avc1_info.frame_rate = (avc1_info.frame_rate * 1000.0).round() / 1000.0;
             info.specific_info = SpecificTrackInfo::VideoTrackInfo(avc1_info);
         } else if let Some(hevc) = first_box!(stsd.entries, HEVCSampleEntry) {
             let mut hevc_info = hevc.track_info();
@@ -190,6 +194,7 @@ pub fn track_info(mp4: &MP4) -> Vec<TrackInfo> {
                 log::debug!("track::track_info: hvcc.framerate == 0, estimate: {}", fr);
                 hevc_info.frame_rate = fr;
             }
+            hevc_info.frame_rate = (hevc_info.frame_rate * 1000.0).round() / 1000.0;
             info.specific_info = SpecificTrackInfo::VideoTrackInfo(hevc_info);
         } else if let Some(ac3) = first_box!(stsd.entries, Ac3SampleEntry) {
             let mut ac3 = ac3.track_info();
@@ -237,4 +242,21 @@ pub fn track_info(mp4: &MP4) -> Vec<TrackInfo> {
     }
 
     v
+}
+
+// Serialize helper.
+fn display<T, S>(value: &T, serializer: S) -> Result<S::Ok, S::Error>
+where
+    T: Display,
+    S: Serializer
+{
+    serializer.collect_str(value)
+}
+
+// Serialize helper.
+fn seconds<S>(value: &Duration, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer
+{
+    serializer.serialize_f64(value.as_millis() as f64 / 1000.0)
 }
