@@ -124,14 +124,25 @@ fn fmp4_track(movie: &MovieBox, trak: &TrackBox, track_id: u32) -> TrackBox {
 
     // add EditListBox, if present.
     if let Some(elst) = trak.edit_list() {
-        // We know there is at least one entry, and that entry is valid for the track duration.
-        // Copy it, and set the duration to 0 (meaning: valid for all track fragments).
-        let mut entry = elst.entries[0].clone();
-        entry.segment_duration = 0;
-        let mut elst = EditListBox::default();
-        elst.entries.push(entry);
+        // We can deal with only two edits:
+        // - an initial empty edit
+        // - one composition time offset edit over the entire length of the track
+        //   (usually used with version 0 ctts).
+        //
+        // If there are more than two edits, or of another type, then
+        // the movie will most likely not play correctly.
+        let mut new_elst = EditListBox::default();
+        for entry in &elst.entries {
+            let mut entry = entry.clone();
+            if entry.media_time >= 0 {
+                // set duration to zero, meaning entire movie.
+                // should we check if the original duration covers the entire movie?
+                entry.segment_duration = 0;
+            }
+            new_elst.entries.push(entry);
+        }
         let mut edts = EditBox::default();
-        edts.boxes.push(elst);
+        edts.boxes.push(new_elst);
         boxes.push(edts.to_mp4box());
     }
 
