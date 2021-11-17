@@ -93,9 +93,18 @@ impl Display for ExtXMedia {
 fn uniqify(media: &mut Vec<ExtXMedia>) {
 
     let mut hm = HashMap::new();
-    for idx in 0 .. media.len() {
-        let e = hm.entry(&media[idx].name).or_insert(Vec::new());
+    let mut idx = 0;
+    while idx < media.len() {
+        // XXX remove all tracks with "Commentary" in them. There is a main
+        // track in the same language, and duplicate tracks with the same
+        // language and the same codec confuse many players.
+        if media[idx].name.contains("Commentary") {
+            media.remove(idx);
+            continue;
+        }
+        let e = hm.entry(media[idx].name.clone()).or_insert(Vec::new());
         e.push(idx);
+        idx += 1;
     }
     let dups: Vec<_> = hm.drain().map(|e| e.1).filter(|v| v.len() > 1).collect();
 
