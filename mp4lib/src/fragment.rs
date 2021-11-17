@@ -74,11 +74,6 @@ pub fn media_init_section(mp4: &MP4, tracks: &[u32]) -> MP4 {
     // add the MovieExtendsBox.
     movie_boxes.push(MP4Box::MovieExtendsBox(MovieExtendsBox { boxes: mvex_boxes }));
 
-    // Temporary marker, for debugging.
-    let mut mdat = MediaDataBox::default();
-    mdat.data.push(b"\n---END---\n");
-    movie_boxes.push(mdat.to_mp4box());
-
     // finally add the MovieBox to the top level boxes!
     boxes.push(MP4Box::MovieBox(MovieBox { boxes: movie_boxes }));
 
