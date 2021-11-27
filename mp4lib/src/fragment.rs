@@ -444,6 +444,13 @@ fn track_fragment(
     let mut tfhd = TrackFragmentHeaderBox::default();
     tfhd.track_id = new_track_id;
     tfhd.default_base_is_moof = true;
+    // Set sample defaults.
+    let dfl = SampleDefaults::new(track, from, to);
+    tfhd.sample_description_index = Some(1);
+    tfhd.default_sample_duration = dfl.sample_duration;
+    tfhd.default_sample_size = dfl.sample_size;
+    tfhd.default_sample_flags = dfl.sample_flags.clone();
+
     traf.boxes.push(tfhd.to_mp4box());
 
     // SampleToGroupBox.
@@ -465,7 +472,6 @@ fn track_fragment(
     // XXX TODO: if we have multiple sync frames in this range,
     //           split them up over multiple trun boxes.
     //
-    let dfl = SampleDefaults::new(track, from, to);
     let flags = build_sample_flags(first_sample.is_sync);
     let first_sample_flags = if dfl.sample_flags.as_ref() != Some(&flags) {
         Some(flags)
