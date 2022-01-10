@@ -10,6 +10,7 @@ use crate::boxes::*;
 
 const MAX_SEGMENT_SIZE: u32 = 7_200_000;
 const MAX_SEGMENT_APPEND: u32 = 800_000;
+const MAX_SEGMENT_DURATION_MERGED: f64 = 6.0;
 
 /// A segment.
 ///
@@ -34,8 +35,77 @@ struct Segment_ {
     is_sync:      bool,
 }
 
+// Subtitle fragments are not in-sync wrt start/end time with
+// the main track. We could have as many fragments as lines
+// in the .vtt file. Still, merge fragments that are 'close'.
+fn squish_subtitle(s: Vec<Segment_>) -> Vec<Segment> {
+    let mut v = Vec::new();
+    let mut idx = 0;
+    let mut delta_t = 0f64;
+
+    while idx < s.len() {
+
+        // Create a new Segment struct from the Segment_ struct.
+        let st = &s[idx];
+        let mut sb = Segment {
+            start_sample: st.start_sample,
+            end_sample: st.end_sample,
+            start_time: st.start_time - delta_t,
+            duration: st.duration + delta_t,
+        };
+        delta_t = 0.0;
+
+        // Empty segment?
+        if s[idx].size <= 2 && idx < s.len() - 1 {
+            if st.duration > 10.0 {
+                // Long. Give some extra lead-time to the next sample.
+                delta_t = 5.0;
+                sb.duration -= 5.0;
+            } else {
+                // Short. Merge with the next sample.
+                let sn = &s[idx + 1];
+                sb.end_sample = sn.end_sample;
+                sb.duration += sn.duration;
+                idx += 1;
+            }
+        }
+
+        // Segment with content?
+        if s[idx].size > 2 && idx < s.len() - 1 {
+
+            while idx < s.len() -1 {
+                let sn = &s[idx + 1];
+
+                // always merge contiguous content.
+                if sn.size > 2 || sn.duration < 1.0 {
+                    sb.end_sample = sn.end_sample;
+                    sb.duration += sn.duration;
+                    idx += 1;
+                    continue;
+                }
+
+                // empty.
+                if sn.duration > 8.0 {
+                    // merge, but give some extra lead-time to the next sample.
+                    // shorter durations will be merged in the next iteration.
+                    sb.end_sample = sn.end_sample;
+                    sb.duration += sn.duration - 5.0;
+                    delta_t = 5.0;
+                    idx += 1;
+                }
+                break;
+            }
+        }
+                
+        v.push(sb);
+        idx += 1;
+    }
+    v
+}
+
 fn squish(s: Vec<Segment_>) -> Vec<Segment> {
     let mut v = Vec::new();
+
     let mut idx = 0;
     while idx < s.len() {
 
@@ -47,15 +117,43 @@ fn squish(s: Vec<Segment_>) -> Vec<Segment> {
             start_time: st.start_time,
             duration: st.duration,
         };
+        let mut segment_duration = st.duration;
+        let mut segment_size = st.size;
 
         // If the next segment is small, and non-sync, tack it onto this one.
+        // I should have documented this better- I'm sure why we do this.
         if idx + 1 < s.len() {
             let sn = &s[idx + 1];
             if !sn.is_sync && sn.size < MAX_SEGMENT_APPEND {
                 sb.end_sample = sn.end_sample;
                 sb.duration += sn.duration;
+                segment_size += sn.size;
+                segment_duration += sn.duration;
                 idx += 1;
             }
+        }
+
+        // Merge short segments. Not at the beginning though, having a
+        // few short segments at the start might be better.
+        //
+        // TODO: when creating the fmp4 segment, put these short segments
+        // in multiple MOOF/MDAT frags and flush after each one. Some
+        // players can take advantage of that.
+        let start_idx = idx;
+        while idx > 8 && idx + 1 < s.len() {
+            let sn = &s[idx + 1];
+            if segment_duration + sn.duration > MAX_SEGMENT_DURATION_MERGED ||
+               segment_size + sn.size > MAX_SEGMENT_SIZE {
+                // Make an exception if the initial segment is really short.
+                if !(idx == start_idx && s[idx].duration < 1.2) {
+                    break;
+                }
+            }
+            sb.end_sample = sn.end_sample;
+            sb.duration += sn.duration;
+            segment_size += sn.size;
+            segment_duration += sn.duration;
+            idx += 1;
         }
 
         v.push(sb);
@@ -137,6 +235,9 @@ pub fn track_to_segments(trak: &TrackBox, segment_duration: Option<u32>) -> io::
                     // no stss iter? every sample is a sync sample.
                     true
                 };
+                // Cut the segment here if it would become too big.
+                // Some players (e.g. my Chromecast) cannot handle
+                // large segments. I suspect it runs out of memory.
                 if cur_seg_size + sample_size > MAX_SEGMENT_SIZE {
                     true
                 } else {
@@ -167,7 +268,12 @@ pub fn track_to_segments(trak: &TrackBox, segment_duration: Option<u32>) -> io::
         cur_time += sample_duration;
     }
 
-    Ok(squish(segments))
+    let segments = if handler.is_subtitle() {
+        squish_subtitle(segments)
+    } else {
+        squish(segments)
+    };
+    Ok(segments)
 }
 
 /// Parse a track into segments, based on a list of segment time/duration.
