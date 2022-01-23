@@ -96,7 +96,7 @@ fn ptime(secs: f64, format: Format) -> String {
     format!("{:02}:{:02}:{:02}{}{:03}", tm, mins, secs, sep, millis)
 }
 
-fn cue(format: Format, timescale: u32, seq: Option<u32>, sample: SampleInfo, subt: Tx3GTextSample) -> String {
+fn cue(format: Format, timescale: u32, seq: Option<u32>, sample: SampleInfo, subt: Tx3GTextSample, tm_off: f64) -> String {
     use std::fmt::Write;
     let eol = if format == Format::Vtt { "\n" } else { "\r\n" };
 
@@ -106,15 +106,13 @@ fn cue(format: Format, timescale: u32, seq: Option<u32>, sample: SampleInfo, sub
 
     if let Some(seq) = seq {
         let _ = write!(cue, "{}{}", seq, eol);
-    } else {
-        let _ = write!(cue, "{}", eol);
     }
 
     let _ = write!(
         cue,
         "{} --> {}{}",
-        ptime(starttime, format),
-        ptime(endtime, format),
+        ptime(starttime - tm_off, format),
+        ptime(endtime - tm_off, format),
         eol
     );
 
@@ -175,7 +173,7 @@ pub fn subtitle_extract(
         if subt.text.as_str() == "" {
             continue;
         }
-        let cue = cue(format, timescale, Some(seq), sample, subt);
+        let cue = cue(format, timescale, Some(seq), sample, subt, 0f64);
         write!(output, "{}{}", cue, eol)?;
         seq += 1;
     }
@@ -187,7 +185,7 @@ pub fn subtitle_extract(
 ///
 /// Outputs raw data. If this is to be sent in a CMAF container, it
 /// still needs to be wrapped by a moof + mdat.
-pub fn fragment(mp4: &MP4, format: Format, frag: &FragmentSource) -> io::Result<Vec<u8>> {
+pub fn fragment(mp4: &MP4, format: Format, frag: &FragmentSource, tm_off: f64) -> io::Result<Vec<u8>> {
     let track = mp4
         .movie()
         .track_by_id(frag.src_track_id)
@@ -204,24 +202,27 @@ pub fn fragment(mp4: &MP4, format: Format, frag: &FragmentSource) -> io::Result<
     let mut seq = frag.from_sample;
     iter.seek(frag.from_sample)?;
 
+    if format == Format::Vtt {
+        buffer.extend_from_slice(b"WEBVTT\n\n");
+    }
+
     for sample in iter {
-        let mut data = mp4.data_ref(sample.fpos, sample.size as u64);
-        match Tx3GTextSample::from_bytes(&mut data) {
-            Ok(subt) => {
-                if format == Format::Tx3g {
-                    buffer.extend_from_slice(&data[..]);
-                } else {
-                    if format == Format::Vtt {
-                        buffer.extend_from_slice(b"WEBVTT\n\n");
+        if format == Format::Tx3g || sample.size > 2 {
+            let mut data = mp4.data_ref(sample.fpos, sample.size as u64);
+            match Tx3GTextSample::from_bytes(&mut data) {
+                Ok(subt) => {
+                    if format == Format::Tx3g {
+                        buffer.extend_from_slice(&data[..]);
+                    } else {
+                        if subt.text.len() > 0 {
+                            let cue = cue(format, timescale, None, sample, subt, tm_off);
+                            buffer.extend_from_slice(cue.as_bytes());
+                            buffer.extend_from_slice(eol);
+                        }
                     }
-                    if subt.text.len() > 0 {
-                        let cue = cue(format, timescale, None, sample, subt);
-                        buffer.extend_from_slice(cue.as_bytes());
-                        buffer.extend_from_slice(eol);
-                    }
-                }
-            },
-            Err(_) => {},
+                },
+                Err(_) => {},
+            }
         }
         seq += 1;
         if seq > frag.to_sample {
@@ -326,7 +327,7 @@ impl SubtitleFile {
 
         // skip UTF-8 BOM.
         let mut buf = [0u8; 3];
-        let mut is_bom = true;
+        let mut is_bom = false;
         if let Ok(_) = file.read_exact(&mut buf) {
             if &buf[..] == &[0xef_u8, 0xbb, 0xbf] {
                 is_bom = true;

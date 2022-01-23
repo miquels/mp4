@@ -610,7 +610,13 @@ async fn manifest(req: &Request) -> Result<Option<Response>, Error> {
     let mp4 = task::block_in_place(|| mp4lib::lru_cache::open_mp4(&req.fpath))?;
     let range = req.parse_range(&fs)?;
 
-    let (mime, body, size) = task::block_in_place(|| mp4lib::stream::manifest_from_uri(&mp4, &req.extra, range.clone()))?;
+    let simple_subs = match req.headers.typed_get::<UserAgent>() {
+        Some(ua) => ua.as_str().contains("ChromeCast") || ua.as_str().contains("Chromecast"),
+        None => false,
+    };
+    let (mime, body, size) = task::block_in_place(|| {
+        mp4lib::stream::manifest_from_uri(&mp4, &req.extra, simple_subs, range.clone())
+    })?;
 
     resp_headers.insert("content-type", HeaderValue::from_static(mime));
     resp_headers.typed_insert(ContentLength(body.len() as u64));
