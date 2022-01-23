@@ -13,15 +13,18 @@ use anyhow::Result;
 use bytes::Bytes;
 use headers::{
     ContentLength, ContentRange, ETag, HeaderMapExt, IfMatch, IfModifiedSince, IfNoneMatch, IfRange,
-    IfUnmodifiedSince, LastModified, Origin, Range, AcceptRanges,
+    IfUnmodifiedSince, LastModified, Origin, Range, AcceptRanges, CacheControl, UserAgent,
 };
 use http::{HeaderMap, HeaderValue, Method, StatusCode};
+use once_cell::sync::OnceCell;
 use percent_encoding::percent_decode_str;
 use structopt::StructOpt;
 use tokio::task;
 use warp::Filter;
 
 use mp4lib::pseudo::Mp4Stream;
+
+static EXE_STAMP: OnceCell<u32> = OnceCell::new();
 
 type Response<T = hyper::Body> = http::Response<T>;
 type RespBuilder = http::response::Builder;
@@ -69,9 +72,28 @@ async fn main() -> Result<()> {
     }
     builder.init();
 
+    let exe_stamp = std::env::current_exe()
+        .and_then(|p| p.metadata())
+        .map(|m| m.mtime() as u32)
+        .unwrap_or(0);
+    EXE_STAMP.set(exe_stamp).unwrap();
+
     match opts.cmd {
         Command::Serve(opts) => return serve(opts).await,
     }
+}
+
+// When creating ETags, add the timestamp of the current executable,
+// so that every time we recompile we get new unique tags.
+fn make_etag(tag: &str) -> ETag {
+    if tag.len() >= 2 {
+        if tag.starts_with("\"") && tag.ends_with("\"") {
+            let tag = &tag[1 .. tag.len() - 1];
+            let stamp = EXE_STAMP.get().expect("EXE_STAMP unset");
+            return ETag::from_str(&format!("\"{}.{:08x}\"", tag, stamp)).expect("bad etag");
+        }
+    }
+    ETag::from_str(tag).expect("bad etag")
 }
 
 async fn serve(opts: ServeOpts) -> Result<()> {
@@ -93,7 +115,10 @@ async fn serve(opts: ServeOpts) -> Result<()> {
                 async move {
                     let extra = tail.as_str().to_string();
                     let resp = match Request::parse(dir, method, extra, query, headers) {
-                        Ok(req) => route_request(req).await.unwrap_or_else(|e| e.into()),
+                        Ok(req) => {
+                            let resp = route_request(req).await.unwrap_or_else(|e| e.into());
+                            resp
+                        },
                         Err(e) => e.into(),
                     };
                     Ok::<_, warp::Rejection>(resp)
@@ -370,7 +395,7 @@ impl FileServer {
         let d = modified.duration_since(SystemTime::UNIX_EPOCH);
         let secs = d.map(|s| s.as_secs()).unwrap_or(0);
         let etag = format!("\"{:08x}.{:08x}.{}\"", secs, inode, size);
-        let etag_hdr = ETag::from_str(&etag).unwrap();
+        let etag_hdr = make_etag(&etag);
 
         let lastmod_hdr = LastModified::from(modified);
 
@@ -388,7 +413,7 @@ impl FileServer {
             file:        strm.file().try_clone().unwrap(),
             modified:    strm.modified(),
             size:        strm.size(),
-            etag_hdr:    ETag::from_str(&strm.etag()).unwrap(),
+            etag_hdr:    make_etag(&strm.etag()),
             lastmod_hdr: LastModified::from(strm.modified()),
         }
     }
@@ -426,26 +451,25 @@ impl FileServer {
     }
 
     // build initial response headers.
-    fn build_response(&self, req: &Request, cors: bool, range: bool) -> RespBuilder {
+    fn build_response(&self, req: &Request, cors: bool) -> RespBuilder {
 
         let mut response = http::Response::builder();
         let resp_headers = response.headers_mut().unwrap();
 
         resp_headers.typed_insert(self.etag_hdr.clone());
         resp_headers.typed_insert(self.lastmod_hdr.clone());
-        if range {
-            resp_headers.typed_insert(AcceptRanges::bytes());
-        }
+        resp_headers.typed_insert(CacheControl::new().with_no_cache());
+        resp_headers.typed_insert(AcceptRanges::bytes());
 
         if cors {
-            cors_headers(req, &mut response, range);
+            cors_headers(req, &mut response);
         }
 
         response
     }
 }
 
-fn cors_headers(req: &Request, response: &mut RespBuilder, range: bool) {
+fn cors_headers(req: &Request, response: &mut RespBuilder) {
     let resp_headers = response.headers_mut().unwrap();
 
     if let Some(host) = req.headers.typed_get::<Origin>() {
@@ -457,25 +481,24 @@ fn cors_headers(req: &Request, response: &mut RespBuilder, range: bool) {
         resp_headers.insert("access-control-allow-origin", HeaderValue::from_static("*"));
     }
 
-    let (aca, ace) = if range {
-        (
-            "if-match, if-unmodified-since, if-range, range",
-            "content-type, content-length, content-range",
-        )
-    } else {
-        ("if-none-match, if-modified-since", "content-type, content-length")
-    };
-    resp_headers.insert("access-control-allow-headers", HeaderValue::from_static(aca));
-    resp_headers.insert("access-control-expose-headers", HeaderValue::from_static(ace));
+    let h = HeaderValue::from_static("if-match, if-unmodified-since, if-range, origin, range");
+    resp_headers.insert("access-control-allow-headers", h);
+
+    let h = HeaderValue::from_static("server, content-range, accept-ranges");
+    resp_headers.insert("access-control-expose-headers", h);
+
+    let h = HeaderValue::from_static("GET, HEAD, OPTIONS");
+    resp_headers.insert("access-control-allow-methods", h);
+
 }
 
-fn options(req: &Request, cors: bool, range: bool) -> Response {
+fn options(req: &Request, cors: bool) -> Response {
     let mut response = http::Response::builder().status(204);
     let resp_headers = response.headers_mut().unwrap();
 
-    resp_headers.insert("allow", HeaderValue::from_static("get, head, options"));
+    resp_headers.insert("allow", HeaderValue::from_static("GET, HEAD, OPTIONS"));
     if cors {
-        cors_headers(req, &mut response, range);
+        cors_headers(req, &mut response);
     }
     response.body(hyper::Body::empty()).unwrap()
 }
@@ -495,7 +518,7 @@ async fn mp4pseudo(req: &Request) -> Result<Option<Response>, Error> {
 
     // if OPTIONS quit now
     if req.method == Method::OPTIONS {
-        return Ok(Some(options(req, false, false)));
+        return Ok(Some(options(req, true)));
     }
 
     let mut mp4stream = mp4lib::pseudo::Mp4Stream::open(&req.fpath, tracks)?;
@@ -504,7 +527,7 @@ async fn mp4pseudo(req: &Request) -> Result<Option<Response>, Error> {
     let fs = FileServer::from_mp4stream(&mp4stream);
     fs.check_conditionals(req)?;
 
-    let mut response = fs.build_response(req, false, false);
+    let mut response = fs.build_response(req, false);
     let resp_headers = response.headers_mut().unwrap();
     let mut status = 200;
 
@@ -569,7 +592,7 @@ async fn manifest(req: &Request) -> Result<Option<Response>, Error> {
 
     // if OPTIONS quit now
     if req.method == Method::OPTIONS {
-        return Ok(Some(options(req, true, true)));
+        return Ok(Some(options(req, true)));
     }
 
     // use FileServer for conditionals and initial response.
@@ -580,7 +603,7 @@ async fn manifest(req: &Request) -> Result<Option<Response>, Error> {
     }
 
     fs.check_conditionals(req)?;
-    let mut response = fs.build_response(req, true, true);
+    let mut response = fs.build_response(req, true);
     let resp_headers = response.headers_mut().unwrap();
 
     // open and parse mp4 file.
@@ -619,20 +642,22 @@ async fn media(req: &Request) -> Result<Option<Response>, Error> {
 
     // if OPTIONS quit now
     if req.method == Method::OPTIONS {
-        return Ok(Some(options(req, true, true)));
+        return Ok(Some(options(req, true)));
     }
 
     // use FileServer for conditionals and initial response.
     let fs = FileServer::open(&req.fpath).await?;
     fs.check_conditionals(req)?;
-    let mut response = fs.build_response(req, true, true);
+    let mut response = fs.build_response(req, true);
     let resp_headers = response.headers_mut().unwrap();
 
     // open and parse mp4 file.
     let mp4 = task::block_in_place(|| mp4lib::lru_cache::open_mp4(&req.fpath))?;
 
     let range = req.parse_range(&fs)?;
-    let (mime, body, size) = task::block_in_place(|| mp4lib::stream::media_from_uri(&mp4, &req.extra, range.clone()))?;
+    let (mime, body, size) = task::block_in_place(|| {
+        mp4lib::stream::media_from_uri(&mp4, &req.extra, range.clone())
+    })?;
     resp_headers.insert("content-type", HeaderValue::from_static(mime));
     resp_headers.typed_insert(ContentLength(body.len() as u64));
 
@@ -662,14 +687,14 @@ async fn info(req: &Request) -> Result<Option<Response>, Error> {
 
     // if OPTIONS quit now
     if req.method == Method::OPTIONS {
-        return Ok(Some(options(req, true, true)));
+        return Ok(Some(options(req, true)));
     }
 
     // use FileServer for conditionals and initial response.
     let fs = FileServer::open(&req.fpath).await?;
 
     fs.check_conditionals(req)?;
-    let mut response = fs.build_response(req, true, true);
+    let mut response = fs.build_response(req, true);
     let resp_headers = response.headers_mut().unwrap();
 
     // open and parse mp4 file.
@@ -700,12 +725,12 @@ async fn subtitle(req: &Request) -> Result<Option<Response>, Error> {
 
     // if OPTIONS quit now
     if req.method == Method::OPTIONS {
-        return Ok(Some(options(req, true, false)));
+        return Ok(Some(options(req, true)));
     }
 
     let fs = FileServer::open(&req.fpath).await?;
     fs.check_conditionals(req)?;
-    let mut response = fs.build_response(req, true, false);
+    let mut response = fs.build_response(req, true);
     let resp_headers = response.headers_mut().unwrap();
 
     let (mime, body) = task::block_in_place(|| mp4lib::subtitle::external(&req.fpath, &req.extra))?;
@@ -724,7 +749,7 @@ async fn serve_file(req: &Request) -> Result<Response, Error> {
 
     // if OPTIONS quit now
     if req.method == Method::OPTIONS {
-        return Ok(options(req, true, false));
+        return Ok(options(req, true));
     }
 
     if req.sep != "" {
@@ -734,7 +759,7 @@ async fn serve_file(req: &Request) -> Result<Response, Error> {
     let fs = FileServer::open(&req.fpath).await?;
     fs.check_conditionals(req)?;
 
-    let mut response = fs.build_response(req, false, false);
+    let mut response = fs.build_response(req, false);
     let resp_headers = response.headers_mut().unwrap();
     let mut status = 200;
 
