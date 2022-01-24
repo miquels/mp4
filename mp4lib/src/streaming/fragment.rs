@@ -401,6 +401,7 @@ pub fn movie_fragment(mp4: &MP4, seq_num: u32, source: &[FragmentSource]) -> io:
     Ok(boxes)
 }
 
+#[cfg(not(target_os = "macos"))]
 fn readahead(file: &fs::File, offset: u64, len: u64) {
     use std::os::unix::io::AsRawFd;
     unsafe {
@@ -410,6 +411,20 @@ fn readahead(file: &fs::File, offset: u64, len: u64) {
             len as libc::off_t,
             libc::POSIX_FADV_WILLNEED,
         );
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn readahead(file: &fs::File, offset: u64, len: u64) {
+    use std::os::unix::io::AsRawFd;
+    if offset < i64::MAX as u64 && len < i32::MAX as u64 {
+        let ra = libc::radvisory {
+            ra_offset: offset as i64,
+            ra_count: len as i32,
+        };
+        unsafe {
+            libc::fcntl(file.as_raw_fd(), libc::F_RDADVISE, &ra);
+        }
     }
 }
 

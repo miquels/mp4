@@ -346,13 +346,13 @@ macro_rules! def_struct {
 
     // @from_bytes: Generate the from_bytes details for a struct.
     (@from_bytes $name:ident, $base:tt, $stream:tt, $( $field:tt: $type:tt $(<$gen:tt>)? ),* $(,)?) => {
-        def_struct!(@from_bytes_ $name, $base, $stream, [ $( $field: $type $(<$gen>)?, )* ] -> [] [] []);
+        def_struct!(@from_bytes_ $name, $base, $stream, [ $( $field: $type $(<$gen>)?, )* ] -> [] [] [])
     };
     // Insert a skip instruction.
     (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ skip: $amount:tt, $($tt:tt)*]
         -> [ $($set:tt)* ] $set2:tt [ $($fields:tt)* ] ) => {
         def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [ $stream.skip($amount).unwrap(); ] ] $set2 [$($fields)*]);
+            [ $($set)* [ $stream.skip($amount).unwrap(); ] ] $set2 [$($fields)*])
     };
     // Set a field with type in curlies.
     (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: { $type:ty } $(<$gen:tt>)?, $($tt:tt)*]
@@ -364,7 +364,7 @@ macro_rules! def_struct {
     (@from_bytes_ $name:ident, $base:tt, $stream:ident, [ $field:tt: $type:tt $(<$gen:tt>)?, $($tt:tt)*]
         -> [ $($set:tt)* ] $set2:tt [ $($fields:tt)* ]) => {
         def_struct!(@from_bytes_ $name, $base, $stream, [ $($tt)* ] ->
-            [ $($set)* [ let $field = <$type $(<$gen>)?>::from_bytes($stream)?; ] ] $set2 [ $($fields)* $field ]);
+            [ $($set)* [ let $field = <$type $(<$gen>)?>::from_bytes($stream)?; ] ] $set2 [ $($fields)* $field ])
     };
     // Final.
     (@from_bytes_ $name:ident, [ $($base:tt)* ], $_stream:tt, [] -> [ $([$($set:tt)*])* ] [ $([$($set2:tt)*])* ] [ $($field:tt)* ]) => {

@@ -85,11 +85,11 @@ apple_name_item!(INameBox, name, b"name");
 /// Apple item.
 #[derive(Clone, Debug)]
 pub struct AppleItem {
-    tag:    FourCC,
-    name:   Option<INameBox>,
-    mean:   Option<IMeanBox>,
-    data:   Option<IDataBox>,
-    boxes:  Vec<GenericBox>,
+    pub tag:    FourCC,
+    pub name:   Option<INameBox>,
+    pub mean:   Option<IMeanBox>,
+    pub data:   Option<IDataBox>,
+    pub boxes:  Vec<GenericBox>,
 }
 
 impl FromBytes for AppleItem {
