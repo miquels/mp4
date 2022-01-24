@@ -223,7 +223,7 @@ fn main() -> Result<()> {
 }
 
 fn rewrite(opts: RewriteOpts) -> Result<()> {
-    let mut reader = Mp4File::open(&opts.input)?;
+    let mut reader = Mp4File::open(&opts.input, false)?;
     let mut mp4 = MP4::read(&mut reader)?;
 
     mp4lib::rewrite::movie_at_front(&mut mp4);
@@ -235,7 +235,7 @@ fn rewrite(opts: RewriteOpts) -> Result<()> {
 }
 
 fn subtitles(opts: SubtitlesOpts) -> Result<()> {
-    let mut reader = Mp4File::open(&opts.input)?;
+    let mut reader = Mp4File::open(&opts.input, false)?;
     let mp4 = MP4::read(&mut reader)?;
 
     let movie = mp4.movie();
@@ -253,7 +253,7 @@ fn subtitles(opts: SubtitlesOpts) -> Result<()> {
 }
 
 fn fragment(opts: FragmentOpts) -> Result<()> {
-    let mut reader = Mp4File::open(&opts.input)?;
+    let mut reader = Mp4File::open(&opts.input, false)?;
     let mp4 = MP4::read(&mut reader)?;
     let mut tracks = Vec::new();
 
@@ -361,7 +361,7 @@ fn short(track: &mp4lib::track::TrackInfo) {
 }
 
 fn mediainfo(opts: MediainfoOpts) -> Result<()> {
-    let mut reader = Mp4File::open(&opts.input)?;
+    let mut reader = Mp4File::open(&opts.input, false)?;
     let mp4 = MP4::read(&mut reader)?;
     let mp4 = mp4.clone();
 
@@ -410,7 +410,7 @@ fn mediainfo(opts: MediainfoOpts) -> Result<()> {
 }
 
 fn dump(opts: DumpOpts) -> Result<()> {
-    let mut reader = Mp4File::open(&opts.input)?;
+    let mut reader = Mp4File::open(&opts.input, false)?;
     let mp4 = MP4::read(&mut reader)?;
 
     let infh = reader.file();
@@ -467,7 +467,7 @@ fn dump(opts: DumpOpts) -> Result<()> {
 }
 
 fn boxes(opts: BoxesOpts) -> Result<()> {
-    let mut reader = Mp4File::open(&opts.input)?;
+    let mut reader = Mp4File::open(&opts.input, true)?;
     let mut mp4 = MP4::read(&mut reader)?;
 
     if let Some(opt_track) = opts.track {
@@ -524,7 +524,7 @@ fn boxes(opts: BoxesOpts) -> Result<()> {
 }
 
 fn debug(opts: DebugOpts) -> Result<()> {
-    let mut reader = Mp4File::open(&opts.input)?;
+    let mut reader = Mp4File::open(&opts.input, false)?;
     let mp4 = MP4::read(&mut reader)?;
 
     if opts.hls {

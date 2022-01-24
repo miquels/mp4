@@ -395,6 +395,7 @@ impl MP4 {
         valid
     }
 
+    /*
     pub(crate) fn data_ref(&self, offset: u64, len: u64) -> &[u8] {
         let len = if len == 0 {
             self.data_ref.mmap.len() as u64
@@ -403,6 +404,7 @@ impl MP4 {
         };
         &self.data_ref[offset as usize..(offset + len) as usize]
     }
+    */
 
     pub(crate) fn insert_file_type_box(&mut self) {
         if first_box!(&self.boxes, FileTypeBox).is_some() {

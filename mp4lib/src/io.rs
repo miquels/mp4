@@ -1,35 +1,86 @@
 //! File read/write.
 //!
+use std::convert::TryInto;
 use std::fs;
 use std::io::{self, ErrorKind};
-use std::mem;
+use std::os::unix::fs::FileExt;
 use std::sync::Arc;
 
 use memmap::{Mmap, MmapOptions};
 
 use crate::serialize::{BoxBytes, FromBytes, ReadBytes, ToBytes, WriteBytes};
-use crate::types::{FourCC, ToPrimitive};
+use crate::types::FourCC;
+
+struct FileSegment {
+    start: u64,
+    len: u64,
+    map: Mmap,
+}
 
 /// Reads a MP4 file.
 ///
 /// Implements `ReadBytes`, so can be passed to `MP4::read`.
 pub struct Mp4File {
-    pub(crate) mmap: Arc<Mmap>,
     file:            Arc<fs::File>,
     pos:             u64,
     size:            u64,
+    segments:        Vec<FileSegment>,
     input_filename:  Option<String>,
 }
 
 impl Mp4File {
     /// Open an mp4 file.
-    pub fn open(path: impl AsRef<str>) -> io::Result<Mp4File> {
+    ///
+    /// We use `mmap` to read the contents of the file, except for
+    /// any `mdat` boxes. If you are processing a file that has a
+    /// loy of `mdat`s interspersed with other boxes - say, a
+    /// CMAF file, then set `mmap_all` to `true`. Otherwise, `false`.
+    pub fn open(path: impl AsRef<str>, mmap_all: bool) -> io::Result<Mp4File> {
         let path = path.as_ref();
         let file = fs::File::open(path)?;
         let size = file.metadata()?.len();
-        let mmap = unsafe { MmapOptions::new().map(&file)? };
+
+        let mut segs = Vec::<(u64, u64)>::new();
+
+        if mmap_all {
+            // One big segment.
+            segs.push((0, size));
+        } else {
+            // Create a list of segments where we leave out the
+            // payload part of MDAT boxes.
+            segs.push((0, 0));
+            let mut pos = 0;
+            while let Some((boxtype, boxpos, boxsize)) = next_box(&file, &mut pos, size)? {
+                if &boxtype == b"mdat" {
+                    segs.last_mut().unwrap().1 += 16;
+                    segs.push((boxpos + boxsize, 0));
+                } else {
+                    segs.last_mut().unwrap().1 += boxsize;
+                }
+            }
+        }
+
+        // Now mmap those segments.
+        let mut segments = Vec::new();
+        for seg in &segs {
+            if seg.1 == 0 {
+                break;
+            }
+            let map = unsafe {
+                MmapOptions::new()
+                    .offset(seg.0)
+                    .len(seg.1 as usize)
+                    .map(&file)?
+            };
+            segments.push(FileSegment {
+                start: seg.0,
+                len: seg.1,
+                map,
+            });
+        }
+
         Ok(Mp4File {
-            mmap: Arc::new(mmap),
+            segments,
             file: Arc::new(file),
             pos: 0,
             size,
@@ -41,28 +92,56 @@ impl Mp4File {
     pub fn file(self) -> Arc<fs::File> {
         self.file.clone()
     }
+
+    #[inline]
+    fn map(&self, amount: u64) -> io::Result<(usize, usize)> {
+        //println!("XXX DBG map {}, {}", self.pos, amount);
+        for idx in 0 .. self.segments.len() {
+            let seg = &self.segments[idx];
+            if self.pos >= seg.start && self.pos < seg.start + seg.len {
+                if self.pos + amount > seg.start + seg.len {
+                    return Err(io::Error::new(ErrorKind::InvalidInput,
+                            "tried to read over mapped segment boundary"));
+                }
+                let npos = (self.pos - seg.start) as usize;
+                return Ok((idx, npos));
+            }
+        }
+        Err(io::Error::new(ErrorKind::InvalidInput, "read request outside of any mapped segment"))
+    }
+}
+
+/// Locate the MOOV box.
+fn next_box(file: &fs::File, pos: &mut u64, filesize: u64) -> io::Result<Option<([u8; 4], u64, u64)>> {
+    if *pos + 15 >= filesize {
+        return Ok(None);
+    }
+    let mut buf = [0u8; 16];
+    file.read_exact_at(&mut buf[..], *pos)?;
+    let boxtype = &buf[..4];
+    let mut boxsize = u32::from_be_bytes(buf[4..8].try_into().unwrap()) as u64;
+    if boxsize == 0 {
+        boxsize = filesize - *pos;
+    } else if boxsize == 1 {
+        boxsize = u64::from_be_bytes(buf[8..16].try_into().unwrap());
+    }
+    let xpos = *pos;
+    *pos += boxsize;
+    Ok(Some((boxtype.try_into().unwrap(), xpos, boxsize)))
 }
 
 impl ReadBytes for Mp4File {
     #[inline]
     fn read(&mut self, amount: u64) -> io::Result<&[u8]> {
-        //println!("XXX DBG read {}", amount);
-        if self.pos + amount > self.size {
-            return Err(io::Error::new(ErrorKind::UnexpectedEof, "tried to read past eof"));
-        }
-        let pos = self.pos as usize;
+        let (seg, offset) = self.map(amount)?;
         self.pos += amount;
-        Ok(&self.mmap[pos..pos + amount as usize])
+        Ok(&self.segments[seg].map[offset .. offset + amount as usize])
     }
 
     #[inline]
     fn peek(&mut self, amount: u64) -> io::Result<&[u8]> {
-        //println!("XXX DBG peek {}", amount);
-        if self.pos + amount > self.size {
-            return Err(io::Error::new(ErrorKind::UnexpectedEof, "tried to read past eof"));
-        }
-        let pos = self.pos as usize;
-        Ok(&self.mmap[pos..pos + amount as usize])
+        let (seg, offset) = self.map(amount)?;
+        Ok(&self.segments[seg].map[offset .. offset + amount as usize])
     }
 
     #[inline]
@@ -109,12 +188,9 @@ impl BoxBytes for Mp4File {
             return Err(io::Error::new(ErrorKind::UnexpectedEof, "tried to seek past eof"));
         }
         Ok(DataRef {
-            mmap:             self.mmap.clone(),
             file:             self.file.clone(),
             start:            self.pos as usize,
             end:              (self.pos + size) as usize,
-            num_entries_type: std::marker::PhantomData,
-            entry_type:       std::marker::PhantomData,
         })
     }
 
@@ -123,59 +199,34 @@ impl BoxBytes for Mp4File {
     }
 }
 
-/// Reference to items that are stored in a chunk of data somewhere
-/// in the source file. Could be in the `moov` box, or a `moof` box,
-/// or an `mdat` box.
+/// All boxes that are not `MediaDataBox` or `GenericBox` are `mmap`ed
+/// into memory. The contents of `MediaDataBox` and `GenericBox` are
+/// not, those are referened by this `DataRef`. Stuff in a `DataRef` uses
+/// `read_at` and `write_at` to get at the data, rather than accessing
+/// it through `mmap`.
 ///
-/// It is a lot like [`Array`](crate::types::Array), except it's
-/// read-only.
-pub struct DataRef<N = (), T = u8> {
-    pub(crate) mmap:  Arc<Mmap>,
+/// This is done so that we don't have to `mmap` gigabytes of memory.
+pub struct DataRef {
     pub(crate) file:  Arc<fs::File>,
     start:            usize,
     end:              usize,
-    num_entries_type: std::marker::PhantomData<N>,
-    entry_type:       std::marker::PhantomData<T>,
 }
 
-pub type DataRefUnsized<T> = DataRef<(), T>;
-pub type DataRefSized16<T> = DataRef<u16, T>;
-pub type DataRefSized32<T> = DataRef<u32, T>;
-
-impl<N, T> DataRef<N, T> {
+impl DataRef {
     // This is not the from_bytes from the FromBytes trait, it is
     // a direct method, because it has an extra data_size argument.
     pub(crate) fn from_bytes_limit<R: ReadBytes>(
         stream: &mut R,
         data_size: u64,
-    ) -> io::Result<DataRef<N, T>> {
-        // The stream returns a DataRef<(), u8>. we need to convert it
-        // into our type.
+    ) -> io::Result<DataRef> {
         let data_ref = stream.data_ref(data_size)?;
         stream.skip(data_size)?;
-        Ok(data_ref.transmute())
-    }
-
-    // This is a safe transmute, we only change the PhantomData markers.
-    // It changes the input for put() and the output of the iterator.
-    pub(crate) fn transmute<N2, T2>(self) -> DataRef<N2, T2> {
-        DataRef {
-            mmap:             self.mmap,
-            file:             self.file.clone(),
-            start:            self.start,
-            end:              self.end,
-            num_entries_type: std::marker::PhantomData,
-            entry_type:       std::marker::PhantomData,
-        }
-    }
-
-    pub(crate) fn bytes(&self) -> &[u8] {
-        &self.mmap[self.start..self.end]
+        Ok(data_ref)
     }
 
     /// Number of items.
     pub fn len(&self) -> u64 {
-        (self.end - self.start) as u64 / (mem::size_of::<T>() as u64)
+        (self.end - self.start) as u64
     }
 
     /// Does it need a large box.
@@ -183,228 +234,69 @@ impl<N, T> DataRef<N, T> {
         self.len() > u32::MAX as u64 - 16
     }
 
-    /// Return an iterator over all items.
-    ///
-    /// This panics using `unimplemented()`. It's impossible to return a
-    /// reference to some owned data in the iterator itself due to
-    /// lifetime issues. Use [`iter_cloned`](Self::iter_cloned).
-    pub fn iter(&self) -> DataRefIterator<'_, T>
-    where
-        T: FromBytes,
-    {
-        unimplemented!()
-    }
-
-    /// return an iterator over all items.
-    pub fn iter_cloned(&self) -> DataRefIteratorCloned<'_, T>
-    where
-        T: FromBytes + Clone,
-    {
-        DataRefIteratorCloned::<'_, T> {
-            count:   self.len() as usize,
-            default: None,
-            entries: self.bytes(),
-            index:   0,
-        }
-    }
-
-    /// Return an iterator that repeats the same item `count` times.
-    pub fn iter_repeat(&self, item: T, count: usize) -> DataRefIteratorCloned<'_, T>
-    where
-        T: FromBytes + Clone,
-    {
-        DataRefIteratorCloned::<'_, T> {
-            count,
-            default: Some(item),
-            entries: b"",
-            index: 0,
-        }
+    pub fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> io::Result<()> {
+        self.file.read_exact_at(buf, offset + self.start as u64)
     }
 }
 
-impl<N, T> DataRef<N, T>
-where
-    T: FromBytes + Clone,
-{
-    /// Get a clone of the value at index `index`.
-    pub fn get(&self, index: usize) -> T {
-        let start = index * mem::size_of::<T>();
-        let end = start + mem::size_of::<T>();
-        let mut data = &self.bytes()[start..end];
-        T::from_bytes(&mut data).unwrap()
-    }
-}
-
-impl<N, T> FromBytes for DataRef<N, T>
-where
-    N: FromBytes + ToPrimitive,
-    T: FromBytes,
-{
-    fn from_bytes<R: ReadBytes>(stream: &mut R) -> io::Result<Self> {
-        let elem_size = mem::size_of::<N>() as u64;
-        let (size, skip) = if elem_size == 0 {
-            ((stream.left() / elem_size) * elem_size, stream.left())
-        } else {
-            let sz = (N::from_bytes(stream)?.to_usize() as u64) * elem_size;
-            (sz, sz)
-        };
-        let data_ref = stream.data_ref(size)?;
-        stream.skip(skip)?;
-        Ok(data_ref.transmute())
+impl FromBytes for DataRef {
+    /// from_bytes for DataRef is actually not implemented.
+    fn from_bytes<R: ReadBytes>(_stream: &mut R) -> io::Result<Self> {
+        panic!("DataRef::from_bytes is not implemented- use DataRef::from_bytes_limit");
     }
 
     fn min_size() -> usize {
-        if mem::size_of::<N>() > 0 {
-            N::min_size()
-        } else {
-            0
-        }
+        0
     }
 }
 
-impl<N, T> ToBytes for DataRef<N, T> {
+impl ToBytes for DataRef {
     fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
-        stream.write(self.bytes())
+        if self.start == self.end {
+            return Ok(())
+        }
+
+        let mut buf = Vec::new();
+        buf.resize(std::cmp::min((self.end - self.start) as usize, 128000), 0);
+
+        let mut pos = self.start;
+        while pos < self.end {
+            let to_read = std::cmp::min(buf.len(), self.end - pos);
+            let nread = self.file.read_at(&mut buf[..to_read], pos as u64)?;
+            if nread == 0 {
+                return Err(io::Error::new(ErrorKind::UnexpectedEof, "Unexpected EOF"));
+            }
+            stream.write(&buf[..nread])?;
+            pos += nread;
+        }
+        Ok(())
     }
 }
 
-impl<N, T> Default for DataRef<N, T> {
+impl Default for DataRef {
     fn default() -> Self {
         let devzero = fs::File::open("/dev/zero").unwrap();
-        let mmap = unsafe { MmapOptions::new().len(4).map(&devzero).unwrap() };
         DataRef {
-            mmap:             Arc::new(mmap),
             file:             Arc::new(devzero),
             start:            0,
             end:              0,
-            num_entries_type: std::marker::PhantomData,
-            entry_type:       std::marker::PhantomData,
         }
     }
 }
 
-impl<N, T> Clone for DataRef<N, T>
-where
-    N: Clone,
-    T: Clone,
-{
+impl Clone for DataRef {
     fn clone(&self) -> Self {
         DataRef {
-            mmap:             self.mmap.clone(),
             file:             self.file.clone(),
             start:            self.start,
             end:              self.end,
-            num_entries_type: self.num_entries_type,
-            entry_type:       self.entry_type,
         }
     }
 }
 
-// deref to &[u8]
-impl<N, T> std::ops::Deref for DataRef<N, T> {
-    type Target = [u8];
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.mmap[self.start..self.end]
-    }
-}
-
-impl<N, T> std::fmt::Debug for DataRef<N, T> {
+impl std::fmt::Debug for DataRef {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{{ &file[{}..{}] }}", self.start, self.end)
-    }
-}
-
-pub struct DataRefIterator<'a, T> {
-    type_: std::marker::PhantomData<&'a T>,
-}
-
-impl<'a, T> Iterator for DataRefIterator<'a, T>
-where
-    T: FromBytes,
-{
-    type Item = &'a T;
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        // This cannot be implemented. We cannot return a reference to
-        // an element if we got it from T::from_bytes, we can't
-        // express the lifetime properly.
-        unimplemented!()
-    }
-}
-
-pub struct DataRefIteratorCloned<'a, T> {
-    count:   usize,
-    default: Option<T>,
-    entries: &'a [u8],
-    index:   usize,
-}
-
-impl<'a, T> DataRefIteratorCloned<'a, T>
-where
-    T: FromBytes + Clone,
-{
-    /// Check if all items fall in the range.
-    ///
-    /// We assume that the items are ordered, and check only
-    /// the first and last item.
-    pub fn in_range(&self, range: std::ops::Range<T>) -> bool
-    where
-        T: std::cmp::PartialOrd<T>,
-    {
-        if self.count == 0 {
-            return true;
-        }
-        if let Some(dfl) = self.default.as_ref() {
-            return dfl.ge(&range.start) && dfl.lt(&range.end);
-        }
-        if let Some((first, last)) = self.first_last() {
-            return first >= range.start && last < range.end;
-        }
-        false
-    }
-
-    fn first_last(&self) -> Option<(T, T)> {
-        if self.count == 0 {
-            return None;
-        }
-        if let Some(entry) = self.default.as_ref() {
-            return Some((entry.clone(), entry.clone()));
-        }
-
-        let mut data = &self.entries[0..mem::size_of::<T>()];
-        let first = T::from_bytes(&mut data).ok()?;
-
-        let start = (self.count - 1) * mem::size_of::<T>();
-        let end = start + mem::size_of::<T>();
-        let mut data = &self.entries[start..end];
-        let last = T::from_bytes(&mut data).ok()?;
-        Some((first, last))
-    }
-}
-
-impl<'a, T> Iterator for DataRefIteratorCloned<'a, T>
-where
-    T: FromBytes + Clone,
-{
-    type Item = T;
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index == self.count as usize {
-            return None;
-        }
-        if let Some(entry) = self.default.as_ref() {
-            self.index += 1;
-            return Some(entry.clone());
-        }
-        let start = self.index * mem::size_of::<T>();
-        let end = start + mem::size_of::<T>();
-        let mut data = &self.entries[start..end];
-        self.index += 1;
-        Some(T::from_bytes(&mut data).unwrap())
+        write!(f, "DataRef{{ start: {}, end: {} }}", self.start, self.end)
     }
 }
 

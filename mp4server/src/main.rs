@@ -607,7 +607,7 @@ async fn manifest(req: &Request) -> Result<Option<Response>, Error> {
     let resp_headers = response.headers_mut().unwrap();
 
     // open and parse mp4 file.
-    let mp4 = task::block_in_place(|| mp4lib::lru_cache::open_mp4(&req.fpath))?;
+    let mp4 = task::block_in_place(|| mp4lib::lru_cache::open_mp4(&req.fpath, false))?;
     let range = req.parse_range(&fs)?;
 
     let simple_subs = match req.headers.typed_get::<UserAgent>() {
@@ -658,7 +658,7 @@ async fn media(req: &Request) -> Result<Option<Response>, Error> {
     let resp_headers = response.headers_mut().unwrap();
 
     // open and parse mp4 file.
-    let mp4 = task::block_in_place(|| mp4lib::lru_cache::open_mp4(&req.fpath))?;
+    let mp4 = task::block_in_place(|| mp4lib::lru_cache::open_mp4(&req.fpath, false))?;
 
     let range = req.parse_range(&fs)?;
     let (mime, body, size) = task::block_in_place(|| {
@@ -704,7 +704,7 @@ async fn info(req: &Request) -> Result<Option<Response>, Error> {
     let resp_headers = response.headers_mut().unwrap();
 
     // open and parse mp4 file.
-    let mp4 = task::block_in_place(|| mp4lib::lru_cache::open_mp4(&req.fpath))?;
+    let mp4 = task::block_in_place(|| mp4lib::lru_cache::open_mp4(&req.fpath, false))?;
 
     let info = mp4lib::track::track_info(&mp4);
     let body = serde_json::to_string_pretty(&info).unwrap();

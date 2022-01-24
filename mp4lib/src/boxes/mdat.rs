@@ -87,27 +87,11 @@ impl MediaData {
         }
     }
 
-    /// Add data.
-    pub fn push(&mut self, data: &[u8]) {
-        match &mut self.0 {
-            &mut MediaData_::DataRef(_) => panic!("cannot push onto MediaData_::DataRef"),
-            &mut MediaData_::Data(ref mut d) => d.extend_from_slice(data),
-        }
-    }
-
     /// Resize.
     pub fn resize(&mut self, size: usize) {
         match &mut self.0 {
-            &mut MediaData_::DataRef(_) => panic!("cannot push onto MediaData_::DataRef"),
+            &mut MediaData_::DataRef(_) => panic!("cannot resize MediaData_::DataRef"),
             &mut MediaData_::Data(ref mut d) => d.resize(size, 0),
-        }
-    }
-
-    /// Reference as bytes.
-    pub fn bytes(&self) -> &[u8] {
-        match &self.0 {
-            MediaData_::DataRef(d) => d.bytes(),
-            MediaData_::Data(d) => &d[..],
         }
     }
 

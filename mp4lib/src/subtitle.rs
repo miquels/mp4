@@ -71,17 +71,6 @@ pub fn subtitle_track_bylang<'a>(mp4: &'a MP4, language: &str) -> Option<&'a Tra
     None
 }
 
-#[doc(hidden)]
-pub fn subtitle_dump(mp4: &MP4, track: &TrackBox) {
-    let mut count = 0;
-    for sample in track.sample_info_iter() {
-        count += 1;
-        let mut subt = mp4.data_ref(sample.fpos, sample.size as u64);
-        let text = Tx3GTextSample::from_bytes(&mut subt).unwrap();
-        println!("{:02} {:?}", count, text);
-    }
-}
-
 fn ptime(secs: f64, format: Format) -> String {
     let mut tm = (secs * 1000f64) as u64;
 
@@ -160,14 +149,21 @@ pub fn subtitle_extract(
     }
     let eol = if format == Format::Vtt { "\n" } else { "\r\n" };
 
+    let mut buf = Vec::new();
+    buf.resize(256, 0);
+
     for sample in iter {
-        let mut data = mp4.data_ref(sample.fpos, sample.size as u64);
-        let subt = match Tx3GTextSample::from_bytes(&mut data) {
+        if buf.len() < sample.size as usize {
+            buf.resize(sample.size as usize, 0);
+        }
+        let data = &mut buf[..sample.size as usize];
+        mp4.data_ref.read_exact_at(data, sample.fpos)?;
+        let subt = match Tx3GTextSample::from_bytes(&mut &data[..]) {
             Ok(subt) => subt,
             Err(_) => continue,
         };
         if format == Format::Tx3g {
-            output.write(&data)?;
+            output.write(&buf[..sample.size as usize])?;
             continue;
         }
         if subt.text.as_str() == "" {
@@ -206,13 +202,20 @@ pub fn fragment(mp4: &MP4, format: Format, frag: &FragmentSource, tm_off: f64) -
         buffer.extend_from_slice(b"WEBVTT\n\n");
     }
 
+    let mut buf = Vec::new();
+    buf.resize(256, 0);
+
     for sample in iter {
         if format == Format::Tx3g || sample.size > 2 {
-            let mut data = mp4.data_ref(sample.fpos, sample.size as u64);
-            match Tx3GTextSample::from_bytes(&mut data) {
+            if buf.len() < sample.size as usize {
+                buf.resize(sample.size as usize, 0);
+            }
+            let data = &mut buf[..sample.size as usize];
+            mp4.data_ref.read_exact_at(data, sample.fpos)?;
+            match Tx3GTextSample::from_bytes(&mut &data[..]) {
                 Ok(subt) => {
                     if format == Format::Tx3g {
-                        buffer.extend_from_slice(&data[..]);
+                        buffer.extend_from_slice(&buf[..sample.size as usize]);
                     } else {
                         if subt.text.len() > 0 {
                             let cue = cue(format, timescale, None, sample, subt, tm_off);

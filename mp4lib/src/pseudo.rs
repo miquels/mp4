@@ -83,7 +83,7 @@ impl Mp4Stream {
 
         // If no tracks were selected, we choose the first video and the first audio track.
         if tracks.len() == 0 {
-            let mp4 = open_mp4(&path)?;
+            let mp4 = open_mp4(&path, false)?;
             let info = crate::track::track_info(&mp4);
             if let Some(id) = info.iter().find(|t| t.track_type == "vide").map(|t| t.id) {
                 tracks.push(id);
@@ -440,7 +440,7 @@ impl InitSection {
         let init = match INIT_SECTIONS.get(key) {
             Some(init) => init,
             None => {
-                let mp4 = open_mp4(&key.path)?;
+                let mp4 = open_mp4(&key.path, false)?;
                 let (init, mapping) = InitSection::init_and_mapping(key, mp4.as_ref())?;
                 let init = Arc::new(init);
                 let mapping = Arc::new(mapping);
@@ -457,7 +457,7 @@ impl InitSection {
         let mapping = match MAPPINGS.get(key) {
             Some(mapping) => mapping,
             None => {
-                let mp4 = open_mp4(&key.path)?;
+                let mp4 = open_mp4(&key.path, false)?;
                 let (init, mapping) = InitSection::init_and_mapping(key, mp4.as_ref())?;
                 let init = Arc::new(init);
                 let mapping = Arc::new(mapping);

@@ -499,8 +499,11 @@ fn track_fragment(
 
         // Add entry mediadata.
         let start = sample.fpos as usize;
-        let end = (sample.fpos + sample.size as u64) as usize;
-        mdat.data.push(&data_ref.mmap[start..end]);
+        let end = start + sample.size as usize;
+        let oldlen = mdat.data.len() as usize;
+        let newlen = oldlen + (end - start);
+        mdat.data.resize(newlen);
+        data_ref.read_exact_at(&mut mdat.data.bytes_mut()[oldlen .. newlen], sample.fpos)?;
     }
 
     traf.boxes.push(trun.to_mp4box());
