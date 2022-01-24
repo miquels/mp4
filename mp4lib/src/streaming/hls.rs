@@ -15,23 +15,17 @@ use once_cell::sync::Lazy;
 use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 use scan_fmt::scan_fmt;
 
+use super::fragment::FragmentSource;
+use super::lru_cache::LruCache;
+use super::segment::Segment;
+use super::subtitle::Format;
 use crate::io::MemBuffer;
 use crate::mp4box::MP4;
 use crate::serialize::ToBytes;
 use crate::track::SpecificTrackInfo;
 use crate::types::FourCC;
-use super::fragment::FragmentSource;
-use super::lru_cache::LruCache;
-use super::segment::Segment;
-use super::subtitle::Format;
 
-const SUBTITLE_LANG: [&'static str; 5] = [
-    "en",
-    "nl",
-    "de",
-    "fr",
-    "es",
-];
+const SUBTITLE_LANG: [&'static str; 5] = ["en", "nl", "de", "fr", "es"];
 
 const PATH_ESCAPE: &AsciiSet = &CONTROLS
     .add(b' ')
@@ -99,7 +93,6 @@ impl Display for ExtXMedia {
 
 // If there are entries with the same name, add #1, #2 etc to the name to make them unique.
 fn uniqify_audio(media: &mut Vec<ExtXMedia>) {
-
     let mut hm = HashMap::new();
     let mut idx = 0;
     while idx < media.len() {
@@ -122,9 +115,8 @@ fn uniqify_audio(media: &mut Vec<ExtXMedia>) {
 // - that doesn't have the forced flag set, or
 // - the first we see.
 fn uniqify_subtitles(media: &mut Vec<ExtXMedia>, remove_forced: bool) {
-
     let mut hm = HashMap::new();
-    for idx in 0 .. media.len() {
+    for idx in 0..media.len() {
         let mut key = media[idx].language.unwrap_or("").to_string();
         if !remove_forced && media[idx].forced {
             key += ".FORCED";
@@ -192,7 +184,7 @@ fn lang(lang: &str) -> (Option<&'static str>, &'static str) {
         "de" | "ger" => return (Some("de"), "German"),
         "es" | "spa" => return (Some("es"), "Español"),
         "za" | "afr" | "zaf" => return (Some("za"), "Afrikaans"),
-        "und" => return(None, "Undetermined"),
+        "und" => return (None, "Undetermined"),
         _ => {},
     }
 
@@ -276,7 +268,8 @@ fn lookup_subtitles(mp4path: Option<&String>) -> Vec<String> {
         for entry in fs::read_dir(parent)? {
             let entry = entry?;
             if let Some(filename) = entry.file_name().to_str() {
-                if filename.starts_with(prefix) && (filename.ends_with(".srt") || filename.ends_with(".vtt")) {
+                if filename.starts_with(prefix) && (filename.ends_with(".srt") || filename.ends_with(".vtt"))
+                {
                     subs.push(filename.to_string());
                 }
             }
@@ -336,17 +329,17 @@ pub fn hls_master(mp4: &MP4, external_subs: bool, simple_subs: bool) -> String {
         let commentary = name.contains("Commentary");
 
         let audio = ExtXMedia {
-            type_:       "AUDIO",
-            group_id:    format!("audio/{}", info.codec_id),
-            language:    lang,
-            channels:    Some(info.channel_count + info.lfe_channel as u16),
+            type_: "AUDIO",
+            group_id: format!("audio/{}", info.codec_id),
+            language: lang,
+            channels: Some(info.channel_count + info.lfe_channel as u16),
             name,
             auto_select: !commentary,
-            default:     false,
-            forced:      false,
-            sdh:         false,
+            default: false,
+            forced: false,
+            sdh: false,
             commentary,
-            uri:         format!("media.{}.m3u8", track.id),
+            uri: format!("media.{}.m3u8", track.id),
         };
         audio_tracks.push(audio);
     }
@@ -377,18 +370,18 @@ pub fn hls_master(mp4: &MP4, external_subs: bool, simple_subs: bool) -> String {
             let sub = utf8_percent_encode(&sub, PATH_ESCAPE).to_string();
 
             let subm = ExtXMedia {
-                type_:       "SUBTITLES",
-                group_id:    "subs".to_string(),
-                language:    lang,
-                channels:    None,
-                name:        name.to_string(),
+                type_: "SUBTITLES",
+                group_id: "subs".to_string(),
+                language: lang,
+                channels: None,
+                name: name.to_string(),
                 auto_select: true,
-                default:     false,
+                default: false,
                 forced,
                 sdh,
                 commentary: false,
                 // note, either keep the "./", or escape the ":".
-                uri:         format!("./media.ext:{}:as.m3u8", sub),
+                uri: format!("./media.ext:{}:as.m3u8", sub),
             };
             subtitles.push(subm);
         }
@@ -434,24 +427,25 @@ pub fn hls_master(mp4: &MP4, external_subs: bool, simple_subs: bool) -> String {
 
         // skip if we already have an external subtitle track file.
         // This is not quite correct, we also should compare forced and sdh.
-        if subtitles.iter().any(|s| {
-            !s.uri.starts_with("media.") && s.language == lang && s.sdh == sdh && s.forced == forced
-        }) {
+        if subtitles
+            .iter()
+            .any(|s| !s.uri.starts_with("media.") && s.language == lang && s.sdh == sdh && s.forced == forced)
+        {
             continue;
         }
 
         let sub = ExtXMedia {
-            type_:       "SUBTITLES",
-            group_id:    "subs".to_string(),
-            language:    lang,
-            channels:    None,
-            name:        name.to_string(),
+            type_: "SUBTITLES",
+            group_id: "subs".to_string(),
+            language: lang,
+            channels: None,
+            name: name.to_string(),
             auto_select: true,
-            default:     false,
+            default: false,
             forced,
             sdh,
-            commentary:  false,
-            uri:         format!("media.{}.m3u8", track.id),
+            commentary: false,
+            uri: format!("media.{}.m3u8", track.id),
         };
         subtitles.push(sub);
     }
@@ -475,7 +469,7 @@ pub fn hls_master(mp4: &MP4, external_subs: bool, simple_subs: bool) -> String {
         });
 
         if simple_subs {
-          uniqify_subtitles(&mut subtitles, true);
+            uniqify_subtitles(&mut subtitles, true);
         }
 
         for sub in &subtitles {
@@ -598,7 +592,6 @@ pub fn hls_track(mp4: &MP4, track_id: u32) -> io::Result<String> {
     }
 
     for (mut seq, seg) in segments.iter().enumerate() {
-
         if is_subtitle {
             seq = (seg.start_time * 1000.0) as usize;
         } else {
@@ -609,13 +602,7 @@ pub fn hls_track(mp4: &MP4, track_id: u32) -> io::Result<String> {
         if seg.duration.partial_cmp(&0.0001) == Some(std::cmp::Ordering::Greater) {
             m += &format!(
                 "#EXTINF:{:.5}\n{}/c.{}.{}.{}-{}.{}\n",
-                seg.duration,
-                prefix,
-                track_id,
-                seq,
-                seg.start_sample,
-                seg.end_sample,
-                suffix
+                seg.duration, prefix, track_id, seq, seg.start_sample, seg.end_sample, suffix
             );
         }
     }
@@ -648,7 +635,7 @@ fn hls_subtitle(dirname: &str, name: &str) -> io::Result<String> {
 }
 
 /// Translates the tail of an URL into a manifest (m3u8 playlist or dash mpd).
-/// 
+///
 /// - master.m3u8                => HLS master playlist
 /// - media.<TRACK>.m3u8         => HLS track playlist
 /// - media.ext:NAME.EXT:as.m3u8 => external file
@@ -671,37 +658,27 @@ pub fn manifest_from_uri(
             range.end = size;
         }
         if range.end - range.start != size {
-            let data = data[range.start as usize .. range.end as usize].to_vec();
+            let data = data[range.start as usize..range.end as usize].to_vec();
             return Ok((mime, data, size));
         }
     }
     Ok((mime, data, size))
 }
 
-fn manifest_from_uri_(
-    mp4: &MP4,
-    url_tail: &str,
-    simple_subs: bool,
-) -> io::Result<(&'static str, Vec<u8>)> {
-
+fn manifest_from_uri_(mp4: &MP4, url_tail: &str, simple_subs: bool) -> io::Result<(&'static str, Vec<u8>)> {
     let data = if url_tail == "main.m3u8" || url_tail == "master.m3u8" {
-
         // HLS master playlist.
         hls_master(&mp4, true, simple_subs)
     } else if let Ok(track) = scan_fmt!(url_tail, "media.{}.m3u8{e}", u32) {
-
         // HLS media playlist.
         hls_track(&mp4, track)?
     } else if let Ok((name, _)) = scan_fmt!(url_tail, "media.ext:{}:{}.m3u8{e}", String, String) {
-
         // external file next to .mp4.
         if name.ends_with(".srt") || name.ends_with(".vtt") {
-
             // subtitles.
             let dirname = dirname(mp4.input_file.as_ref(), &name)?;
             hls_subtitle(&dirname, &name)?
         } else {
-
             // unknown external file type.
             return Err(ioerr!(InvalidData, "415 Unsupported Media Type"));
         }
@@ -728,7 +705,6 @@ pub fn media_from_uri(
     url_tail: &str,
     range: Option<Range<u64>>,
 ) -> io::Result<(&'static str, Vec<u8>, u64)> {
-
     // initialization section.
     if let Ok((track_id, ext)) = scan_fmt!(url_tail, "init.{}.{}{e}", u32, String) {
         match ext.as_str() {
@@ -899,4 +875,3 @@ fn join_path(dir: impl Into<String>, name: &str) -> String {
     dir.push(Path::new(name));
     dir.to_str().unwrap().to_string()
 }
-

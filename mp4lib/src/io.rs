@@ -13,19 +13,19 @@ use crate::types::FourCC;
 
 struct FileSegment {
     start: u64,
-    len: u64,
-    map: Mmap,
+    len:   u64,
+    map:   Mmap,
 }
 
 /// Reads a MP4 file.
 ///
 /// Implements `ReadBytes`, so can be passed to `MP4::read`.
 pub struct Mp4File {
-    file:            Arc<fs::File>,
-    pos:             u64,
-    size:            u64,
-    segments:        Vec<FileSegment>,
-    input_filename:  Option<String>,
+    file:           Arc<fs::File>,
+    pos:            u64,
+    size:           u64,
+    segments:       Vec<FileSegment>,
+    input_filename: Option<String>,
 }
 
 impl Mp4File {
@@ -66,12 +66,7 @@ impl Mp4File {
             if seg.1 == 0 {
                 break;
             }
-            let map = unsafe {
-                MmapOptions::new()
-                    .offset(seg.0)
-                    .len(seg.1 as usize)
-                    .map(&file)?
-            };
+            let map = unsafe { MmapOptions::new().offset(seg.0).len(seg.1 as usize).map(&file)? };
             segments.push(FileSegment {
                 start: seg.0,
                 len: seg.1,
@@ -96,18 +91,23 @@ impl Mp4File {
     #[inline]
     fn map(&self, amount: u64) -> io::Result<(usize, usize)> {
         //println!("XXX DBG map {}, {}", self.pos, amount);
-        for idx in 0 .. self.segments.len() {
+        for idx in 0..self.segments.len() {
             let seg = &self.segments[idx];
             if self.pos >= seg.start && self.pos < seg.start + seg.len {
                 if self.pos + amount > seg.start + seg.len {
-                    return Err(io::Error::new(ErrorKind::InvalidInput,
-                            "tried to read over mapped segment boundary"));
+                    return Err(io::Error::new(
+                        ErrorKind::InvalidInput,
+                        "tried to read over mapped segment boundary",
+                    ));
                 }
                 let npos = (self.pos - seg.start) as usize;
                 return Ok((idx, npos));
             }
         }
-        Err(io::Error::new(ErrorKind::InvalidInput, "read request outside of any mapped segment"))
+        Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "read request outside of any mapped segment",
+        ))
     }
 }
 
@@ -135,13 +135,13 @@ impl ReadBytes for Mp4File {
     fn read(&mut self, amount: u64) -> io::Result<&[u8]> {
         let (seg, offset) = self.map(amount)?;
         self.pos += amount;
-        Ok(&self.segments[seg].map[offset .. offset + amount as usize])
+        Ok(&self.segments[seg].map[offset..offset + amount as usize])
     }
 
     #[inline]
     fn peek(&mut self, amount: u64) -> io::Result<&[u8]> {
         let (seg, offset) = self.map(amount)?;
-        Ok(&self.segments[seg].map[offset .. offset + amount as usize])
+        Ok(&self.segments[seg].map[offset..offset + amount as usize])
     }
 
     #[inline]
@@ -188,9 +188,9 @@ impl BoxBytes for Mp4File {
             return Err(io::Error::new(ErrorKind::UnexpectedEof, "tried to seek past eof"));
         }
         Ok(DataRef {
-            file:             self.file.clone(),
-            start:            self.pos as usize,
-            end:              (self.pos + size) as usize,
+            file:  self.file.clone(),
+            start: self.pos as usize,
+            end:   (self.pos + size) as usize,
         })
     }
 
@@ -207,18 +207,15 @@ impl BoxBytes for Mp4File {
 ///
 /// This is done so that we don't have to `mmap` gigabytes of memory.
 pub struct DataRef {
-    pub(crate) file:  Arc<fs::File>,
-    start:            usize,
-    end:              usize,
+    pub(crate) file: Arc<fs::File>,
+    start:           usize,
+    end:             usize,
 }
 
 impl DataRef {
     // This is not the from_bytes from the FromBytes trait, it is
     // a direct method, because it has an extra data_size argument.
-    pub(crate) fn from_bytes_limit<R: ReadBytes>(
-        stream: &mut R,
-        data_size: u64,
-    ) -> io::Result<DataRef> {
+    pub(crate) fn from_bytes_limit<R: ReadBytes>(stream: &mut R, data_size: u64) -> io::Result<DataRef> {
         let data_ref = stream.data_ref(data_size)?;
         stream.skip(data_size)?;
         Ok(data_ref)
@@ -253,7 +250,7 @@ impl FromBytes for DataRef {
 impl ToBytes for DataRef {
     fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
         if self.start == self.end {
-            return Ok(())
+            return Ok(());
         }
 
         let mut buf = Vec::new();
@@ -277,9 +274,9 @@ impl Default for DataRef {
     fn default() -> Self {
         let devzero = fs::File::open("/dev/zero").unwrap();
         DataRef {
-            file:             Arc::new(devzero),
-            start:            0,
-            end:              0,
+            file:  Arc::new(devzero),
+            start: 0,
+            end:   0,
         }
     }
 }
@@ -287,9 +284,9 @@ impl Default for DataRef {
 impl Clone for DataRef {
     fn clone(&self) -> Self {
         DataRef {
-            file:             self.file.clone(),
-            start:            self.start,
-            end:              self.end,
+            file:  self.file.clone(),
+            start: self.start,
+            end:   self.end,
         }
     }
 }

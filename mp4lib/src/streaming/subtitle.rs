@@ -7,13 +7,13 @@ use std::str::FromStr;
 
 use scan_fmt::scan_fmt;
 
+use super::fragment::FragmentSource;
 use crate::boxes::sbtl::Tx3GTextSample;
 use crate::boxes::*;
 use crate::mp4box::BoxInfo;
 use crate::mp4box::MP4;
 use crate::serialize::FromBytes;
 use crate::track::SampleInfo;
-use super::fragment::FragmentSource;
 
 /// Subtitle format.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -85,7 +85,14 @@ fn ptime(secs: f64, format: Format) -> String {
     format!("{:02}:{:02}:{:02}{}{:03}", tm, mins, secs, sep, millis)
 }
 
-fn cue(format: Format, timescale: u32, seq: Option<u32>, sample: SampleInfo, subt: Tx3GTextSample, tm_off: f64) -> String {
+fn cue(
+    format: Format,
+    timescale: u32,
+    seq: Option<u32>,
+    sample: SampleInfo,
+    subt: Tx3GTextSample,
+    tm_off: f64,
+) -> String {
     use std::fmt::Write;
     let eol = if format == Format::Vtt { "\n" } else { "\r\n" };
 

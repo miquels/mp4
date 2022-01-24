@@ -24,9 +24,9 @@ use std::time::{Duration, SystemTime};
 use memmap::Mmap;
 use once_cell::sync::Lazy;
 
+use super::lru_cache::{open_mp4, LruCache};
 use crate::boxes::*;
 use crate::io::DataRef;
-use super::lru_cache::{open_mp4, LruCache};
 use crate::mp4box::{MP4Box, MP4};
 use crate::serialize::ToBytes;
 use crate::types::FourCC;

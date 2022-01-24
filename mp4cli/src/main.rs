@@ -9,11 +9,11 @@ use structopt::StructOpt;
 use mp4lib::boxes::*;
 use mp4lib::debug;
 use mp4lib::first_box;
-use mp4lib::streaming::fragment::FragmentSource;
 use mp4lib::io::Mp4File;
 use mp4lib::ioerr;
 use mp4lib::iter_box;
 use mp4lib::mp4box::{MP4Box, MP4};
+use mp4lib::streaming::fragment::FragmentSource;
 use mp4lib::streaming::subtitle;
 
 #[derive(StructOpt, Debug)]

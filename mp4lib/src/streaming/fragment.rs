@@ -127,13 +127,12 @@ fn fmp4_track(movie: &MovieBox, trak: &TrackBox, track_id: u32) -> TrackBox {
         // If there are more than two edits, or of another type, then
         // the movie will most likely not play correctly.
         let mut new_elst = EditListBox::default();
-        for idx in 0 .. elst.entries.len() {
+        for idx in 0..elst.entries.len() {
             let mut entry = elst.entries[idx].clone();
             if entry.media_time >= 0 {
                 // XXX log warning/error if this is _not_ the last edit.
 
                 if idx == elst.entries.len() - 1 {
-
                     // Skip this if it's just a single edit covering the whole track.
                     if entry.media_time == 0 && idx == 0 {
                         continue;
@@ -503,7 +502,7 @@ fn track_fragment(
         let oldlen = mdat.data.len() as usize;
         let newlen = oldlen + (end - start);
         mdat.data.resize(newlen);
-        data_ref.read_exact_at(&mut mdat.data.bytes_mut()[oldlen .. newlen], sample.fpos)?;
+        data_ref.read_exact_at(&mut mdat.data.bytes_mut()[oldlen..newlen], sample.fpos)?;
     }
 
     traf.boxes.push(trun.to_mp4box());

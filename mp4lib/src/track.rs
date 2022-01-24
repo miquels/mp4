@@ -248,7 +248,7 @@ pub fn track_info(mp4: &MP4) -> Vec<TrackInfo> {
 fn display<T, S>(value: &T, serializer: S) -> Result<S::Ok, S::Error>
 where
     T: Display,
-    S: Serializer
+    S: Serializer,
 {
     serializer.collect_str(value)
 }
@@ -256,7 +256,7 @@ where
 // Serialize helper.
 fn seconds<S>(value: &Duration, serializer: S) -> Result<S::Ok, S::Error>
 where
-    S: Serializer
+    S: Serializer,
 {
     serializer.serialize_f64(value.as_millis() as f64 / 1000.0)
 }

@@ -12,8 +12,8 @@ use std::time::SystemTime;
 use anyhow::Result;
 use bytes::Bytes;
 use headers::{
-    ContentLength, ContentRange, ETag, HeaderMapExt, IfMatch, IfModifiedSince, IfNoneMatch, IfRange,
-    IfUnmodifiedSince, LastModified, Origin, Range, AcceptRanges, CacheControl, UserAgent,
+    AcceptRanges, CacheControl, ContentLength, ContentRange, ETag, HeaderMapExt, IfMatch, IfModifiedSince,
+    IfNoneMatch, IfRange, IfUnmodifiedSince, LastModified, Origin, Range, UserAgent,
 };
 use http::{HeaderMap, HeaderValue, Method, StatusCode};
 use once_cell::sync::OnceCell;
@@ -88,7 +88,7 @@ async fn main() -> Result<()> {
 fn make_etag(tag: &str) -> ETag {
     if tag.len() >= 2 {
         if tag.starts_with("\"") && tag.ends_with("\"") {
-            let tag = &tag[1 .. tag.len() - 1];
+            let tag = &tag[1..tag.len() - 1];
             let stamp = EXE_STAMP.get().expect("EXE_STAMP unset");
             return ETag::from_str(&format!("\"{}.{:08x}\"", tag, stamp)).expect("bad etag");
         }
@@ -129,7 +129,7 @@ async fn serve(opts: ServeOpts) -> Result<()> {
     let log = warp::log("mp4");
     let data = data.with(log);
 
-#[cfg(target_os = "freebsd")]
+    #[cfg(target_os = "freebsd")]
     {
         use std::net::Ipv4Addr;
         let addrv4 = IpAddr::V4(Ipv4Addr::from(0u32));
@@ -140,7 +140,7 @@ async fn serve(opts: ServeOpts) -> Result<()> {
         );
     }
 
-#[cfg(not(target_os = "freebsd"))]
+    #[cfg(not(target_os = "freebsd"))]
     {
         let addr = IpAddr::V6(Ipv6Addr::from(0u128));
         warp::serve(data).run(SocketAddr::new(addr, opts.port)).await;
@@ -452,7 +452,6 @@ impl FileServer {
 
     // build initial response headers.
     fn build_response(&self, req: &Request, cors: bool) -> RespBuilder {
-
         let mut response = http::Response::builder();
         let resp_headers = response.headers_mut().unwrap();
 
@@ -489,7 +488,6 @@ fn cors_headers(req: &Request, response: &mut RespBuilder) {
 
     let h = HeaderValue::from_static("GET, HEAD, OPTIONS");
     resp_headers.insert("access-control-allow-methods", h);
-
 }
 
 fn options(req: &Request, cors: bool) -> Response {
@@ -642,7 +640,12 @@ async fn manifest(req: &Request) -> Result<Option<Response>, Error> {
 
 async fn media(req: &Request) -> Result<Option<Response>, Error> {
     let e = &req.extra;
-    if !e.starts_with("a/") && !e.starts_with("v/") && !e.starts_with("s/") && !e.starts_with("e/") && !e.starts_with("init.") {
+    if !e.starts_with("a/") &&
+        !e.starts_with("v/") &&
+        !e.starts_with("s/") &&
+        !e.starts_with("e/") &&
+        !e.starts_with("init.")
+    {
         return Ok(None);
     }
 
@@ -661,9 +664,8 @@ async fn media(req: &Request) -> Result<Option<Response>, Error> {
     let mp4 = task::block_in_place(|| mp4lib::streaming::lru_cache::open_mp4(&req.fpath, false))?;
 
     let range = req.parse_range(&fs)?;
-    let (mime, body, size) = task::block_in_place(|| {
-        mp4lib::streaming::hls::media_from_uri(&mp4, &req.extra, range.clone())
-    })?;
+    let (mime, body, size) =
+        task::block_in_place(|| mp4lib::streaming::hls::media_from_uri(&mp4, &req.extra, range.clone()))?;
     resp_headers.insert("content-type", HeaderValue::from_static(mime));
     resp_headers.typed_insert(ContentLength(body.len() as u64));
 
@@ -739,7 +741,8 @@ async fn subtitle(req: &Request) -> Result<Option<Response>, Error> {
     let mut response = fs.build_response(req, true);
     let resp_headers = response.headers_mut().unwrap();
 
-    let (mime, body) = task::block_in_place(|| mp4lib::streaming::subtitle::external(&req.fpath, &req.extra))?;
+    let (mime, body) =
+        task::block_in_place(|| mp4lib::streaming::subtitle::external(&req.fpath, &req.extra))?;
     resp_headers.insert("content-type", HeaderValue::from_static(mime));
     resp_headers.typed_insert(ContentLength(body.len() as u64));
 
@@ -752,7 +755,6 @@ async fn subtitle(req: &Request) -> Result<Option<Response>, Error> {
 }
 
 async fn serve_file(req: &Request) -> Result<Response, Error> {
-
     // if OPTIONS quit now
     if req.method == Method::OPTIONS {
         return Ok(options(req, true));
