@@ -26,7 +26,7 @@ use once_cell::sync::Lazy;
 
 use crate::boxes::*;
 use crate::io::DataRef;
-use crate::lru_cache::{open_mp4, LruCache};
+use super::lru_cache::{open_mp4, LruCache};
 use crate::mp4box::{MP4Box, MP4};
 use crate::serialize::ToBytes;
 use crate::types::FourCC;

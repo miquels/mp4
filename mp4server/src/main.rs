@@ -22,7 +22,7 @@ use structopt::StructOpt;
 use tokio::task;
 use warp::Filter;
 
-use mp4lib::pseudo::Mp4Stream;
+use mp4lib::streaming::pseudo::Mp4Stream;
 
 static EXE_STAMP: OnceCell<u32> = OnceCell::new();
 
@@ -521,7 +521,7 @@ async fn mp4pseudo(req: &Request) -> Result<Option<Response>, Error> {
         return Ok(Some(options(req, true)));
     }
 
-    let mut mp4stream = mp4lib::pseudo::Mp4Stream::open(&req.fpath, tracks)?;
+    let mut mp4stream = mp4lib::streaming::pseudo::Mp4Stream::open(&req.fpath, tracks)?;
 
     // use FileServer for conditionals and initial response.
     let fs = FileServer::from_mp4stream(&mp4stream);
@@ -607,7 +607,7 @@ async fn manifest(req: &Request) -> Result<Option<Response>, Error> {
     let resp_headers = response.headers_mut().unwrap();
 
     // open and parse mp4 file.
-    let mp4 = task::block_in_place(|| mp4lib::lru_cache::open_mp4(&req.fpath, false))?;
+    let mp4 = task::block_in_place(|| mp4lib::streaming::lru_cache::open_mp4(&req.fpath, false))?;
     let range = req.parse_range(&fs)?;
 
     let simple_subs = match req.headers.typed_get::<UserAgent>() {
@@ -615,7 +615,7 @@ async fn manifest(req: &Request) -> Result<Option<Response>, Error> {
         None => false,
     };
     let (mime, body, size) = task::block_in_place(|| {
-        mp4lib::stream::manifest_from_uri(&mp4, &req.extra, simple_subs, range.clone())
+        mp4lib::streaming::hls::manifest_from_uri(&mp4, &req.extra, simple_subs, range.clone())
     })?;
 
     resp_headers.insert("content-type", HeaderValue::from_static(mime));
@@ -658,11 +658,11 @@ async fn media(req: &Request) -> Result<Option<Response>, Error> {
     let resp_headers = response.headers_mut().unwrap();
 
     // open and parse mp4 file.
-    let mp4 = task::block_in_place(|| mp4lib::lru_cache::open_mp4(&req.fpath, false))?;
+    let mp4 = task::block_in_place(|| mp4lib::streaming::lru_cache::open_mp4(&req.fpath, false))?;
 
     let range = req.parse_range(&fs)?;
     let (mime, body, size) = task::block_in_place(|| {
-        mp4lib::stream::media_from_uri(&mp4, &req.extra, range.clone())
+        mp4lib::streaming::hls::media_from_uri(&mp4, &req.extra, range.clone())
     })?;
     resp_headers.insert("content-type", HeaderValue::from_static(mime));
     resp_headers.typed_insert(ContentLength(body.len() as u64));
@@ -704,7 +704,7 @@ async fn info(req: &Request) -> Result<Option<Response>, Error> {
     let resp_headers = response.headers_mut().unwrap();
 
     // open and parse mp4 file.
-    let mp4 = task::block_in_place(|| mp4lib::lru_cache::open_mp4(&req.fpath, false))?;
+    let mp4 = task::block_in_place(|| mp4lib::streaming::lru_cache::open_mp4(&req.fpath, false))?;
 
     let info = mp4lib::track::track_info(&mp4);
     let body = serde_json::to_string_pretty(&info).unwrap();
@@ -739,7 +739,7 @@ async fn subtitle(req: &Request) -> Result<Option<Response>, Error> {
     let mut response = fs.build_response(req, true);
     let resp_headers = response.headers_mut().unwrap();
 
-    let (mime, body) = task::block_in_place(|| mp4lib::subtitle::external(&req.fpath, &req.extra))?;
+    let (mime, body) = task::block_in_place(|| mp4lib::streaming::subtitle::external(&req.fpath, &req.extra))?;
     resp_headers.insert("content-type", HeaderValue::from_static(mime));
     resp_headers.typed_insert(ContentLength(body.len() as u64));
 

@@ -9,11 +9,11 @@ use scan_fmt::scan_fmt;
 
 use crate::boxes::sbtl::Tx3GTextSample;
 use crate::boxes::*;
-use crate::fragment::FragmentSource;
 use crate::mp4box::BoxInfo;
 use crate::mp4box::MP4;
 use crate::serialize::FromBytes;
 use crate::track::SampleInfo;
+use super::fragment::FragmentSource;
 
 /// Subtitle format.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

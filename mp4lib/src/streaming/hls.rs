@@ -15,15 +15,15 @@ use once_cell::sync::Lazy;
 use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 use scan_fmt::scan_fmt;
 
-use crate::fragment::FragmentSource;
 use crate::io::MemBuffer;
-use crate::lru_cache::LruCache;
 use crate::mp4box::MP4;
-use crate::segment::Segment;
 use crate::serialize::ToBytes;
-use crate::subtitle::Format;
 use crate::track::SpecificTrackInfo;
 use crate::types::FourCC;
+use super::fragment::FragmentSource;
+use super::lru_cache::LruCache;
+use super::segment::Segment;
+use super::subtitle::Format;
 
 const SUBTITLE_LANG: [&'static str; 5] = [
     "en",
@@ -535,7 +535,7 @@ fn track_to_segments(mp4: &MP4, track_id: u32, duration: Option<u32>) -> io::Res
         .movie()
         .track_by_id(track_id)
         .ok_or_else(|| ioerr!(NotFound, "track not found"))?;
-    let segments = crate::segment::track_to_segments(track, duration)?;
+    let segments = super::segment::track_to_segments(track, duration)?;
     let segments = Arc::new(segments);
     SEGMENTS.put(key, segments.clone());
     Ok(segments)
@@ -561,7 +561,7 @@ pub fn hls_track(mp4: &MP4, track_id: u32) -> io::Result<String> {
         let mut segments = track_to_segments(mp4, video_id, seg_duration)?;
         if track_id != video_id {
             let segs: &[Segment] = segments.as_ref();
-            segments = Arc::new(crate::segment::track_to_segments_timed(trak, segs)?);
+            segments = Arc::new(super::segment::track_to_segments_timed(trak, segs)?);
         }
         segments
     } else {
@@ -626,7 +626,7 @@ pub fn hls_track(mp4: &MP4, track_id: u32) -> io::Result<String> {
 
 fn hls_subtitle(dirname: &str, name: &str) -> io::Result<String> {
     let path = join_path(dirname, name);
-    let duration = crate::subtitle::duration(&path)?;
+    let duration = super::subtitle::duration(&path)?;
 
     let mut name = name.to_string();
     if !name.ends_with(".vtt") {
@@ -733,7 +733,7 @@ pub fn media_from_uri(
     if let Ok((track_id, ext)) = scan_fmt!(url_tail, "init.{}.{}{e}", u32, String) {
         match ext.as_str() {
             "mp4" => {
-                let init = crate::fragment::media_init_section(&mp4, &[track_id]);
+                let init = super::fragment::media_init_section(&mp4, &[track_id]);
                 let mut buffer = MemBuffer::new();
                 init.write(&mut buffer)?;
                 let data = buffer.into_vec();
@@ -759,7 +759,7 @@ pub fn media_from_uri(
         let dirname = dirname(mp4.input_file.as_ref(), name)?;
         let path = join_path(dirname, name);
 
-        let (mime, data) = crate::subtitle::external(&path, format)?;
+        let (mime, data) = super::subtitle::external(&path, format)?;
         let size = data.len() as u64;
         return Ok((mime, data, size));
     }
@@ -781,7 +781,7 @@ pub fn media_from_uri(
             let (buffer, size) = match typ {
                 's' => {
                     //let ts = seq_id as f64 / 1000.0;
-                    let buffer = crate::subtitle::fragment(&mp4, Format::Vtt, &fs, 0.0)?;
+                    let buffer = super::subtitle::fragment(&mp4, Format::Vtt, &fs, 0.0)?;
                     let size = buffer.len() as u64;
                     (buffer, size)
                 },
@@ -840,7 +840,7 @@ fn movie_fragment(
         frag
     } else {
         // Not in the cache, so generate it.
-        let frag = crate::fragment::movie_fragment(&mp4, seq_id, &[fs])?;
+        let frag = super::fragment::movie_fragment(&mp4, seq_id, &[fs])?;
         let mut buffer = MemBuffer::new();
         frag.to_bytes(&mut buffer)?;
         Arc::new(buffer.into_vec())

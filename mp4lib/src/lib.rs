@@ -35,27 +35,21 @@
 //!
 #[macro_use]
 mod ioerr;
+mod bitreader;
+pub(crate) mod sample_info;
 #[macro_use]
 #[doc(hidden)]
 pub mod macros;
+
 #[macro_use]
 pub mod serialize;
 #[macro_use]
 pub mod types;
-mod bitreader;
-//mod global;
 pub mod boxes;
 pub mod debug;
-pub mod fragment;
 pub mod io;
-pub mod lru_cache;
 pub mod mp4box;
-pub mod pseudo;
-pub mod rewrite;
-pub(crate) mod sample_info;
-pub mod segment;
-pub mod stream;
-pub mod subtitle;
+pub mod streaming;
 pub mod track;
 
 pub use crate::io::Mp4File;
