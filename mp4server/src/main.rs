@@ -480,7 +480,7 @@ fn cors_headers(req: &Request, response: &mut RespBuilder) {
         resp_headers.insert("access-control-allow-origin", HeaderValue::from_static("*"));
     }
 
-    let h = HeaderValue::from_static("if-match, if-unmodified-since, if-range, origin, range");
+    let h = HeaderValue::from_static("x-application, origin, range");
     resp_headers.insert("access-control-allow-headers", h);
 
     let h = HeaderValue::from_static("server, content-range, accept-ranges");
@@ -608,10 +608,16 @@ async fn manifest(req: &Request) -> Result<Option<Response>, Error> {
     let mp4 = task::block_in_place(|| mp4lib::streaming::lru_cache::open_mp4(&req.fpath, false))?;
     let range = req.parse_range(&fs)?;
 
-    let simple_subs = match req.headers.typed_get::<UserAgent>() {
-        Some(ua) => ua.as_str().contains("ChromeCast") || ua.as_str().contains("Chromecast"),
+    let is_notflix = match req.headers.get("x-application").map(|v| v.to_str()) {
+        Some(Ok(v)) => v.contains("Notflix"),
+        _ => false,
+    };
+    let is_cast = match req.headers.typed_get::<UserAgent>() {
+        Some(ua) => ua.as_str().contains("CrKey/"),
         None => false,
     };
+    let simple_subs = is_cast && !is_notflix;
+
     let (mime, body, size) = task::block_in_place(|| {
         mp4lib::streaming::hls::manifest_from_uri(&mp4, &req.extra, simple_subs, range.clone())
     })?;
