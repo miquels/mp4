@@ -338,66 +338,73 @@ impl BoxBytes for CountBytes {
     }
 }
 
-/// Memory buffer that implements WriteBytes.
-#[derive(Debug, Default)]
-pub(crate) struct MemBuffer {
-    data: Vec<u8>,
-    pos:  usize,
+#[cfg(feature = "streaming")]
+mod membuffer {
+    use super::*;
+
+    /// Memory buffer that implements WriteBytes.
+    #[derive(Debug, Default)]
+    pub(crate) struct MemBuffer {
+        data: Vec<u8>,
+        pos:  usize,
+    }
+
+    impl MemBuffer {
+        pub fn new() -> MemBuffer {
+            MemBuffer {
+                data: Vec::new(),
+                pos:  0,
+            }
+        }
+
+        pub fn into_vec(self) -> Vec<u8> {
+            self.data
+        }
+    }
+
+    impl WriteBytes for MemBuffer {
+        fn write(&mut self, newdata: &[u8]) -> io::Result<()> {
+            let mut newdata = newdata;
+            if self.pos < self.data.len() {
+                let len = std::cmp::min(self.data.len() - self.pos, newdata.len());
+                self.data[self.pos..self.pos + len].copy_from_slice(&newdata[..len]);
+                newdata = &newdata[len..];
+                self.pos += len;
+            }
+            if newdata.len() > 0 {
+                self.data.extend_from_slice(newdata);
+                self.pos = self.data.len();
+            }
+            Ok(())
+        }
+
+        fn skip(&mut self, amount: u64) -> io::Result<()> {
+            self.pos += amount as usize;
+            if self.pos > self.data.len() {
+                self.data.resize(self.pos, 0);
+            }
+            Ok(())
+        }
+    }
+
+    impl BoxBytes for MemBuffer {
+        fn pos(&mut self) -> u64 {
+            self.pos as u64
+        }
+        fn seek(&mut self, pos: u64) -> io::Result<()> {
+            self.pos = pos as usize;
+            if self.pos > self.data.len() {
+                self.data.resize(self.pos, 0);
+            }
+            Ok(())
+        }
+        fn size(&self) -> u64 {
+            self.data.len() as u64
+        }
+    }
 }
-
-impl MemBuffer {
-    pub fn new() -> MemBuffer {
-        MemBuffer {
-            data: Vec::new(),
-            pos:  0,
-        }
-    }
-
-    pub fn into_vec(self) -> Vec<u8> {
-        self.data
-    }
-}
-
-impl WriteBytes for MemBuffer {
-    fn write(&mut self, newdata: &[u8]) -> io::Result<()> {
-        let mut newdata = newdata;
-        if self.pos < self.data.len() {
-            let len = std::cmp::min(self.data.len() - self.pos, newdata.len());
-            self.data[self.pos..self.pos + len].copy_from_slice(&newdata[..len]);
-            newdata = &newdata[len..];
-            self.pos += len;
-        }
-        if newdata.len() > 0 {
-            self.data.extend_from_slice(newdata);
-            self.pos = self.data.len();
-        }
-        Ok(())
-    }
-
-    fn skip(&mut self, amount: u64) -> io::Result<()> {
-        self.pos += amount as usize;
-        if self.pos > self.data.len() {
-            self.data.resize(self.pos, 0);
-        }
-        Ok(())
-    }
-}
-
-impl BoxBytes for MemBuffer {
-    fn pos(&mut self) -> u64 {
-        self.pos as u64
-    }
-    fn seek(&mut self, pos: u64) -> io::Result<()> {
-        self.pos = pos as usize;
-        if self.pos > self.data.len() {
-            self.data.resize(self.pos, 0);
-        }
-        Ok(())
-    }
-    fn size(&self) -> u64 {
-        self.data.len() as u64
-    }
-}
+#[cfg(feature = "streaming")]
+pub(crate) use membuffer::*;
 
 impl<'a, B: ?Sized + ReadBytes + 'a> ReadBytes for Box<B> {
     fn read(&mut self, amount: u64) -> io::Result<&[u8]> {

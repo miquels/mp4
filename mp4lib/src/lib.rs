@@ -49,6 +49,7 @@ pub mod boxes;
 pub mod debug;
 pub mod io;
 pub mod mp4box;
+#[cfg(feature = "streaming")]
 pub mod streaming;
 pub mod track;
 

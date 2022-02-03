@@ -6,6 +6,7 @@
 //! Note, `transmuxing` is not `transcoding`.
 pub mod fragment;
 pub mod hls;
+pub mod http_file;
 pub mod lru_cache;
 pub mod pseudo;
 pub mod rewrite;

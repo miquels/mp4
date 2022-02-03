@@ -17,6 +17,7 @@ use std::fs;
 use std::hash::Hash;
 use std::io;
 use std::mem;
+use std::ops::{Bound, Range, RangeBounds};
 use std::os::unix::fs::MetadataExt;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -30,6 +31,8 @@ use crate::io::DataRef;
 use crate::mp4box::{MP4Box, MP4};
 use crate::serialize::ToBytes;
 use crate::types::FourCC;
+
+use super::http_file::HttpFile;
 
 // Key into INIT_SECTION / DATA_SECTION cache.
 #[derive(Hash, PartialEq, Eq, Clone)]
@@ -47,6 +50,9 @@ pub struct Mp4Stream {
     inode:        u64,
     modified:     SystemTime,
     size:         u64,
+    etag:         String,
+    start:        u64,
+    end:          u64,
     pos:          u64,
     mmap:         Option<Mmap>,
 }
@@ -68,6 +74,10 @@ impl Mp4Stream {
         let meta = file.metadata()?;
         let modified = meta.modified().unwrap();
         let inode = meta.ino();
+
+        let d = modified.duration_since(SystemTime::UNIX_EPOCH);
+        let secs = d.map(|s| s.as_secs()).unwrap_or(0);
+        let etag = format!("\"{:08x}.{:08x}.{}\"", secs, inode, meta.size());
 
         // This is kind of aribitraty.
         //
@@ -107,52 +117,16 @@ impl Mp4Stream {
             inode,
             modified,
             size,
+            etag,
+            start: 0,
+            end: size,
             pos: 0,
             mmap,
         })
     }
 
-    /// Return the pathname of the open file.
-    pub fn path(&self) -> &str {
-        &self.key.path
-    }
-
-    /// Returns the size of the (virtual) file.
-    pub fn size(&self) -> u64 {
-        self.size
-    }
-
-    /// Returns the last modified time stamp.
-    pub fn modified(&self) -> SystemTime {
-        self.modified
-    }
-
-    /// Returns the HTTP ETag.
-    pub fn etag(&self) -> String {
-        let d = self.modified.duration_since(SystemTime::UNIX_EPOCH);
-        let secs = d.map(|s| s.as_secs()).unwrap_or(0);
-        format!("\"{:08x}.{:08x}.{}\"", secs, self.inode, self.size)
-    }
-
-    #[doc(hidden)]
-    pub fn inode(&self) -> u64 {
-        self.inode
-    }
-
-    #[doc(hidden)]
-    pub fn file(&self) -> &fs::File {
-        &self.file
-    }
-
-    /// Read data and advance file position.
-    pub fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let n = self.read_at(buf, self.pos)?;
-        self.pos += n as u64;
-        Ok(n)
-    }
-
     /// Read data at a certain offset.
-    pub fn read_at(&mut self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+    fn read_at(&mut self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
         //println!("0. read_at(buf[0..{}], {})", buf.len(), offset);
         let mut buf = buf;
         let mut offset = offset;
@@ -196,6 +170,95 @@ impl Mp4Stream {
         //println!("read {} bytes ({} via mapping)", done, n);
         Ok(done)
     }
+
+    #[doc(hidden)]
+    pub fn inode(&self) -> u64 {
+        self.inode
+    }
+
+    #[doc(hidden)]
+    pub fn file(&self) -> &fs::File {
+        &self.file
+    }
+}
+
+impl HttpFile for Mp4Stream {
+    /// Return the pathname of the open file.
+    fn path(&self) -> Option<&str> {
+        Some(&self.key.path)
+    }
+
+    /// Returns the size of the (virtual) file.
+    fn size(&self) -> u64 {
+        self.size
+    }
+
+    /// Returns the size of the range.
+    fn range_size(&self) -> u64 {
+        self.end - self.start
+    }
+
+    /// Returns the last modified time stamp.
+    fn modified(&self) -> Option<SystemTime> {
+        Some(self.modified)
+    }
+
+    /// Returns the HTTP ETag.
+    fn get_etag(&self) -> Option<&str> {
+        Some(&self.etag)
+    }
+
+    /// Set the HTTP ETag.
+    fn set_etag(&mut self, tag: &str) {
+        self.etag = tag.to_string();
+    }
+
+    /// Get the limited range we're serving.
+    fn get_range(&self) -> Range<u64> {
+        Range{ start: self.start, end: self.end }
+    }
+
+    /// Limit reading to a range.
+    fn set_range(&mut self, range: impl RangeBounds<u64>) -> io::Result<()> {
+        self.start = match range.start_bound() {
+            Bound::Included(&n) => n,
+            Bound::Excluded(&n) =>  n + 1,
+            Bound::Unbounded => 0,
+        };
+        self.end = match range.end_bound() {
+            Bound::Included(&n) => n + 1,
+            Bound::Excluded(&n) => n,
+            Bound::Unbounded => self.size,
+        };
+
+        if self.start >= self.size {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "range out of bounds"));
+        }
+        if self.end > self.size {
+            self.end = self.size;
+        }
+        self.pos = self.start;
+
+        Ok(())
+    }
+
+    /// Read data and advance file position.
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.pos == self.end {
+            return Ok(0);
+        }
+        let mut buf = buf;
+        if self.pos + buf.len() as u64 > self.end {
+            let max = (self.end - self.pos as u64) as usize;
+            buf = &mut buf[..max];
+        }
+        let n = self.read_at(buf, self.pos)?;
+        if n == 0 {
+            return Err(io::ErrorKind::UnexpectedEof.into());
+        }
+        self.pos += n as u64;
+        Ok(n)
+    }
 }
 
 impl std::fmt::Debug for Mp4Stream {
@@ -206,7 +269,7 @@ impl std::fmt::Debug for Mp4Stream {
         dbg.field("inode", &self.inode);
         dbg.field("modified", &self.modified);
         dbg.field("size", &self.size);
-        dbg.field("etag", &self.etag());
+        dbg.field("etag", &self.etag);
         dbg.finish()
     }
 }

@@ -23,6 +23,7 @@ use tokio::task;
 use warp::Filter;
 
 use mp4lib::streaming::pseudo::Mp4Stream;
+use mp4lib::streaming::http_file::HttpFile;
 
 static EXE_STAMP: OnceCell<u32> = OnceCell::new();
 
@@ -411,10 +412,10 @@ impl FileServer {
     fn from_mp4stream(strm: &Mp4Stream) -> FileServer {
         FileServer {
             file:        strm.file().try_clone().unwrap(),
-            modified:    strm.modified(),
+            modified:    strm.modified().unwrap(),
             size:        strm.size(),
-            etag_hdr:    make_etag(&strm.etag()),
-            lastmod_hdr: LastModified::from(strm.modified()),
+            etag_hdr:    make_etag(strm.get_etag().unwrap()),
+            lastmod_hdr: LastModified::from(strm.modified().unwrap()),
         }
     }
 
@@ -530,12 +531,9 @@ async fn mp4pseudo(req: &Request) -> Result<Option<Response>, Error> {
     let mut status = 200;
 
     // Check ranges.
-    let mut start = 0;
-    let mut end = fs.size;
     if let Some(range) = req.parse_range(&fs)? {
         if let Ok(cr) = ContentRange::bytes(range.clone(), fs.size) {
-            start = range.start;
-            end = range.end;
+            mp4stream.set_range(range)?;
             resp_headers.typed_insert(cr);
             status = 206;
         }
@@ -543,7 +541,7 @@ async fn mp4pseudo(req: &Request) -> Result<Option<Response>, Error> {
 
     // Set Content-Type, Content-Length, and StatusCode.
     resp_headers.insert("content-type", HeaderValue::from_static("video/mp4"));
-    resp_headers.typed_insert(ContentLength(end - start));
+    resp_headers.typed_insert(ContentLength(mp4stream.range_size()));
     response = response.status(status);
 
     // if HEAD quit now
@@ -553,23 +551,21 @@ async fn mp4pseudo(req: &Request) -> Result<Option<Response>, Error> {
 
     // Run content generation in a separate task
     let (mut tx, body) = hyper::Body::channel();
+    let mut todo = mp4stream.range_size();
     task::spawn(async move {
         loop {
-            let buflen = std::cmp::min(end - start, 128000) as usize;
+            let buflen = std::cmp::min(todo, 128000) as usize;
             let mut buf = Vec::<u8>::new();
             buf.resize(buflen, 0);
-            let result = task::block_in_place(|| mp4stream.read_at(&mut buf, start));
+            let result = task::block_in_place(|| mp4stream.read(&mut buf));
             let n = match result {
                 Ok(n) if n == 0 => break,
                 Ok(n) => n,
                 Err(_) => break,
             };
             buf.truncate(n);
-            start += n as u64;
+            todo -= n as u64;
             if let Err(_) = tx.send_data(Bytes::from(buf)).await {
-                break;
-            }
-            if start >= end {
                 break;
             }
         }

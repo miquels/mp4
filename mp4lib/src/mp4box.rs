@@ -325,7 +325,9 @@ impl<'a> BoxBytes for BoxWriter<'a> {
 pub struct MP4 {
     /// The boxes at the top level.
     pub boxes:             Vec<MP4Box>,
+    #[allow(dead_code)]
     pub(crate) data_ref:   DataRef,
+    #[allow(dead_code)]
     pub(crate) input_file: Option<String>,
 }
 

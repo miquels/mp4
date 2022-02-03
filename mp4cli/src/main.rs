@@ -14,6 +14,7 @@ use mp4lib::ioerr;
 use mp4lib::iter_box;
 use mp4lib::mp4box::{MP4Box, MP4};
 use mp4lib::streaming::fragment::FragmentSource;
+use mp4lib::streaming::http_file::HttpFile;
 use mp4lib::streaming::subtitle;
 
 #[derive(StructOpt, Debug)]
