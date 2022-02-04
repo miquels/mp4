@@ -1,4 +1,21 @@
-//! On the fly HLS / DASH packaging.
+//! On the fly `HLS` packaging.
+//!
+//! The functions in this crate can repackage a normal `MP4` file
+//! on-the-fly into a `HLS VOD` stream.
+//!
+//! A `HLS` stream consists of:
+//!
+//! - a `master.m3u8` `HLS` manifest, which references:
+//! - several `media.m3u8` manifests, one per track
+//! - which each refer to
+//!   o a `Media Init Section` for the track
+//!   o `fMP4` / `CMAF` fragments c.q. segments for the track.
+//!
+//! The `master.m3u8` manifest can also refer directly to `WebVTT` subtitle files.
+//! Subtitles embedded in the `MP4` file are served as a `HLS` track.
+//!
+//! Start at [`HlsManifest`](crate::streaming::hls::HlsManifest) and
+//! [`MediaSegment`](crate::streaming::hls::MediaSegment).
 //!
 use std::cmp;
 use std::collections::{HashMap, HashSet};
@@ -15,15 +32,17 @@ use once_cell::sync::Lazy;
 use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 use scan_fmt::scan_fmt;
 
-use super::fragment::FragmentSource;
-use super::lru_cache::LruCache;
-use super::segment::Segment;
-use super::subtitle::Format;
 use crate::io::MemBuffer;
 use crate::mp4box::MP4;
 use crate::serialize::ToBytes;
 use crate::track::SpecificTrackInfo;
 use crate::types::FourCC;
+
+use super::fragment::FragmentSource;
+use super::http_file::{MemFile, HttpFile};
+use super::lru_cache::LruCache;
+use super::segment::Segment;
+use super::subtitle::Format;
 
 const SUBTITLE_LANG: [&'static str; 5] = ["en", "nl", "de", "fr", "es"];
 
@@ -279,12 +298,21 @@ fn lookup_subtitles(mp4path: Option<&String>) -> Vec<String> {
     subs
 }
 
-/// Generate a HLS playlist.
+/// Generate a master `HLS` playlist from a `MP4` object.
 ///
-/// You can pass in external subtitles using the `subs` argument.
-/// The subtitle path needs to be relative, just a filename, and
-/// the file needs to be in the same subdir as the mp4 file.
-pub fn hls_master(mp4: &MP4, external_subs: bool, simple_subs: bool) -> String {
+/// The extra parameters are:
+///
+/// - `external_subs`: if `true`, the directory of the original `mp4` file
+///   is scanned for `.srt` and `.vtt` files that have the same `"base"`
+///   (the part of the filename before the `.mp4` extension) and those are
+///   included in the manifest. `Srt` files are automatically translated to `vtt`.
+///
+/// - `filter_subs`: some HLS players only show one subtitle per language, even
+///   if multiple are available (say, `main`, `SDH`, `FORCED`, `commentary`.
+///   If `filter_subs` is `true`, we try to only include the `main` subtitle
+///   for each language in the manifest.
+///
+pub fn hls_master(mp4: &MP4, external_subs: bool, filter_subs: bool) -> String {
     let mut m = String::new();
     m += "#EXTM3U\n";
     m += "# Created by mp4lib.rs\n";
@@ -468,7 +496,7 @@ pub fn hls_master(mp4: &MP4, external_subs: bool, simple_subs: bool) -> String {
             a.forced.cmp(&b.forced)
         });
 
-        if simple_subs {
+        if filter_subs {
             uniqify_subtitles(&mut subtitles, true);
         }
 
@@ -535,6 +563,10 @@ fn track_to_segments(mp4: &MP4, track_id: u32, duration: Option<u32>) -> io::Res
     Ok(segments)
 }
 
+/// Generate a `HLS` track manifest.
+///
+/// This is also an `m3u8` file. It contains a list of media segments.
+///
 pub fn hls_track(mp4: &MP4, track_id: u32) -> io::Result<String> {
     let movie = mp4.movie();
     let trak = movie
@@ -634,138 +666,171 @@ fn hls_subtitle(dirname: &str, name: &str) -> io::Result<String> {
     Ok(m)
 }
 
-/// Translates the tail of an URL into a manifest (m3u8 playlist or dash mpd).
+/// HLS manifest data.
 ///
-/// - master.m3u8                => HLS master playlist
-/// - media.<TRACK>.m3u8         => HLS track playlist
-/// - media.ext:NAME.EXT:as.m3u8 => external file
-///
-/// Returns (mime-type, data, data_fullsize).
-///
-pub fn manifest_from_uri(
-    mp4: &MP4,
-    url_tail: &str,
-    simple_subs: bool,
-    range: Option<Range<u64>>,
-) -> io::Result<(&'static str, Vec<u8>, u64)> {
-    let (mime, data) = manifest_from_uri_(mp4, url_tail, simple_subs)?;
-    let size = data.len() as u64;
-    if let Some(mut range) = range {
-        if range.start >= size {
-            return Err(ioerr!(InvalidData, "416 Invalid range"));
-        }
-        if range.end > size {
-            range.end = size;
-        }
-        if range.end - range.start != size {
-            let data = data[range.start as usize..range.end as usize].to_vec();
-            return Ok((mime, data, size));
-        }
-    }
-    Ok((mime, data, size))
-}
+/// This struct `impl`s `HttpFile`.
+#[derive(Delegate)]
+#[delegate(HttpFile)]
+pub struct HlsManifest(MemFile);
 
-fn manifest_from_uri_(mp4: &MP4, url_tail: &str, simple_subs: bool) -> io::Result<(&'static str, Vec<u8>)> {
-    let data = if url_tail == "main.m3u8" || url_tail == "master.m3u8" {
-        // HLS master playlist.
-        hls_master(&mp4, true, simple_subs)
-    } else if let Ok(track) = scan_fmt!(url_tail, "media.{}.m3u8{e}", u32) {
-        // HLS media playlist.
-        hls_track(&mp4, track)?
-    } else if let Ok((name, _)) = scan_fmt!(url_tail, "media.ext:{}:{}.m3u8{e}", String, String) {
-        // external file next to .mp4.
-        if name.ends_with(".srt") || name.ends_with(".vtt") {
-            // subtitles.
-            let dirname = dirname(mp4.input_file.as_ref(), &name)?;
-            hls_subtitle(&dirname, &name)?
+impl HlsManifest {
+    /// Translates the tail of an `Url` into a `HLS` manifest or subtitle file.
+    ///
+    /// The main idea here is for a http server to serve requests for (example url)
+    /// `/media/path/filename.mp4/<manifest.m3u8`. This then serves 
+    /// a `master` or `track` `HLS` manifest.
+    ///
+    /// The `url_tail` is the part after `...mp4/` and has this format:
+    ///
+    /// - `master.m3u8`              => `HLS` master playlist
+    /// - `media.<TRACK_ID>.m3u8`     => `HLS` track playlist
+    /// - `media.ext:NAME.EXT:as.m3u8` => `HLS` external subtitle file playlist
+    ///
+    /// The last case looks the most complicated, but is in fact the simplest.
+    /// `media.ext` is literal. `NAME.EXT` is the name of the subtitle
+    /// file in the same directory as the `mp4` file, either an `srt` or `vtt` file.
+    /// `:as.m3u8` means "create a manifest for this file with one entry: this file".
+    ///
+    /// `master.m3u8` will have entries that refer to the latter two `url`s.
+    ///
+    /// Each manifest will have entries that refer to per-track media segments.
+    ///
+    pub fn from_uri(mp4: &MP4, url_tail: &str, filter_subs: bool) -> io::Result<HlsManifest> {
+        let data = if url_tail == "main.m3u8" || url_tail == "master.m3u8" {
+            // HLS master playlist.
+            hls_master(&mp4, true, filter_subs)
+        } else if let Ok(track) = scan_fmt!(url_tail, "media.{}.m3u8{e}", u32) {
+            // HLS media playlist.
+            hls_track(&mp4, track)?
+        } else if let Ok((name, _)) = scan_fmt!(url_tail, "media.ext:{}:{}.m3u8{e}", String, String) {
+            // external file next to .mp4.
+            if name.ends_with(".srt") || name.ends_with(".vtt") {
+                // subtitles.
+                let dirname = dirname(mp4.input_file.as_ref(), &name)?;
+                hls_subtitle(&dirname, &name)?
+            } else {
+                // unknown external file type.
+                return Err(ioerr!(InvalidData, "415 Unsupported Media Type"));
+            }
         } else {
-            // unknown external file type.
             return Err(ioerr!(InvalidData, "415 Unsupported Media Type"));
-        }
-    } else {
-        return Err(ioerr!(InvalidData, "415 Unsupported Media Type"));
-    };
+        };
 
-    Ok(("application/vnd.apple.mpegurl", data.into_bytes()))
+        let file = &*mp4.data_ref.file;
+        let mem_file = MemFile::from_file(
+            data.into_bytes(),
+            "application/vnd.apple.mpegurl",
+            file,
+        )?;
+        Ok(HlsManifest(mem_file))
+    }
+
+    /// `HLS` manifest as text.
+    pub fn manifest(&self) -> &'_ str {
+        std::str::from_utf8(&self.0.content[..]).unwrap_or("")
+    }
 }
 
-/// Translates the tail of an URL into an MP4 init segment or media segment.
-///
-/// - init.TRACK_ID.mp4 => initialization segment for track TRACK_ID.
-/// - init.TRACK_ID.vtt => initialization segment for track TRACK_ID.
-///
-/// - a/c.TRACK_ID.SEQUENCE.FROM_SAMPLE.TO_SAMPLE.m4a => audio moof + mdat
-/// - v/c.TRACK_ID.SEQUENCE.FROM_SAMPLE.TO_SAMPLE.mp4 => video moof + mdat
-/// - s/c.TRACK_ID.SEQUENCE.FROM_SAMPLE.TO_SAMPLE.vtt => webvtt fragment
-/// - e/externalfile.ext[:into.ext] => external file next to mp4 (.srt, .vtt)
-///
-/// Returns (mime-type, data, data_fullsize).
-pub fn media_from_uri(
-    mp4: &MP4,
-    url_tail: &str,
-    range: Option<Range<u64>>,
-) -> io::Result<(&'static str, Vec<u8>, u64)> {
-    // initialization section.
-    if let Ok((track_id, ext)) = scan_fmt!(url_tail, "init.{}.{}{e}", u32, String) {
-        match ext.as_str() {
-            "mp4" => {
-                let init = super::fragment::media_init_section(&mp4, &[track_id]);
-                let mut buffer = MemBuffer::new();
-                init.write(&mut buffer)?;
-                let data = buffer.into_vec();
-                let size = data.len() as u64;
-                return Ok(("video/mp4", data, size));
-            },
-            "vtt" => {
-                let buffer = b"WEBVTT\n\n";
-                let size = buffer.len() as u64;
-                return Ok(("text/vtt", buffer.to_vec(), size));
-            },
-            _ => return Err(ioerr!(InvalidData, "Bad request")),
-        }
+/// A media segment. An `fMP4` fragment, or a `CMAF` segment.
+#[derive(Delegate)]
+#[delegate(HttpFile)]
+pub struct MediaSegment(MemFile);
+
+impl MediaSegment {
+    /// Translates the tail of an URL into an MP4 init segment or media segment.
+    ///
+    /// - `init.TRACK_ID.mp4` => initialization segment for track `TRACK_ID`.
+    /// - `init.TRACK_ID.vtt` => initialization segment for track `TRACK_ID`.
+    ///
+    /// - `a/c.TRACK_ID.SEQUENCE.FROM_SAMPLE.TO_SAMPLE.m4a` => audio moof + mdat
+    /// - `v/c.TRACK_ID.SEQUENCE.FROM_SAMPLE.TO_SAMPLE.mp4` => video moof + mdat
+    /// - `s/c.TRACK_ID.SEQUENCE.FROM_SAMPLE.TO_SAMPLE.vtt` => webvtt fragment
+    /// - `e/EXTERNALFILE.EXT[:into.ext]` => external file next to `.mp4` (`.srt`, `.vtt`)
+    ///
+    pub fn from_uri(
+        mp4: &MP4,
+        url_tail: &str,
+    ) -> io::Result<MediaSegment> {
+        let (mime_type, content) = MediaSegment::from_uri_(mp4, url_tail)?;
+        let file = &*mp4.data_ref.file;
+        let mem_file = MemFile::from_file(
+            content,
+            mime_type,
+            file,
+        )?;
+        Ok(MediaSegment(mem_file))
     }
 
-    // external file.
-    if url_tail.starts_with("e/") && url_tail.ends_with(".vtt") {
-        // subtitles.
-        let mut iter = url_tail[2..].split(':');
-        let name = iter.next().unwrap();
-        let format = iter.next().unwrap_or(name);
-
-        let dirname = dirname(mp4.input_file.as_ref(), name)?;
-        let path = join_path(dirname, name);
-
-        let (mime, data) = super::subtitle::external(&path, format)?;
-        let size = data.len() as u64;
-        return Ok((mime, data, size));
-    }
-
-    match scan_fmt!(url_tail, "{[vas]}/c.{}.{}.{}-{}.", char, u32, u32, u32, u32) {
-        Ok((typ, track_id, seq_id, start_sample, end_sample)) => {
-            let mime = match typ {
-                'v' => "video/mp4",
-                'a' => "audio/mp4",
-                's' => "text/vtt",
-                _ => unreachable!(),
-            };
-            let fs = FragmentSource {
-                src_track_id: track_id,
-                dst_track_id: 1,
-                from_sample:  start_sample,
-                to_sample:    end_sample,
-            };
-            let (buffer, size) = match typ {
-                's' => {
-                    //let ts = seq_id as f64 / 1000.0;
-                    let buffer = super::subtitle::fragment(&mp4, Format::Vtt, &fs, 0.0)?;
-                    let size = buffer.len() as u64;
-                    (buffer, size)
+    fn from_uri_(
+        mp4: &MP4,
+        url_tail: &str,
+    ) -> io::Result<(&'static str, Vec<u8>)> {
+        // initialization section.
+        if let Ok((track_id, ext)) = scan_fmt!(url_tail, "init.{}.{}{e}", u32, String) {
+            match ext.as_str() {
+                "mp4" => {
+                    let init = super::fragment::media_init_section(&mp4, &[track_id]);
+                    let mut buffer = MemBuffer::new();
+                    init.write(&mut buffer)?;
+                    let data = buffer.into_vec();
+                    return Ok(("video/mp4", data))
                 },
-                _ => movie_fragment(&mp4, seq_id, fs, range)?,
-            };
-            Ok((mime, buffer, size))
-        },
-        Err(_) => Err(ioerr!(InvalidData, "bad request")),
+                "vtt" => {
+                    let buffer = b"WEBVTT\n\n".to_vec();
+                    return Ok(("text/vtt", buffer));
+                },
+                _ => return Err(ioerr!(InvalidData, "Bad request")),
+            }
+        }
+
+        // external file.
+        if url_tail.starts_with("e/") && url_tail.ends_with(".vtt") {
+            // subtitles.
+            let mut iter = url_tail[2..].split(':');
+            let name = iter.next().unwrap();
+            let format = iter.next().unwrap_or(name);
+
+            let dirname = dirname(mp4.input_file.as_ref(), name)?;
+            let path = join_path(dirname, name);
+
+            return super::subtitle::external(&path, format);
+        }
+
+        let tups = match scan_fmt!(url_tail, "{[vas]}/c.{}.{}.{}-{}.", char, u32, u32, u32, u32) {
+            Ok(tups) => tups,
+            Err(_) => return Err(ioerr!(InvalidData, "bad request")),
+        };
+        let (typ, track_id, seq_id, start_sample, end_sample) = tups;
+
+        let mime = match typ {
+            'v' => "video/mp4",
+            'a' => "audio/mp4",
+            's' => "text/vtt",
+            _ => unreachable!(),
+        };
+        let fs = FragmentSource {
+            src_track_id: track_id,
+            dst_track_id: 1,
+            from_sample:  start_sample,
+            to_sample:    end_sample,
+        };
+        let content = match typ {
+            's' => {
+                //let ts = seq_id as f64 / 1000.0;
+                super::subtitle::fragment(&mp4, Format::Vtt, &fs, 0.0)?
+            },
+            // XXX FIXME: caching of segments partially read.
+            // was depening on whether we've read them fully.
+            // better to just drop them if the sequence is higher.
+            _ => movie_fragment(&mp4, seq_id, fs, None)?.0,
+        };
+
+        Ok((mime, content))
+    }
+
+    /// `media segment` data as bytes.
+    pub fn media_data(&self) -> &'_ [u8] {
+        &self.0.content[..]
     }
 }
 

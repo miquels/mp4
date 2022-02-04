@@ -1,11 +1,21 @@
 //! Abstraction for a `File` like object to be served over HTTP.
 //!
+//! `HttpFile` is a trait with just enough methods for it to be
+//! used by an HTTP server to serve `GET` and `HEAD` requests.
+//!
+//! If the `http-file-server` feature is enabled, you also get
+//! `FsFile` and `serve_file`.
+//!
+use std::cmp;
 use std::fs;
 use std::io;
 use std::ops::{Bound, Range, RangeBounds};
 use std::os::unix::fs::{FileExt, MetadataExt};
 use std::time::SystemTime;
 
+use ambassador::delegatable_trait;
+
+#[delegatable_trait]
 pub trait HttpFile {
     /// Return the pathname of the open file (if any).
     fn path(&self) -> Option<&str> {
@@ -19,7 +29,7 @@ pub trait HttpFile {
     fn range_size(&self) -> u64;
 
     /// Returns the last modified time stamp.
-    fn modified(&self) -> Option<SystemTime>;
+    fn modified(&self) -> Option<std::time::SystemTime>;
 
     /// Returns the HTTP ETag.
     fn get_etag(&self) -> Option<&str>;
@@ -28,161 +38,157 @@ pub trait HttpFile {
     fn set_etag(&mut self, tag: &str);
 
     /// Get the limited range we're serving.
-    fn get_range(&self) -> Range<u64>;
+    fn get_range(&self) -> std::ops::Range<u64>;
 
     /// Limit reading to a range.
-    fn set_range(&mut self, range: impl RangeBounds<u64>) -> io::Result<()>;
+    fn set_range(&mut self, range: impl std::ops::RangeBounds<u64>) -> std::io::Result<()>;
 
     /// Read data and advance file position.
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize>;
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize>;
+
+    /// MIME type.
+    fn mime_type(&self) -> &str {
+        "application/octet-stream"
+    }
 }
 
-/// Implementation of `HttpFile` for a plain filesystem file.
-pub struct FsFile {
-    file:   Option<fs::File>,
-    path:   Option<String>,
-    size:   u64,
-    etag:   Option<String>,
+macro_rules! impl_http_file {
+    ($type:ty { $($methods:tt)* }) => {
+
+        impl HttpFile for $type {
+            /// Returns the size of the (virtual) file.
+            fn size(&self) -> u64 {
+                self.size
+            }
+
+            /// Returns the size of the range.
+            fn range_size(&self) -> u64 {
+                self.end - self.start
+            }
+
+            /// Returns the last modified time stamp.
+            fn modified(&self) -> Option<SystemTime> {
+                self.modified
+            }
+
+            /// Returns the HTTP ETag.
+            fn get_etag(&self) -> Option<&str> {
+                self.etag.as_ref().map(|t| t.as_str())
+            }
+
+            /// Set the HTTP ETag.
+            fn set_etag(&mut self, tag: &str) {
+                self.etag = Some(tag.to_string());
+            }
+
+            /// Get the limited range we're serving.
+            fn get_range(&self) -> Range<u64> {
+                Range{ start: self.start, end: self.end }
+            }
+
+            /// Limit reading to a range.
+            fn set_range(&mut self, range: impl RangeBounds<u64>) -> io::Result<()> {
+                self.start = match range.start_bound() {
+                    Bound::Included(&n) => n,
+                    Bound::Excluded(&n) =>  n + 1,
+                    Bound::Unbounded => 0,
+                };
+                self.end = match range.end_bound() {
+                    Bound::Included(&n) => n + 1,
+                    Bound::Excluded(&n) => n,
+                    Bound::Unbounded => self.size,
+                };
+
+                if self.start >= self.size {
+                    return Err(io::Error::new(io::ErrorKind::InvalidInput, "range out of bounds"));
+                }
+                if self.end > self.size {
+                    self.end = self.size;
+                }
+                self.pos = self.start;
+
+                Ok(())
+            }
+
+            /// Return the MIME type of this content.
+            fn mime_type(&self) -> &str {
+                self.mime_type.as_str()
+            }
+
+            $($methods)*
+        }
+    }
+}
+
+/// Implementation of `HttpFile` for an in-memory file.
+pub struct MemFile {
     start:  u64,
     end:    u64,
+    size:   u64,
     pos:    u64,
     modified: Option<SystemTime>,
-    content:    Vec<u8>,
+    etag:   Option<String>,
+    mime_type: String,
+    pub(crate) content: Vec<u8>,
 }
 
-impl FsFile {
-    /// Open file.
-    pub fn open(path: &str) -> io::Result<FsFile> {
-        let mut file = FsFile::from_file(fs::File::open(path)?)?;
-        file.path = Some(path.to_string());
-        Ok(file)
+impl MemFile {
+    /// New MemFile.
+    pub fn new(content: Vec<u8>, mime_type: &str) -> MemFile {
+        MemFile {
+            start:  0,
+            end:    content.len() as u64,
+            size:   content.len() as u64,
+            pos:    0,
+            modified: None,
+            etag:   None,
+            mime_type: mime_type.to_string(),
+            content,
+        }
     }
 
-    /// From an already opened file.
-    pub fn from_file(file: fs::File) -> io::Result<FsFile> {
+    /// Referring to an already opened file for modified time / etag.
+    pub fn from_file<'a>(content: Vec<u8>, mime_type: impl Into<String>, file: &fs::File) -> io::Result<MemFile> {
+        let mime_type = mime_type.into();
+
         let meta = file.metadata()?;
         let modified = meta.modified()?;
-
         let d = modified.duration_since(SystemTime::UNIX_EPOCH);
         let secs = d.map(|s| s.as_secs()).unwrap_or(0);
         let etag = format!("\"{:08x}.{:08x}.{}\"", secs, meta.ino(), meta.size());
 
-        Ok(FsFile {
-            file: Some(file),
-            path: None,
-            size: meta.len(),
-            etag: Some(etag),
+        Ok(MemFile {
             start: 0,
-            end: meta.len(),
+            end: content.len() as u64,
+            size: content.len() as u64,
+            etag: Some(etag),
             pos: 0,
             modified: Some(modified),
-            content: Vec::new(),
+            mime_type,
+            content,
         })
-    }
-
-    /// Serve different content.
-    ///
-    /// This is used when you open a file, but then serve data generated
-    /// from the file - such as a CMAF segment. Timestamp and etag remain
-    /// the same, content differs.
-    pub fn set_content(&mut self, content: Vec<u8>) {
-        self.content = content;
-        self.file = None;
-        self.size = self.content.len() as u64;
-        self.pos = 0;
-        self.start = 0;
-        self.end = self.content.len() as u64;
     }
 }
 
-impl HttpFile for FsFile {
-    /// Return the pathname of the open file.
-    fn path(&self) -> Option<&str> {
-        self.path.as_ref().map(|s| s.as_str())
-    }
-
-    /// Returns the size of the (virtual) file.
-    fn size(&self) -> u64 {
-        self.size
-    }
-
-    /// Returns the size of the range.
-    fn range_size(&self) -> u64 {
-        self.end - self.start
-    }
-
-    /// Returns the last modified time stamp.
-    fn modified(&self) -> Option<SystemTime> {
-        self.modified
-    }
-
-    /// Returns the HTTP ETag.
-    fn get_etag(&self) -> Option<&str> {
-        self.etag.as_ref().map(|t| t.as_str())
-    }
-
-    /// Set the HTTP ETag.
-    fn set_etag(&mut self, tag: &str) {
-        self.etag = Some(tag.to_string());
-    }
-
-    /// Get the limited range we're serving.
-    fn get_range(&self) -> Range<u64> {
-        Range{ start: self.start, end: self.end }
-    }
-
-    /// Limit reading to a range.
-    fn set_range(&mut self, range: impl RangeBounds<u64>) -> io::Result<()> {
-        self.start = match range.start_bound() {
-            Bound::Included(&n) => n,
-            Bound::Excluded(&n) =>  n + 1,
-            Bound::Unbounded => 0,
-        };
-        self.end = match range.end_bound() {
-            Bound::Included(&n) => n + 1,
-            Bound::Excluded(&n) => n,
-            Bound::Unbounded => self.size,
-        };
-
-        if self.start >= self.size {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "range out of bounds"));
-        }
-        if self.end > self.size {
-            self.end = self.size;
-        }
-        self.pos = self.start;
-
-        Ok(())
-    }
-
+impl_http_file!(MemFile {
     /// Read data and advance file position.
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.pos == self.end {
             return Ok(0);
         }
-        let mut buf = buf;
-        if self.pos + buf.len() as u64 > self.end {
-            let max = (self.end - self.pos as u64) as usize;
-            buf = &mut buf[..max];
-        }
-        let n = match self.file.as_ref() {
-            Some(file) => file.read_at(buf, self.pos)?,
-            None => {
-                buf.copy_from_slice(&self.content[self.pos as usize .. self.pos as usize + buf.len()]);
-                buf.len()
-            },
-        };
-        if n == 0 {
-            return Err(io::ErrorKind::UnexpectedEof.into());
-        }
-        self.pos += n as u64;
-        Ok(n)
+        let size = cmp::min(buf.len() as u64, self.end - self.pos) as usize;
+        let pos = self.pos as usize;
+        buf[..size].copy_from_slice(&self.content[pos .. pos + size]);
+        self.pos += size as u64;
+        Ok(size)
     }
-}
+});
 
+#[cfg_attr(docsrs, doc(cfg(feature = "http-file-server")))]
 #[cfg(feature = "http-file-server")]
-mod http {
+mod http_file_server {
    use std::cmp;
+   use std::fs;
    use std::future::Future;
    use std::io;
    use std::pin::Pin;
@@ -198,21 +204,92 @@ mod http {
    };
    use http::{Method, StatusCode};
 
-   use super::HttpFile;
+   use super::*;
+
+    /// Implementation of `HttpFile` for a plain filesystem file.
+    pub struct FsFile {
+        file:  fs::File,
+        path:   Option<String>,
+        size:   u64,
+        start:  u64,
+        end:    u64,
+        pos:    u64,
+        modified: Option<SystemTime>,
+        etag:   Option<String>,
+        mime_type: String,
+    }
+
+    impl FsFile {
+        /// Open file.
+        pub fn open(path: &str) -> io::Result<FsFile> {
+            let mut file = FsFile::from_file(fs::File::open(path)?, path)?;
+            file.path = Some(path.to_string());
+            Ok(file)
+        }
+
+        /// From an already opened file.
+        pub fn from_file<'a>(file: fs::File, path: impl Into<Option<&'a str>>) -> io::Result<FsFile> {
+            let path = path.into();
+            let meta = file.metadata()?;
+            let modified = meta.modified()?;
+
+            let d = modified.duration_since(SystemTime::UNIX_EPOCH);
+            let secs = d.map(|s| s.as_secs()).unwrap_or(0);
+            let etag = format!("\"{:08x}.{:08x}.{}\"", secs, meta.ino(), meta.size());
+            let mime_type = match path.as_ref() {
+                Some(path) => mime_guess::from_path(path).first_or_octet_stream().to_string(),
+                None => "application/octet_stream".to_string(),
+            };
+
+            Ok(FsFile {
+                file,
+                path: path.map(|p| p.to_string()),
+                size: meta.len(),
+                start: 0,
+                end: meta.len(),
+                pos: 0,
+                modified: Some(modified),
+                etag: Some(etag),
+                mime_type,
+            })
+        }
+    }
+
+    impl_http_file!(FsFile {
+        /// Return the pathname of the open file.
+        fn path(&self) -> Option<&str> {
+            self.path.as_ref().map(|s| s.as_str())
+        }
+
+        /// Read data and advance file position.
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if self.pos == self.end {
+                return Ok(0);
+            }
+            let max = cmp::min(buf.len() as u64, self.end - self.pos) as usize;
+            let n = self.file.read_at(&mut buf[..max], self.pos)?;
+            if n == 0 {
+                return Err(io::ErrorKind::UnexpectedEof.into());
+            }
+            self.pos += n as u64;
+            Ok(n)
+        }
+    });
+
 
    /// Serve a `HttpFile`.
    ///
    /// This function takes care of:
    ///
    /// - `GET` and `HEAD` methods.
-   /// - checking conditionals (If-Modified-Since, If-Range, etc)
+   /// - checking conditionals (`If-Modified-Since`, `If-Range`, etc)
    /// - rejecting invalid requests
    /// - serving a range
    ///
-   /// It does not handle OPTIONS and it does not set CORS headers.
+   /// It does not handle `OPTIONS` and it does not set `CORS` headers.
    ///
-   /// CORS headers can be set after this function returns, or
-   /// it can be done by middleware.
+   /// `CORS` headers can be set on the `Response` after this function returns,
+   /// or it can be handled by middleware.
    ///
    pub async fn serve_file<F, R>(req: &http::Request<R>, mut file: F) -> http::Response<Body<F>>
    where
@@ -319,7 +396,7 @@ mod http {
        None
    }
    
-   /// Body that implements Stream<Item=Bytes>.
+   /// Body that implements `Stream<Item=Bytes>`.
    pub struct Body<F: HttpFile + Unpin + Send + 'static> {
        file: Option<F>,
        todo: u64,
@@ -414,5 +491,5 @@ mod http {
    }
 }
 #[cfg(feature = "http-file-server")]
-pub use self::http::{serve_file, Body};
+pub use self::http_file_server::{serve_file, Body, FsFile};
 

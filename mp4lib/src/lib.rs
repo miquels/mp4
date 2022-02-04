@@ -1,17 +1,20 @@
-//! Read and write MP4 / ISOBMFF containers.
+//! Read and write `MP4` / `ISOBMFF` containers.
 //!
-//! There are several other crates that let you read an MP file into
+//! There are several other crates that let you read an `mp4` file into
 //! a set of structures, but none of them let you write one.
 //!
-//! This crate was created for an HTTP server that can rewrite
-//! mp4-files on the fly, as they are served:
+//! This crate was created for an `HTTP` server that can:
 //!
-//! - put the MOOV box at the front of the file
-//! - extract tx3g subtitles as vtt or srt.
-//! - rearrange the order of tracks.
-//! - get details of the file in json format.
+//! - rewrite `mp4` files on the fly, as they are served:
+//!   - put the MOOV box at the front of the file
+//!   - extract tx3g subtitles as vtt or srt.
+//!   - filter tracks, or rearrange the order of tracks.
 //!
-//! This prints some `mediainfo` like info for an mp4 file.
+//! - serve `mp4` files as a HLS stream.
+//!
+//! It can also be used for other kinds of `MP4` manipulation.
+//!
+//! For example, this prints some `mediainfo` like info for an mp4 file.
 //!
 //! ```no_run
 //! use mp4::{Mp4File, MP4};
@@ -33,6 +36,10 @@
 //! struct. The method [`mp4.movie`](crate::mp4box::MP4::movie) gets you a
 //! [`MovieBox`](crate::boxes::MovieBox) and from there you can inspect the tracks, etc.
 //!
+
+#[macro_use]
+extern crate ambassador;
+
 #[macro_use]
 mod ioerr;
 mod bitreader;
@@ -49,6 +56,8 @@ pub mod boxes;
 pub mod debug;
 pub mod io;
 pub mod mp4box;
+pub mod rewrite;
+#[cfg_attr(docsrs, doc(cfg(feature = "streaming")))]
 #[cfg(feature = "streaming")]
 pub mod streaming;
 pub mod track;

@@ -227,7 +227,7 @@ fn rewrite(opts: RewriteOpts) -> Result<()> {
     let mut reader = Mp4File::open(&opts.input, false)?;
     let mut mp4 = MP4::read(&mut reader)?;
 
-    mp4lib::streaming::rewrite::movie_at_front(&mut mp4);
+    mp4lib::rewrite::movie_at_front(&mut mp4);
 
     let writer = File::create(&opts.output)?;
     mp4.write(writer)?;
