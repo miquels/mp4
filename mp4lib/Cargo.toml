@@ -11,7 +11,10 @@ path = "src/lib.rs"
 
 [features]
 default = [ "http-file-server", "streaming" ]
-http-file-server = [ "streaming", "bytes", "futures-core", "headers", "http", "http-body", "tokio" ]
+http-file-server = [
+    "streaming", "bytes", "futures-core", "headers",
+    "http", "http-body", "regex", "tokio"
+]
 streaming = [ "ambassador", "mime_guess", "once_cell", "percent-encoding", "scan_fmt" ]
 
 [dependencies]
@@ -38,4 +41,5 @@ futures-core = { version = "0.3.19", optional = true }
 headers = { version = "0.3.4", optional = true }
 http = { version = "0.2.6", optional = true }
 http-body = { version = "0.4.4", optional = true }
+regex = { version = "1.5.4", optional = true }
 tokio = { version = "1.16", features = [ "rt", "rt-multi-thread" ], optional = true }

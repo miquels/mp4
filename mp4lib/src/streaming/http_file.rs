@@ -16,6 +16,10 @@ use std::time::SystemTime;
 use ambassador::delegatable_trait;
 use once_cell::sync::Lazy;
 
+/// Methods for a struct that can be served via HTTP.
+///
+/// Several structs in this library are meant to be served over HTTP.
+/// The `serve_file` function can serve structs that implement this trait.
 #[delegatable_trait]
 pub trait HttpFile {
     /// Return the pathname of the open file (if any).
@@ -244,6 +248,40 @@ mod http_file_server {
 
     use super::*;
 
+    macro_rules! regex {
+        ($re:expr $(,)?) => {{
+            static RE: once_cell::sync::OnceCell<regex::Regex> = once_cell::sync::OnceCell::new();
+            RE.get_or_init(|| regex::Regex::new($re).unwrap())
+        }};
+    }
+
+    /// Early check to see if we can send an http `Not Modified` response.
+    ///
+    /// Functions like `HlsManifest::from_uri` and `MediaData::from_uri` generate
+    /// data based on the contents of an MP4 file. The `Last-Modified` header
+    /// is the exact same as that of the file, and the `ETag` header is derived
+    /// from the etag of the file. We can calculate those values in advance,
+    /// without actually processing the mp4 file.
+    ///
+    /// This function calculates and checks those values and returns a
+    /// complete `Not Modified` response if appropriate.
+    ///
+    pub fn not_modified<F, R>(req: &http::Request<R>, file_path: &str) -> Option<http::Response<Body<F>>>
+    where
+        F: HttpFile + Unpin + Send + 'static,
+        http::Request<R>: Send + 'static,
+    {
+        const SUBTITLE: &'static str = r#"^(.*\.(?:srt|vtt)):into\.(srt|vtt))$"#;
+
+        let is_subtitle = regex!(SUBTITLE).is_match(file_path);
+        let is_pseudo = file_path.ends_with(".mp4") && req.uri().query().is_some();
+        let is_hls = file_path.contains(".mp4/");
+
+        let file = fs::File::open(file_path).ok()?;
+        let file = FsFile::from_file(file, file_path, is_subtitle || is_pseudo || is_hls).ok()?;
+        file.not_modified(req)
+    }
+
     /// Implementation of `HttpFile` for a plain filesystem file.
     pub struct FsFile {
         file: fs::File,
@@ -260,19 +298,18 @@ mod http_file_server {
     impl FsFile {
         /// Open file.
         pub fn open(path: &str) -> io::Result<FsFile> {
-            let mut file = FsFile::from_file(fs::File::open(path)?, path)?;
-            file.path = Some(path.to_string());
+            let file = FsFile::from_file(fs::File::open(path)?, path, false)?;
             Ok(file)
         }
 
         /// From an already opened file.
-        pub fn from_file<'a>(file: fs::File, path: impl Into<Option<&'a str>>) -> io::Result<FsFile> {
-            let path = path.into();
+        fn from_file<'a>(file: fs::File, path: &str, version_specific: bool) -> io::Result<FsFile> {
+            let path = Some(path.to_string());
             let meta = file.metadata()?;
             let modified = meta.modified()?;
             let size = meta.len();
 
-            let etag = build_etag(meta, false);
+            let etag = build_etag(meta, version_specific);
             let mime_type = match path.as_ref() {
                 Some(path) => mime_guess::from_path(path).first_or_octet_stream().to_string(),
                 None => "application/octet_stream".to_string(),
@@ -280,7 +317,7 @@ mod http_file_server {
 
             Ok(FsFile {
                 file,
-                path: path.map(|p| p.to_string()),
+                path,
                 size,
                 start: 0,
                 end: size,
@@ -291,14 +328,16 @@ mod http_file_server {
             })
         }
 
-        /*
-        /// Check if the file was not modified (based on LastModified / ETag).
-        /// If so, returns a complete not-modified response.
-        pub fn not_modified(&self) -> Option<Response> {
-            let (response, not_modified) = check_modified(req, file);
+        // Check if the file was not modified (based on LastModified / ETag).
+        // If so, returns a complete not-modified response.
+        fn not_modified<F, R>(&self, req: &http::Request<R>) -> Option<http::Response<Body<F>>>
+        where
+            F: HttpFile + Unpin + Send + 'static,
+            http::Request<R>: Send + 'static,
+        {
+            let (response, not_modified) = check_modified(req, self);
             not_modified.then(move || response.body(Body::empty()).unwrap())
         }
-        */
     }
 
     impl_http_file!(FsFile {
@@ -566,4 +605,4 @@ mod http_file_server {
     }
 }
 #[cfg(feature = "http-file-server")]
-pub use self::http_file_server::{serve_file, Body, FsFile};
+pub use self::http_file_server::{not_modified, serve_file, Body, FsFile};
