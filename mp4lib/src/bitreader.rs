@@ -3,7 +3,7 @@ use std::io;
 // Read binary data bit-by-bit.
 pub(crate) struct BitReader<'a> {
     pub data: &'a [u8],
-    pub pos:  usize,
+    pub pos: usize,
 }
 
 impl<'a> BitReader<'a> {

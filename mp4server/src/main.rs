@@ -10,25 +10,34 @@ use std::str::FromStr;
 use std::time::SystemTime;
 
 use anyhow::Result;
+use axum::{
+    Router,
+    body::Body,
+    error_handling::HandleErrorLayer,
+    http::Request,
+    response::Response,
+    routing::{get, head, options},
+};
 use bytes::Bytes;
 use headers::{
-    AcceptRanges, CacheControl, ContentLength, ContentRange, ETag, HeaderMapExt, IfMatch, IfModifiedSince,
-    IfNoneMatch, IfRange, IfUnmodifiedSince, LastModified, Origin, Range, UserAgent,
+    CacheControl, HeaderMapExt,
+    Origin, UserAgent,
 };
 use http::{HeaderMap, HeaderValue, Method, StatusCode};
-use once_cell::sync::OnceCell;
-use percent_encoding::percent_decode_str;
+use regex::Regex;
 use structopt::StructOpt;
 use tokio::task;
-use warp::Filter;
+use tower::{
+    filter::AsyncFilterLayer,
+    util::AndThenLayer,
+    ServiceBuilder,
+};
+use tower_http::trace::TraceLayer;
 
 use mp4lib::streaming::pseudo::Mp4Stream;
 use mp4lib::streaming::http_file::HttpFile;
 
 static EXE_STAMP: OnceCell<u32> = OnceCell::new();
-
-type Response<T = hyper::Body> = http::Response<T>;
-type RespBuilder = http::response::Builder;
 
 #[derive(StructOpt, Debug)]
 #[structopt(setting = clap::AppSettings::VersionlessSubcommands)]
@@ -86,387 +95,107 @@ async fn main() -> Result<()> {
 
 // When creating ETags, add the timestamp of the current executable,
 // so that every time we recompile we get new unique tags.
-fn make_etag(tag: &str) -> ETag {
-    if tag.len() >= 2 {
-        if tag.starts_with("\"") && tag.ends_with("\"") {
-            let tag = &tag[1..tag.len() - 1];
-            let stamp = EXE_STAMP.get().expect("EXE_STAMP unset");
-            return ETag::from_str(&format!("\"{}.{:08x}\"", tag, stamp)).expect("bad etag");
-        }
+fn update_etag(item: &mut impl HttpFile) {
+    if let Some(tag) = item.get_etag() {
+        let stamp = EXE_STAMP.get().expect("EXE_STAMP unset");
+        tag.set_etag(&format!("{}.{:08x}", tag, stamp);
     }
-    ETag::from_str(tag).expect("bad etag")
 }
 
+// Straight from the documentation of once_cell.
+macro_rules! regex {
+    ($re:expr $(,)?) => {{
+        static RE: once_cell::sync::OnceCell<regex::Regex> = once_cell::sync::OnceCell::new();
+        RE.get_or_init(|| regex::Regex::new($re).unwrap())
+    }};
+}
+
+// helper to tunr the body in the response into axum's body type.
+fn box_response<B>(resp: Response<B>) -> Response {
+where
+    B: 'static + http_Body<Data = Bytes> + Send,
+    <B as http_Body>::Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+{
+    let (parts, body) = resp.into_parts();
+    let body = axum::body::boxed(body);
+    http::Response::from_parts(parts, body)
+}
+
+#[derive(Deserialize)]
+pub struct QueryParams {
+    pub track_id:   Option<u32>,
+}
+
+async fn handle(
+    Path(path): Path(String),
+    params: Option<Query<Params>>,
+    req: Request<Body>,
+) -> Response<StreamBody> {
+    let params = match params {
+        None => None,
+        Some(Query(params)) => Some(params),
+    };
+
+    // Pseudo-streaming request.
+    if path.ends_with(".mp4") && params.is_some() {
+        return mp4pseudo(req, &path, params);
+    }
+
+    // Subtitle format translation (subtitle.srt:into.vtt).
+    const SUBTITLE: &'static str = r#"^(.*\.(?:srt|vtt)):into\.(srt|vtt))$"#;
+    if let Some(caps) = regex!(MEDIA_DATA).captures(path) {
+        return subtitles(req, &caps[1], &caps[2]);
+    }
+
+    // HLS manifest.
+    const MANIFEST: &'static str = r#"^(.*\.mp4)/(.*\.m3u8)$"#;
+    if let Some(caps) = regex!(MANIFEST).captures(path) {
+        return manifest(req, &caps[1], &caps[2]);
+    }
+
+    // Media data.
+    const MEDIA_DATA: &'static str = r#"^(.*\.mp4)/(.*\.(?:mp4|m4a))$"#;
+    if let Some(caps) = regex!(MEDIA_DATA).captures(path) {
+        return media_data(req, &caps[1], &caps[2]);
+    }
+
+    // A normal file.
+    serve_file(&req)
+}
+    
 async fn serve(opts: ServeOpts) -> Result<()> {
     let dir = opts.dir.clone();
 
-    let data = warp::any()
-        .map(move || dir.clone())
-        .and(warp::path("data"))
-        .and(warp::method())
-        .and(warp::header::headers_cloned())
-        .and(warp::path::tail())
-        .and(
-            warp::filters::query::raw()
-                .or(warp::any().map(|| String::default()))
-                .unify(),
-        )
-        .and_then(
-            |dir: String, method: Method, headers: HeaderMap, tail: warp::path::Tail, query: String| {
-                async move {
-                    let extra = tail.as_str().to_string();
-                    let resp = match Request::parse(dir, method, extra, query, headers) {
-                        Ok(req) => {
-                            let resp = route_request(req).await.unwrap_or_else(|e| e.into());
-                            resp
-                        },
-                        Err(e) => e.into(),
-                    };
-                    Ok::<_, warp::Rejection>(resp)
-                }
-            },
-        );
+    let middleware_stack = ServiceBuilder::new()
+        .layer(HandleErrorLayer::new(handle_error))
+        .layer(TraceLayer::new_for_http());
 
-    let log = warp::log("mp4");
-    let data = data.with(log);
+    let app = Router::new()
+        .route("/data/*path", get(handle).head(handle).options(options))
+        .layer(middleware_stack);
 
     #[cfg(target_os = "freebsd")]
     {
         use std::net::Ipv4Addr;
         let addrv4 = IpAddr::V4(Ipv4Addr::from(0u32));
         let addrv6 = IpAddr::V6(Ipv6Addr::from(0u128));
+        let sockaddr_v4 = SocketAddr::new(addrv4, opts.port);
+        let sockaddr_v6 = SocketAddr::new(addrv6, opts.port);
+        let app2 = app.clone();
         tokio::join!(
-            warp::serve(data.clone()).run(SocketAddr::new(addrv4, opts.port)),
-            warp::serve(data).run(SocketAddr::new(addrv6, opts.port))
+            axum::Server::bind(sockaddr_v4).serve(app.into_make_service())
+            axum::Server::bind(sockaddr_v6).serve(app2.into_make_service())
         );
     }
 
     #[cfg(not(target_os = "freebsd"))]
     {
         let addr = IpAddr::V6(Ipv6Addr::from(0u128));
-        warp::serve(data).run(SocketAddr::new(addr, opts.port)).await;
+        let sockaddr = SocketAddr::new(addr, opts.port);
+        axum::Server::bind(sockaddr).serve(app.into_make_service()).await.unwrap();
     }
 
     Ok(())
-}
-
-async fn route_request(req: Request) -> Result<Response, Error> {
-    if let Some(pseudo) = mp4pseudo(&req).await? {
-        return Ok(pseudo);
-    }
-    if let Some(sub) = subtitle(&req).await? {
-        return Ok(sub);
-    }
-    if let Some(manifest) = manifest(&req).await? {
-        return Ok(manifest);
-    }
-    if let Some(media) = media(&req).await? {
-        return Ok(media);
-    }
-    if let Some(info) = info(&req).await? {
-        return Ok(info);
-    }
-    serve_file(&req).await
-}
-
-// HTTP error type.
-#[derive(Debug)]
-struct Error {
-    status:  StatusCode,
-    message: String,
-}
-
-impl Error {
-    fn new(status: u16, message: impl Display) -> Error {
-        let status = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-        Error {
-            status:  status.into(),
-            message: message.to_string(),
-        }
-    }
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {}", self.status, self.message)
-    }
-}
-
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        None
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(err: io::Error) -> Error {
-        match err.kind() {
-            ErrorKind::NotFound => Error::new(404, err),
-            ErrorKind::InvalidInput => Error::new(400, err),
-            _ => Error::new(500, err),
-        }
-    }
-}
-
-impl From<Error> for Response {
-    fn from(err: Error) -> Response {
-        let body = match err.status.as_u16() {
-            204 => hyper::Body::empty(),
-            status => hyper::Body::from(format!("{} {}\n", status, err.message)),
-        };
-        Response::builder()
-            .header("content-type", "text/plain")
-            .status(err.status)
-            .body(body)
-            .unwrap()
-    }
-}
-
-fn decode_path(path: &str, method: &Method) -> Result<String, Error> {
-    // Check method.
-    if method != &Method::GET && method != &Method::HEAD && method != &Method::OPTIONS {
-        return Err(Error::new(405, "Method Not Allowed"));
-    }
-
-    // Decode path and check for shenanigans
-    let path = match percent_decode_str(path).decode_utf8() {
-        Ok(path) => path,
-        Err(_) => return Err(Error::new(400, "Bad Request (path not utf-8)")),
-    };
-    if path
-        .split('/')
-        .any(|elem| elem == "" || elem == "." || elem == "..")
-    {
-        return Err(Error::new(400, "Bad Request (path elements invalid)"));
-    }
-    Ok(path.to_string())
-}
-
-// max.is_none(): always return inclusive bound
-// max.is_some(): always return exclusive bound
-fn bound(bound: std::ops::Bound<u64>, max: Option<u64>) -> u64 {
-    match bound {
-        Bound::Included(n) => {
-            if max.is_some() {
-                n + 1
-            } else {
-                n
-            }
-        },
-        Bound::Excluded(n) => {
-            if max.is_some() {
-                n
-            } else {
-                n + 1
-            }
-        },
-        Bound::Unbounded => max.unwrap_or(0),
-    }
-}
-
-struct Request {
-    method:  Method,
-    path:    String,
-    sep:     &'static str,
-    extra:   String,
-    params:  HashMap<String, String>,
-    headers: HeaderMap,
-    fpath:   String,
-}
-
-impl Request {
-    // parse request.
-    fn parse(
-        dir: String,
-        method: Method,
-        path: String,
-        query: String,
-        headers: HeaderMap,
-    ) -> Result<Request, Error> {
-        let mut path = decode_path(&path, &method)?;
-        let mut extra = String::new();
-        let mut sep = "";
-
-        // A path to an mp4 file can be followed by /extra/data.
-        if let Some(idx) = path.rfind(".mp4/") {
-            if path.len() > idx + 5 {
-                extra.push_str(&path[idx + 5..]);
-                path.truncate(idx + 4);
-                sep = "/";
-            }
-        }
-
-        // Some files can have :extra:data following. For example:
-        //
-        // - subtitles.srt:into.vtt
-        // - subtitles.vtt:media.m3u8
-        //
-        if extra == "" {
-            for ext in &[".srt:", ".vtt:"] {
-                if let Some(idx) = path.rfind(ext) {
-                    if path.len() > idx + 5 {
-                        extra.push_str(&path[idx + 5..]);
-                        path.truncate(idx + 4);
-                        sep = ":";
-                        break;
-                    }
-                }
-            }
-        }
-
-        // query parameter
-        let mut params = HashMap::new();
-        for q in query.split('&') {
-            let mut kv = q.splitn(2, '=');
-            if let Some(key) = kv.next() {
-                params.insert(key.to_string(), kv.next().unwrap_or("").to_string());
-            }
-        }
-
-        // filesystem path
-        let mut fpath = dir;
-        while fpath.ends_with("/") {
-            fpath.truncate(fpath.len() - 1);
-        }
-        if !path.starts_with("/") {
-            fpath.push('/');
-        }
-        fpath.push_str(&path);
-
-        Ok(Request {
-            method,
-            path,
-            sep,
-            extra,
-            params,
-            headers,
-            fpath,
-        })
-    }
-
-    // parse the Range: and If-Range: headers.
-    fn parse_range(&self, fs: &FileServer) -> Result<Option<ops::Range<u64>>, Error> {
-        if let Some(range) = self.headers.typed_get::<Range>() {
-            let do_range = match self.headers.typed_get::<IfRange>() {
-                Some(if_range) => !if_range.is_modified(Some(&fs.etag_hdr), Some(&fs.lastmod_hdr)),
-                None => true,
-            };
-            if do_range {
-                let ranges: Vec<_> = range.iter().collect();
-                if ranges.len() > 1 {
-                    return Err(Error::new(400, "multiple ranges not supported"));
-                }
-                let start = bound(ranges[0].0, None);
-                let end = bound(ranges[0].1, Some(fs.size));
-                if start >= end || start >= fs.size {
-                    return Err(Error::new(416, "invalid range"));
-                }
-                return Ok(Some(ops::Range {
-                    start: start,
-                    end:   cmp::min(end, fs.size),
-                }));
-            }
-        }
-        Ok(None)
-    }
-}
-
-struct FileServer {
-    file:        fs::File,
-    modified:    SystemTime,
-    size:        u64,
-    etag_hdr:    ETag,
-    lastmod_hdr: LastModified,
-}
-
-impl FileServer {
-    // Open file.
-    async fn open(path: impl Into<String>) -> io::Result<FileServer> {
-        // open file.
-        let path = path.into();
-        let file = task::block_in_place(|| fs::File::open(&path))?;
-
-        // get last_modified / inode / size.
-        let meta = file.metadata()?;
-        let modified = meta.modified().unwrap();
-        let inode = meta.ino();
-        let size = meta.len();
-
-        // create etag
-        let d = modified.duration_since(SystemTime::UNIX_EPOCH);
-        let secs = d.map(|s| s.as_secs()).unwrap_or(0);
-        let etag = format!("\"{:08x}.{:08x}.{}\"", secs, inode, size);
-        let etag_hdr = make_etag(&etag);
-
-        let lastmod_hdr = LastModified::from(modified);
-
-        Ok(FileServer {
-            file,
-            modified,
-            size,
-            etag_hdr,
-            lastmod_hdr,
-        })
-    }
-
-    fn from_mp4stream(strm: &Mp4Stream) -> FileServer {
-        FileServer {
-            file:        strm.file().try_clone().unwrap(),
-            modified:    strm.modified().unwrap(),
-            size:        strm.size(),
-            etag_hdr:    make_etag(strm.get_etag().unwrap()),
-            lastmod_hdr: LastModified::from(strm.modified().unwrap()),
-        }
-    }
-
-    // check conditionals
-    fn check_conditionals(&self, req: &Request) -> Result<(), Error> {
-        // Check If-Match.
-        if let Some(im) = req.headers.typed_get::<IfMatch>() {
-            if !im.precondition_passes(&self.etag_hdr) {
-                return Err(Error::new(412, "ETag does not match"));
-            }
-        } else {
-            // Check If-Unmodified-Since.
-            if let Some(iums) = req.headers.typed_get::<IfUnmodifiedSince>() {
-                if !iums.precondition_passes(self.modified) {
-                    return Err(Error::new(412, "resource was modified"));
-                }
-            }
-        }
-
-        // Check If-None-Match.
-        if let Some(inm) = req.headers.typed_get::<IfNoneMatch>() {
-            if inm.precondition_passes(&self.etag_hdr) {
-                return Err(Error::new(304, "Match"));
-            }
-        } else {
-            if let Some(ims) = req.headers.typed_get::<IfModifiedSince>() {
-                if !ims.is_modified(self.modified) {
-                    return Err(Error::new(304, "Not modified"));
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    // build initial response headers.
-    fn build_response(&self, req: &Request, cors: bool) -> RespBuilder {
-        let mut response = http::Response::builder();
-        let resp_headers = response.headers_mut().unwrap();
-
-        resp_headers.typed_insert(self.etag_hdr.clone());
-        resp_headers.typed_insert(self.lastmod_hdr.clone());
-        resp_headers.typed_insert(CacheControl::new().with_no_cache());
-        resp_headers.typed_insert(AcceptRanges::bytes());
-
-        if cors {
-            cors_headers(req, &mut response);
-        }
-
-        response
-    }
 }
 
 fn cors_headers(req: &Request, response: &mut RespBuilder) {
@@ -492,7 +221,7 @@ fn cors_headers(req: &Request, response: &mut RespBuilder) {
 }
 
 fn options(req: &Request, cors: bool) -> Response {
-    let mut response = http::Response::builder().status(204);
+    let mut response = Response::builder().status(204);
     let resp_headers = response.headers_mut().unwrap();
 
     resp_headers.insert("allow", HeaderValue::from_static("GET, HEAD, OPTIONS"));
@@ -502,9 +231,9 @@ fn options(req: &Request, cors: bool) -> Response {
     response.body(hyper::Body::empty()).unwrap()
 }
 
-async fn mp4pseudo(req: &Request) -> Result<Option<Response>, Error> {
+async fn mp4pseudo(req: &Request, path: &str, params: Params) -> io::Result<Response> {
     // get tracks, then open mp4stream.
-    let tracks = match req.params.get("track") {
+    let tracks = match params.tracks.as_ref() {
         Some(val) => {
             let tracks: Vec<_> = val.split(',').filter_map(|t| t.parse::<u32>().ok()).collect();
             if tracks.len() == 0 {
@@ -512,66 +241,10 @@ async fn mp4pseudo(req: &Request) -> Result<Option<Response>, Error> {
             }
             tracks
         },
-        None => return Ok(None),
+        None => return Err(Error::new(400, "need track parameter")),
     };
-
-    // if OPTIONS quit now
-    if req.method == Method::OPTIONS {
-        return Ok(Some(options(req, true)));
-    }
-
-    let mut mp4stream = mp4lib::streaming::pseudo::Mp4Stream::open(&req.fpath, tracks)?;
-
-    // use FileServer for conditionals and initial response.
-    let fs = FileServer::from_mp4stream(&mp4stream);
-    fs.check_conditionals(req)?;
-
-    let mut response = fs.build_response(req, false);
-    let resp_headers = response.headers_mut().unwrap();
-    let mut status = 200;
-
-    // Check ranges.
-    if let Some(range) = req.parse_range(&fs)? {
-        if let Ok(cr) = ContentRange::bytes(range.clone(), fs.size) {
-            mp4stream.set_range(range)?;
-            resp_headers.typed_insert(cr);
-            status = 206;
-        }
-    }
-
-    // Set Content-Type, Content-Length, and StatusCode.
-    resp_headers.insert("content-type", HeaderValue::from_static("video/mp4"));
-    resp_headers.typed_insert(ContentLength(mp4stream.range_size()));
-    response = response.status(status);
-
-    // if HEAD quit now
-    if req.method == Method::HEAD {
-        return Ok(response.body(hyper::Body::empty()).ok());
-    }
-
-    // Run content generation in a separate task
-    let (mut tx, body) = hyper::Body::channel();
-    let mut todo = mp4stream.range_size();
-    task::spawn(async move {
-        loop {
-            let buflen = std::cmp::min(todo, 128000) as usize;
-            let mut buf = Vec::<u8>::new();
-            buf.resize(buflen, 0);
-            let result = task::block_in_place(|| mp4stream.read(&mut buf));
-            let n = match result {
-                Ok(n) if n == 0 => break,
-                Ok(n) => n,
-                Err(_) => break,
-            };
-            buf.truncate(n);
-            todo -= n as u64;
-            if let Err(_) = tx.send_data(Bytes::from(buf)).await {
-                break;
-            }
-        }
-    });
-
-    Ok(response.body(body).ok())
+    let mp4stream = mp4lib::streaming::pseudo::Mp4Stream::open(&req.fpath, tracks)?;
+    Ok(box_response(m4lib::streaming::http_file::serve_file(req, mp4stream)))
 }
 
 // serve m3u8 playlist files:
@@ -579,31 +252,7 @@ async fn mp4pseudo(req: &Request) -> Result<Option<Response>, Error> {
 // - master.m3u8 / main.m3u8
 // - media.<TRACK_ID>.m3u8
 //
-async fn manifest(req: &Request) -> Result<Option<Response>, Error> {
-    if !req.extra.ends_with(".m3u8") {
-        return Ok(None);
-    }
-
-    // if OPTIONS quit now
-    if req.method == Method::OPTIONS {
-        return Ok(Some(options(req, true)));
-    }
-
-    // use FileServer for conditionals and initial response.
-    let fs = FileServer::open(&req.fpath).await?;
-
-    if req.extra != "main.m3u8" && req.extra != "master.m3u8" && !req.extra.starts_with("media.") {
-        return Err(Error::new(404, "playlist not found"));
-    }
-
-    fs.check_conditionals(req)?;
-    let mut response = fs.build_response(req, true);
-    let resp_headers = response.headers_mut().unwrap();
-
-    // open and parse mp4 file.
-    let mp4 = task::block_in_place(|| mp4lib::streaming::lru_cache::open_mp4(&req.fpath, false))?;
-    let range = req.parse_range(&fs)?;
-
+async fn manifest(req: &Request, path: &str, extra: &str) -> io::Result<Response> {
     let is_notflix = match req.headers.get("x-application").map(|v| v.to_str()) {
         Some(Ok(v)) => v.contains("Notflix"),
         _ => false,
@@ -614,124 +263,34 @@ async fn manifest(req: &Request) -> Result<Option<Response>, Error> {
     };
     let simple_subs = is_cast && !is_notflix;
 
-    let (mime, body, size) = task::block_in_place(|| {
-        mp4lib::streaming::hls::manifest_from_uri(&mp4, &req.extra, simple_subs, range.clone())
+    let data = task::block_in_place(|| {
+        let mp4 = mp4lib::streaming::lru_cache::open_mp4(path, false))?;
+        mp4lib::streaming::hls::media_from_uri(mp4, extra)
     })?;
-
-    resp_headers.insert("content-type", HeaderValue::from_static(mime));
-    resp_headers.typed_insert(ContentLength(body.len() as u64));
-
-    if let Some(mut range) = range {
-        // adjust range to what we actually got.
-        range.end = range.start + body.len() as u64;
-        let cr = match ContentRange::bytes(range, size) {
-            Ok(cr) => cr,
-            Err(_) => return Err(Error::new(416, "Invalid Range")),
-        };
-        resp_headers.typed_insert(cr);
-        response = response.status(206);
-    }
-
-    // if HEAD quit now
-    if req.method == Method::HEAD {
-        return Ok(response.body(hyper::Body::empty()).ok());
-    }
-
-    Ok(response.body(body.into()).ok())
+    Ok(box_response(m4lib::streaming::http_file::serve_file(req, data)))
 }
 
-async fn media(req: &Request) -> Result<Option<Response>, Error> {
-    let e = &req.extra;
-    if !e.starts_with("a/") &&
-        !e.starts_with("v/") &&
-        !e.starts_with("s/") &&
-        !e.starts_with("e/") &&
-        !e.starts_with("init.")
-    {
-        return Ok(None);
-    }
-
-    // if OPTIONS quit now
-    if req.method == Method::OPTIONS {
-        return Ok(Some(options(req, true)));
-    }
-
-    // use FileServer for conditionals and initial response.
-    let fs = FileServer::open(&req.fpath).await?;
-    fs.check_conditionals(req)?;
-    let mut response = fs.build_response(req, true);
-    let resp_headers = response.headers_mut().unwrap();
-
-    // open and parse mp4 file.
-    let mp4 = task::block_in_place(|| mp4lib::streaming::lru_cache::open_mp4(&req.fpath, false))?;
-
-    let range = req.parse_range(&fs)?;
-    let (mime, body, size) =
-        task::block_in_place(|| mp4lib::streaming::hls::media_from_uri(&mp4, &req.extra, range.clone()))?;
-    resp_headers.insert("content-type", HeaderValue::from_static(mime));
-    resp_headers.typed_insert(ContentLength(body.len() as u64));
-
-    if let Some(mut range) = range {
-        // adjust range to what we actually got.
-        range.end = range.start + body.len() as u64;
-        let cr = match ContentRange::bytes(range, size) {
-            Ok(cr) => cr,
-            Err(_) => return Err(Error::new(416, "Invalid Range")),
-        };
-        resp_headers.typed_insert(cr);
-        response = response.status(206);
-    }
-
-    // if HEAD quit now
-    if req.method == Method::HEAD {
-        return Ok(response.body(hyper::Body::empty()).ok());
-    }
-
-    Ok(response.body(body.into()).ok())
+async fn media(req: &Request, path: &str, extra: &str) -> io::Result<Response> {
+    let data = task::block_in_place(|| {
+        let mp4 = mp4lib::streaming::lru_cache::open_mp4(path, false))?;
+        mp4lib::streaming::hls::media_from_uri(mp4, extra)
+    })?;
+    Ok(box_response(m4lib::streaming::http_file::serve_file(req, data)))
 }
 
-async fn info(req: &Request) -> Result<Option<Response>, Error> {
-    if req.extra != "info" {
-        return Ok(None);
-    }
-
-    // if OPTIONS quit now
-    if req.method == Method::OPTIONS {
-        return Ok(Some(options(req, true)));
-    }
-
-    // use FileServer for conditionals and initial response.
-    let fs = FileServer::open(&req.fpath).await?;
-
-    fs.check_conditionals(req)?;
-    let mut response = fs.build_response(req, true);
-    let resp_headers = response.headers_mut().unwrap();
-
-    // open and parse mp4 file.
-    let mp4 = task::block_in_place(|| mp4lib::streaming::lru_cache::open_mp4(&req.fpath, false))?;
+async fn info(req: &Request, path: &str) -> io::Result<Response> {
+    let mp4 = task::block_in_place(|| {
+        mp4lib::streaming::lru_cache::open_mp4(path, false))
+    })?;
 
     let info = mp4lib::track::track_info(&mp4);
     let body = serde_json::to_string_pretty(&info).unwrap();
 
-    resp_headers.insert("content-type", HeaderValue::from_static("text/json"));
-    resp_headers.typed_insert(ContentLength(body.len() as u64));
-
-    // if HEAD quit now
-    if req.method == Method::HEAD {
-        return Ok(response.body(hyper::Body::empty()).ok());
-    }
-
-    Ok(response.body(body.into()).ok())
+    let data = mp4lib::streaming::http_file::MemFile::from_file(body, "text/json", mp4)?;
+    Ok(box_response(m4lib::streaming::http_file::serve_file(req, data)))
 }
 
-async fn subtitle(req: &Request) -> Result<Option<Response>, Error> {
-    if !req.path.ends_with(".srt") && !req.path.ends_with(".vtt") {
-        return Ok(None);
-    }
-    if req.extra == "" {
-        // let serve_file handle it.
-        return Ok(None);
-    }
+async fn subtitle(req: &Request, path: &str, into: &str) -> io::Result<Response> { 
 
     // if OPTIONS quit now
     if req.method == Method::OPTIONS {
@@ -744,7 +303,7 @@ async fn subtitle(req: &Request) -> Result<Option<Response>, Error> {
     let resp_headers = response.headers_mut().unwrap();
 
     let (mime, body) =
-        task::block_in_place(|| mp4lib::streaming::subtitle::external(&req.fpath, &req.extra))?;
+        task::block_in_place(|| mp4lib::streaming::subtitle::external(path, info))?;
     resp_headers.insert("content-type", HeaderValue::from_static(mime));
     resp_headers.typed_insert(ContentLength(body.len() as u64));
 

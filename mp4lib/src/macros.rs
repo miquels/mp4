@@ -476,11 +476,9 @@ macro_rules! iter_box {
         iter_box!($vec.boxes, $type)
     };
     ($vec:expr, $type:ident) => {
-        $vec.iter().filter_map(|x| {
-            match x {
-                &MP4Box::$type(ref b) => Some(b),
-                _ => None,
-            }
+        $vec.iter().filter_map(|x| match x {
+            &MP4Box::$type(ref b) => Some(b),
+            _ => None,
         })
     };
 }
@@ -492,11 +490,9 @@ macro_rules! iter_box_mut {
         iter_box_mut!($vec.boxes, $type)
     };
     ($vec:expr, $type:ident) => {
-        $vec.iter_mut().filter_map(|x| {
-            match x {
-                &mut MP4Box::$type(ref mut b) => Some(b),
-                _ => None,
-            }
+        $vec.iter_mut().filter_map(|x| match x {
+            &mut MP4Box::$type(ref mut b) => Some(b),
+            _ => None,
         })
     };
 }

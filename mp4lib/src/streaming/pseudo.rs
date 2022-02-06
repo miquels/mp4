@@ -18,7 +18,6 @@ use std::hash::Hash;
 use std::io;
 use std::mem;
 use std::ops::{Bound, Range, RangeBounds};
-use std::os::unix::fs::MetadataExt;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -32,29 +31,28 @@ use crate::mp4box::{MP4Box, MP4};
 use crate::serialize::ToBytes;
 use crate::types::FourCC;
 
-use super::http_file::HttpFile;
+use super::http_file::{build_etag, HttpFile};
 
 // Key into INIT_SECTION / DATA_SECTION cache.
 #[derive(Hash, PartialEq, Eq, Clone)]
 struct SectionKey {
-    path:   String,
+    path: String,
     tracks: Vec<u32>,
 }
 
 /// An on-the-fly generated, streaming-optimized MP4 file.
 pub struct Mp4Stream {
-    key:          SectionKey,
-    file:         fs::File,
+    key: SectionKey,
+    file: fs::File,
     init_section: Option<Vec<u8>>,
-    init_size:    u32,
-    inode:        u64,
-    modified:     SystemTime,
-    size:         u64,
-    etag:         String,
-    start:        u64,
-    end:          u64,
-    pos:          u64,
-    mmap:         Option<Mmap>,
+    init_size: u32,
+    modified: SystemTime,
+    size: u64,
+    etag: String,
+    start: u64,
+    end: u64,
+    pos: u64,
+    mmap: Option<Mmap>,
 }
 
 impl Mp4Stream {
@@ -73,11 +71,8 @@ impl Mp4Stream {
         let file = fs::File::open(&path)?;
         let meta = file.metadata()?;
         let modified = meta.modified().unwrap();
-        let inode = meta.ino();
-
-        let d = modified.duration_since(SystemTime::UNIX_EPOCH);
-        let secs = d.map(|s| s.as_secs()).unwrap_or(0);
-        let etag = format!("\"{:08x}.{:08x}.{}\"", secs, inode, meta.size());
+        let len = meta.len();
+        let etag = build_etag(meta, true);
 
         // This is kind of aribitraty.
         //
@@ -85,7 +80,7 @@ impl Mp4Stream {
         // every `read_at` the part we need. This is supposing that mapping
         // really large files is more expensive than mapping parts of it
         // multiple times. Is that actually true? XXX TESTME
-        let mmap = if meta.len() < 750_000_000 && tracks.len() > 0 {
+        let mmap = if len < 750_000_000 && tracks.len() > 0 {
             Some(unsafe { Mmap::map(&file)? })
         } else {
             None
@@ -114,7 +109,6 @@ impl Mp4Stream {
             file,
             init_section: None,
             init_size,
-            inode,
             modified,
             size,
             etag,
@@ -172,11 +166,6 @@ impl Mp4Stream {
     }
 
     #[doc(hidden)]
-    pub fn inode(&self) -> u64 {
-        self.inode
-    }
-
-    #[doc(hidden)]
     pub fn file(&self) -> &fs::File {
         &self.file
     }
@@ -215,14 +204,17 @@ impl HttpFile for Mp4Stream {
 
     /// Get the limited range we're serving.
     fn get_range(&self) -> Range<u64> {
-        Range{ start: self.start, end: self.end }
+        Range {
+            start: self.start,
+            end: self.end,
+        }
     }
 
     /// Limit reading to a range.
     fn set_range(&mut self, range: impl RangeBounds<u64>) -> io::Result<()> {
         self.start = match range.start_bound() {
             Bound::Included(&n) => n,
-            Bound::Excluded(&n) =>  n + 1,
+            Bound::Excluded(&n) => n + 1,
             Bound::Unbounded => 0,
         };
         self.end = match range.end_bound() {
@@ -266,7 +258,6 @@ impl std::fmt::Debug for Mp4Stream {
         let mut dbg = f.debug_struct("Mp4Stream");
         dbg.field("path", &self.key.path);
         dbg.field("tracks", &self.key.tracks);
-        dbg.field("inode", &self.inode);
         dbg.field("modified", &self.modified);
         dbg.field("size", &self.size);
         dbg.field("etag", &self.etag);
@@ -282,17 +273,17 @@ struct MdatEntry {
     // Offset into the generated 'virtual' mp4 file.
     virt_offset: u64,
     // Size of the sample.
-    size:        u64,
+    size: u64,
 }
 
 // Mapping of the samples in the virtual metadata to the samples
 // in the original metadata.
 struct MdatMapping {
-    map:       Vec<u8>,
+    map: Vec<u8>,
     // virtual initialization section size.
     init_size: u32,
     // offset into original MP4 file.
-    offset:    u64,
+    offset: u64,
     // size of the data in the generated MediaDataBox.
     virt_size: u64,
 }
@@ -675,8 +666,8 @@ impl InitSection {
                     // and a sample to chunk entry.
                     let chunkno = chunks[t].stco.entries.len() as u32;
                     chunks[t].stsc.entries.push(SampleToChunkEntry {
-                        first_chunk:              chunkno,
-                        samples_per_chunk:        num_samples,
+                        first_chunk: chunkno,
+                        samples_per_chunk: num_samples,
                         // FIXME; sample_description_index is hardcoded.
                         sample_description_index: 1,
                     });

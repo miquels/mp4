@@ -316,14 +316,14 @@ pub fn duration(fspath: &str) -> io::Result<f64> {
 }
 
 struct SubtitleSample {
-    start:    u32,
+    start: u32,
     duration: u32,
-    text:     String,
+    text: String,
 }
 
 struct SubtitleFile {
-    file:    io::BufReader<fs::File>,
-    buf:     Vec<u8>,
+    file: io::BufReader<fs::File>,
+    buf: Vec<u8>,
     is_utf8: bool,
 }
 
@@ -348,8 +348,8 @@ impl SubtitleFile {
         }
 
         Ok(SubtitleFile {
-            file:    io::BufReader::new(file),
-            buf:     Vec::new(),
+            file: io::BufReader::new(file),
+            buf: Vec::new(),
             is_utf8: true,
         })
     }

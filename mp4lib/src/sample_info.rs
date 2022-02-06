@@ -13,37 +13,37 @@ use crate::boxes::stts::TimeToSampleIterator;
 #[derive(Default, Debug, Clone)]
 pub struct SampleInfo {
     /// File position.
-    pub fpos:              u64,
+    pub fpos: u64,
     /// Size.
-    pub size:              u32,
+    pub size: u32,
     /// Duration.
-    pub duration:          u32,
+    pub duration: u32,
     /// Decode time.
-    pub decode_time:       u64,
+    pub decode_time: u64,
     /// Composition time delta.
     pub composition_delta: i32,
     /// is it a sync sample
-    pub is_sync:           bool,
+    pub is_sync: bool,
     /// what chunk is it in.
-    pub chunk:             u32,
+    pub chunk: u32,
 }
 
 /// Iterator that yields SampleInfo.
 #[derive(Clone)]
 pub struct SampleInfoIterator<'a> {
-    stsz_iter:        SampleSizeIterator<'a>,
-    stts_iter:        TimeToSampleIterator<'a>,
-    stsc_iter:        SampleToChunkIterator<'a>,
-    ctts_iter:        Option<CompositionOffsetIterator<'a>>,
-    stss_iter:        Option<SyncSampleIterator<'a>>,
-    chunk_offset:     &'a ChunkOffsetBox,
-    media_timescale:  u32,
+    stsz_iter: SampleSizeIterator<'a>,
+    stts_iter: TimeToSampleIterator<'a>,
+    stsc_iter: SampleToChunkIterator<'a>,
+    ctts_iter: Option<CompositionOffsetIterator<'a>>,
+    stss_iter: Option<SyncSampleIterator<'a>>,
+    chunk_offset: &'a ChunkOffsetBox,
+    media_timescale: u32,
     comp_time_shift_: i32,
-    comp_time_shift:  i32,
-    fpos:             u64,
-    cur_sample:       u32,
-    cur_chunk:        u32,
-    pending:          Option<SampleInfo>,
+    comp_time_shift: i32,
+    fpos: u64,
+    cur_sample: u32,
+    cur_chunk: u32,
+    pending: Option<SampleInfo>,
 }
 
 impl SampleInfoIterator<'_> {

@@ -13,18 +13,18 @@ use crate::types::FourCC;
 
 struct FileSegment {
     start: u64,
-    len:   u64,
-    map:   Mmap,
+    len: u64,
+    map: Mmap,
 }
 
 /// Reads a MP4 file.
 ///
 /// Implements `ReadBytes`, so can be passed to `MP4::read`.
 pub struct Mp4File {
-    file:           Arc<fs::File>,
-    pos:            u64,
-    size:           u64,
-    segments:       Vec<FileSegment>,
+    file: Arc<fs::File>,
+    pos: u64,
+    size: u64,
+    segments: Vec<FileSegment>,
     input_filename: Option<String>,
 }
 
@@ -188,9 +188,9 @@ impl BoxBytes for Mp4File {
             return Err(io::Error::new(ErrorKind::UnexpectedEof, "tried to seek past eof"));
         }
         Ok(DataRef {
-            file:  self.file.clone(),
+            file: self.file.clone(),
             start: self.pos as usize,
-            end:   (self.pos + size) as usize,
+            end: (self.pos + size) as usize,
         })
     }
 
@@ -208,8 +208,8 @@ impl BoxBytes for Mp4File {
 /// This is done so that we don't have to `mmap` gigabytes of memory.
 pub struct DataRef {
     pub(crate) file: Arc<fs::File>,
-    start:           usize,
-    end:             usize,
+    start: usize,
+    end: usize,
 }
 
 impl DataRef {
@@ -274,9 +274,9 @@ impl Default for DataRef {
     fn default() -> Self {
         let devzero = fs::File::open("/dev/zero").unwrap();
         DataRef {
-            file:  Arc::new(devzero),
+            file: Arc::new(devzero),
             start: 0,
-            end:   0,
+            end: 0,
         }
     }
 }
@@ -284,9 +284,9 @@ impl Default for DataRef {
 impl Clone for DataRef {
     fn clone(&self) -> Self {
         DataRef {
-            file:  self.file.clone(),
+            file: self.file.clone(),
             start: self.start,
-            end:   self.end,
+            end: self.end,
         }
     }
 }
@@ -346,14 +346,14 @@ mod membuffer {
     #[derive(Debug, Default)]
     pub(crate) struct MemBuffer {
         data: Vec<u8>,
-        pos:  usize,
+        pos: usize,
     }
 
     impl MemBuffer {
         pub fn new() -> MemBuffer {
             MemBuffer {
                 data: Vec::new(),
-                pos:  0,
+                pos: 0,
             }
         }
 

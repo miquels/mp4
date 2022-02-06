@@ -46,10 +46,10 @@ pub trait FullBox {
 
 #[derive(Debug, Clone)]
 pub(crate) struct BoxHeader {
-    pub(crate) size:        u64,
-    pub(crate) fourcc:      FourCC,
-    pub(crate) version:     Option<u8>,
-    pub(crate) flags:       u32,
+    pub(crate) size: u64,
+    pub(crate) fourcc: FourCC,
+    pub(crate) version: Option<u8>,
+    pub(crate) flags: u32,
     pub(crate) max_version: Option<u8>,
 }
 
@@ -123,9 +123,9 @@ impl BoxHeader {
 /// Limited reader that reads no further than the box size.
 pub(crate) struct BoxReader<'a> {
     pub(crate) header: BoxHeader,
-    maxsize:           u64,
-    pos:               u64,
-    inner:             &'a mut dyn ReadBytes,
+    maxsize: u64,
+    pos: u64,
+    inner: &'a mut dyn ReadBytes,
 }
 
 impl<'a> BoxReader<'a> {
@@ -234,10 +234,10 @@ impl BoxBytes for BoxReader<'_> {
 
 /// Writes the box header.
 pub(crate) struct BoxWriter<'a> {
-    offset:    u64,
-    vflags:    u32,
+    offset: u64,
+    vflags: u32,
     finalized: bool,
-    inner:     Box<dyn WriteBytes + 'a>,
+    inner: Box<dyn WriteBytes + 'a>,
 }
 
 impl<'a> BoxWriter<'a> {
@@ -324,9 +324,9 @@ impl<'a> BoxBytes for BoxWriter<'a> {
 #[derive(Clone)]
 pub struct MP4 {
     /// The boxes at the top level.
-    pub boxes:             Vec<MP4Box>,
+    pub boxes: Vec<MP4Box>,
     #[allow(dead_code)]
-    pub(crate) data_ref:   DataRef,
+    pub(crate) data_ref: DataRef,
     #[allow(dead_code)]
     pub(crate) input_file: Option<String>,
 }
@@ -413,8 +413,8 @@ impl MP4 {
             return;
         }
         let ftype = FileTypeBox {
-            major_brand:       FourCC::new("mp41"),
-            minor_version:     0,
+            major_brand: FourCC::new("mp41"),
+            minor_version: 0,
             compatible_brands: vec![FourCC::new("mp41")],
         };
         self.boxes.insert(0, MP4Box::FileTypeBox(ftype));
@@ -448,10 +448,10 @@ pub fn write_boxes<W: WriteBytes>(mut file: W, boxes: &[MP4Box]) -> io::Result<(
 /// Any unknown boxes we encounter are put into a GenericBox.
 #[derive(Clone)]
 pub struct GenericBox {
-    fourcc:   FourCC,
-    data:     Option<Vec<u8>>,
+    fourcc: FourCC,
+    data: Option<Vec<u8>>,
     data_ref: Option<DataRef>,
-    size:     u64,
+    size: u64,
 }
 
 impl FromBytes for GenericBox {

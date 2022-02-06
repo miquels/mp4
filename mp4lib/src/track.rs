@@ -16,15 +16,15 @@ pub use crate::sample_info::*;
 /// General track information.
 #[derive(Debug, Default, Serialize)]
 pub struct TrackInfo {
-    pub id:            u32,
-    pub track_type:    String,
+    pub id: u32,
+    pub track_type: String,
     #[serde(serialize_with = "seconds")]
-    pub duration:      Duration,
-    pub size:          u64,
+    pub duration: Duration,
+    pub size: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub name:          Option<ZString>,
+    pub name: Option<ZString>,
     #[serde(serialize_with = "display")]
-    pub language:      IsoLanguageCode,
+    pub language: IsoLanguageCode,
     pub specific_info: SpecificTrackInfo,
 }
 
@@ -41,7 +41,7 @@ pub enum SpecificTrackInfo {
 impl Default for SpecificTrackInfo {
     fn default() -> SpecificTrackInfo {
         SpecificTrackInfo::UnknownTrackInfo(UnknownTrackInfo {
-            codec_id:   "und".to_string(),
+            codec_id: "und".to_string(),
             codec_name: None,
         })
     }
@@ -72,15 +72,15 @@ impl Display for SpecificTrackInfo {
 /// Audio track details.
 #[derive(Debug, Default, Serialize)]
 pub struct AudioTrackInfo {
-    pub codec_id:              String,
-    pub codec_name:            Option<String>,
-    pub channel_count:         u16,
-    pub lfe_channel:           bool,
-    pub bit_depth:             Option<u16>,
-    pub sample_rate:           Option<u32>,
+    pub codec_id: String,
+    pub codec_name: Option<String>,
+    pub channel_count: u16,
+    pub lfe_channel: bool,
+    pub bit_depth: Option<u16>,
+    pub sample_rate: Option<u32>,
     pub channel_configuration: Option<String>,
-    pub avg_bitrate:           Option<u32>,
-    pub max_bitrate:           Option<u32>,
+    pub avg_bitrate: Option<u32>,
+    pub max_bitrate: Option<u32>,
 }
 
 impl Display for AudioTrackInfo {
@@ -96,10 +96,10 @@ impl Display for AudioTrackInfo {
 /// Video track details.
 #[derive(Debug, Default, Serialize)]
 pub struct VideoTrackInfo {
-    pub codec_id:   String,
+    pub codec_id: String,
     pub codec_name: Option<String>,
-    pub width:      u16,
-    pub height:     u16,
+    pub width: u16,
+    pub height: u16,
     pub frame_rate: f64,
 }
 
@@ -116,7 +116,7 @@ impl Display for VideoTrackInfo {
 /// Subtitle track details.
 #[derive(Debug, Default, Serialize)]
 pub struct SubtitleTrackInfo {
-    pub codec_id:   String,
+    pub codec_id: String,
     pub codec_name: Option<String>,
 }
 
@@ -133,7 +133,7 @@ impl Display for SubtitleTrackInfo {
 /// Unknown track type.
 #[derive(Debug, Default, Serialize)]
 pub struct UnknownTrackInfo {
-    pub codec_id:   String,
+    pub codec_id: String,
     pub codec_name: Option<String>,
 }
 
@@ -216,24 +216,18 @@ pub fn track_info(mp4: &MP4) -> Vec<TrackInfo> {
                 .map(|e| e.fourcc().to_string())
                 .unwrap_or("unkn".to_string());
             let sp_info = match id.as_str() {
-                "tx3g" => {
-                    SpecificTrackInfo::SubtitleTrackInfo(SubtitleTrackInfo {
-                        codec_id:   id.to_string(),
-                        codec_name: Some(String::from("3GPP Timed Text")),
-                    })
-                },
-                "stpp" | "sbtt" => {
-                    SpecificTrackInfo::SubtitleTrackInfo(SubtitleTrackInfo {
-                        codec_id:   id.to_string(),
-                        codec_name: None,
-                    })
-                },
-                _ => {
-                    SpecificTrackInfo::UnknownTrackInfo(UnknownTrackInfo {
-                        codec_id:   id,
-                        codec_name: None,
-                    })
-                },
+                "tx3g" => SpecificTrackInfo::SubtitleTrackInfo(SubtitleTrackInfo {
+                    codec_id: id.to_string(),
+                    codec_name: Some(String::from("3GPP Timed Text")),
+                }),
+                "stpp" | "sbtt" => SpecificTrackInfo::SubtitleTrackInfo(SubtitleTrackInfo {
+                    codec_id: id.to_string(),
+                    codec_name: None,
+                }),
+                _ => SpecificTrackInfo::UnknownTrackInfo(UnknownTrackInfo {
+                    codec_id: id,
+                    codec_name: None,
+                }),
             };
             info.specific_info = sp_info;
         }

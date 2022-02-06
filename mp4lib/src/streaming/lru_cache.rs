@@ -35,12 +35,12 @@ pub fn open_mp4(path: impl Into<String>, mmap_all: bool) -> io::Result<Arc<MP4>>
 }
 
 struct LruCacheEntry<T> {
-    item:      T,
+    item: T,
     last_used: Instant,
 }
 
 pub(crate) struct LruCache<K, V> {
-    cache:      Mutex<lru::LruCache<K, LruCacheEntry<V>>>,
+    cache: Mutex<lru::LruCache<K, LruCacheEntry<V>>>,
     max_unused: Duration,
 }
 
@@ -64,7 +64,7 @@ where
         cache.put(
             item_key,
             LruCacheEntry {
-                item:      item_value,
+                item: item_value,
                 last_used: Instant::now(),
             },
         );

@@ -539,12 +539,12 @@ impl_flags!(
 /// The sample_is_non_sync_sample field  provides the same information as the sync sample table [8.6.2].
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SampleFlags {
-    pub is_leading:                  u8,
-    pub sample_depends_on:           u8,
-    pub sample_is_depended_on:       u8,
-    pub sample_has_redundancy:       u8,
-    pub sample_padding_value:        u8,
-    pub sample_is_non_sync_sample:   bool,
+    pub is_leading: u8,
+    pub sample_depends_on: u8,
+    pub sample_is_depended_on: u8,
+    pub sample_has_redundancy: u8,
+    pub sample_padding_value: u8,
+    pub sample_is_non_sync_sample: bool,
     pub sample_degradation_priority: u16,
 }
 
@@ -570,12 +570,12 @@ impl FromBytes for SampleFlags {
 
 impl ToBytes for SampleFlags {
     fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
-        let flags = (((self.is_leading & 0b11) as u16) << 10) |
-            (((self.sample_depends_on & 0b11) as u16) << 8) |
-            (((self.sample_is_depended_on & 0b11) as u16) << 6) |
-            (((self.sample_has_redundancy & 0b11) as u16) << 4) |
-            (((self.sample_padding_value & 0b111) as u16) << 1) |
-            self.sample_is_non_sync_sample as u16;
+        let flags = (((self.is_leading & 0b11) as u16) << 10)
+            | (((self.sample_depends_on & 0b11) as u16) << 8)
+            | (((self.sample_is_depended_on & 0b11) as u16) << 6)
+            | (((self.sample_has_redundancy & 0b11) as u16) << 4)
+            | (((self.sample_padding_value & 0b111) as u16) << 1)
+            | self.sample_is_non_sync_sample as u16;
         flags.to_bytes(stream)?;
         self.sample_degradation_priority.to_bytes(stream)?;
         Ok(())
@@ -636,7 +636,7 @@ pub use doc_hidden::*;
 /// - `u32`: 4 bytes size.
 ///
 pub struct Array<N, T> {
-    pub(crate) vec:   Vec<T>,
+    pub(crate) vec: Vec<T>,
     num_entries_type: std::marker::PhantomData<N>,
 }
 
@@ -644,7 +644,7 @@ impl<N, T> Array<N, T> {
     /// Constructs a new, empty `Array`.
     pub fn new() -> Self {
         Self {
-            vec:              Vec::<T>::new(),
+            vec: Vec::<T>::new(),
             num_entries_type: std::marker::PhantomData,
         }
     }
@@ -670,10 +670,10 @@ impl<N, T> Array<N, T> {
         T: Clone,
     {
         ArrayIteratorCloned::<'_, T> {
-            count:   self.len(),
+            count: self.len(),
             default: None,
             entries: &self.vec[..],
-            index:   0,
+            index: 0,
         }
     }
 
@@ -724,7 +724,7 @@ where
             v.push(T::from_bytes(stream)?);
         }
         Ok(Self {
-            vec:              v,
+            vec: v,
             num_entries_type: std::marker::PhantomData,
         })
     }
@@ -782,7 +782,7 @@ where
 {
     fn clone(&self) -> Self {
         Self {
-            vec:              self.vec.clone(),
+            vec: self.vec.clone(),
             num_entries_type: std::marker::PhantomData,
         }
     }
@@ -841,7 +841,7 @@ impl<N, T> std::iter::FromIterator<T> for Array<N, T> {
             v.push(i);
         }
         Self {
-            vec:              v,
+            vec: v,
             num_entries_type: std::marker::PhantomData,
         }
     }
@@ -864,10 +864,10 @@ impl<'a, T> Iterator for ArrayIterator<'a, T> {
 }
 
 pub struct ArrayIteratorCloned<'a, T> {
-    count:   usize,
+    count: usize,
     default: Option<T>,
     entries: &'a [T],
-    index:   usize,
+    index: usize,
 }
 
 impl<'a, T> ArrayIteratorCloned<'a, T> {

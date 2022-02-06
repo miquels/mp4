@@ -39,7 +39,7 @@ use crate::track::SpecificTrackInfo;
 use crate::types::FourCC;
 
 use super::fragment::FragmentSource;
-use super::http_file::{MemFile, HttpFile};
+use super::http_file::{HttpFile, MemFile};
 use super::lru_cache::LruCache;
 use super::segment::Segment;
 use super::subtitle::Format;
@@ -62,17 +62,17 @@ const PATH_ESCAPE: &AsciiSet = &CONTROLS
     .add(b'?');
 
 struct ExtXMedia {
-    type_:       &'static str,
-    group_id:    String,
-    name:        String,
-    channels:    Option<u16>,
-    language:    Option<&'static str>,
+    type_: &'static str,
+    group_id: String,
+    name: String,
+    channels: Option<u16>,
+    language: Option<&'static str>,
     auto_select: bool,
-    default:     bool,
-    forced:      bool,
-    sdh:         bool,
-    commentary:  bool,
-    uri:         String,
+    default: bool,
+    forced: bool,
+    sdh: bool,
+    commentary: bool,
+    uri: String,
 }
 
 impl Display for ExtXMedia {
@@ -157,14 +157,14 @@ fn uniqify_subtitles(media: &mut Vec<ExtXMedia>, remove_forced: bool) {
 
 #[derive(Default)]
 struct ExtXStreamInf {
-    audio:         Option<String>,
+    audio: Option<String>,
     avg_bandwidth: Option<u64>,
-    bandwidth:     u64,
-    codecs:        Vec<String>,
-    subtitles:     bool,
-    resolution:    (u16, u16),
-    frame_rate:    f64,
-    uri:           String,
+    bandwidth: u64,
+    codecs: Vec<String>,
+    subtitles: bool,
+    resolution: (u16, u16),
+    frame_rate: f64,
+    uri: String,
 }
 
 impl Display for ExtXStreamInf {
@@ -677,7 +677,7 @@ impl HlsManifest {
     /// Translates the tail of an `Url` into a `HLS` manifest or subtitle file.
     ///
     /// The main idea here is for a http server to serve requests for (example url)
-    /// `/media/path/filename.mp4/<manifest.m3u8`. This then serves 
+    /// `/media/path/filename.mp4/<manifest.m3u8`. This then serves
     /// a `master` or `track` `HLS` manifest.
     ///
     /// The `url_tail` is the part after `...mp4/` and has this format:
@@ -717,11 +717,7 @@ impl HlsManifest {
         };
 
         let file = &*mp4.data_ref.file;
-        let mem_file = MemFile::from_file(
-            data.into_bytes(),
-            "application/vnd.apple.mpegurl",
-            file,
-        )?;
+        let mem_file = MemFile::from_file(data.into_bytes(), "application/vnd.apple.mpegurl", file)?;
         Ok(HlsManifest(mem_file))
     }
 
@@ -747,24 +743,14 @@ impl MediaSegment {
     /// - `s/c.TRACK_ID.SEQUENCE.FROM_SAMPLE.TO_SAMPLE.vtt` => webvtt fragment
     /// - `e/EXTERNALFILE.EXT[:into.ext]` => external file next to `.mp4` (`.srt`, `.vtt`)
     ///
-    pub fn from_uri(
-        mp4: &MP4,
-        url_tail: &str,
-    ) -> io::Result<MediaSegment> {
+    pub fn from_uri(mp4: &MP4, url_tail: &str) -> io::Result<MediaSegment> {
         let (mime_type, content) = MediaSegment::from_uri_(mp4, url_tail)?;
         let file = &*mp4.data_ref.file;
-        let mem_file = MemFile::from_file(
-            content,
-            mime_type,
-            file,
-        )?;
+        let mem_file = MemFile::from_file(content, mime_type, file)?;
         Ok(MediaSegment(mem_file))
     }
 
-    fn from_uri_(
-        mp4: &MP4,
-        url_tail: &str,
-    ) -> io::Result<(&'static str, Vec<u8>)> {
+    fn from_uri_(mp4: &MP4, url_tail: &str) -> io::Result<(&'static str, Vec<u8>)> {
         // initialization section.
         if let Ok((track_id, ext)) = scan_fmt!(url_tail, "init.{}.{}{e}", u32, String) {
             match ext.as_str() {
@@ -773,7 +759,7 @@ impl MediaSegment {
                     let mut buffer = MemBuffer::new();
                     init.write(&mut buffer)?;
                     let data = buffer.into_vec();
-                    return Ok(("video/mp4", data))
+                    return Ok(("video/mp4", data));
                 },
                 "vtt" => {
                     let buffer = b"WEBVTT\n\n".to_vec();
@@ -811,8 +797,8 @@ impl MediaSegment {
         let fs = FragmentSource {
             src_track_id: track_id,
             dst_track_id: 1,
-            from_sample:  start_sample,
-            to_sample:    end_sample,
+            from_sample: start_sample,
+            to_sample: end_sample,
         };
         let content = match typ {
             's' => {
@@ -836,7 +822,7 @@ impl MediaSegment {
 
 #[derive(Hash, PartialEq, Eq, Clone)]
 struct FragmentKey {
-    file:   String,
+    file: String,
     source: FragmentSource,
 }
 
@@ -858,7 +844,7 @@ fn movie_fragment(
         }
         Some(Range {
             start: range.start as usize,
-            end:   range.end as usize,
+            end: range.end as usize,
         })
     } else {
         None
@@ -890,7 +876,7 @@ fn movie_fragment(
     // remap no range to full range.
     let mut range = range.unwrap_or(Range {
         start: 0,
-        end:   data.len(),
+        end: data.len(),
     });
 
     // check for invalid range.

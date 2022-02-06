@@ -20,19 +20,19 @@ const MAX_SEGMENT_DURATION_MERGED: f64 = 6.0;
 #[derive(Default, Clone, Debug)]
 pub struct Segment {
     pub start_sample: u32,
-    pub end_sample:   u32,
-    pub start_time:   f64,
-    pub duration:     f64,
+    pub end_sample: u32,
+    pub start_time: f64,
+    pub duration: f64,
 }
 
 #[derive(Default, Clone, Debug)]
 struct Segment_ {
     start_sample: u32,
-    end_sample:   u32,
-    start_time:   f64,
-    duration:     f64,
-    size:         u32,
-    is_sync:      bool,
+    end_sample: u32,
+    start_time: f64,
+    duration: f64,
+    size: u32,
+    is_sync: bool,
 }
 
 // Subtitle fragments are not in-sync wrt start/end time with
@@ -48,9 +48,9 @@ fn squish_subtitle(s: Vec<Segment_>) -> Vec<Segment> {
         let st = &s[idx];
         let mut sb = Segment {
             start_sample: st.start_sample,
-            end_sample:   st.end_sample,
-            start_time:   st.start_time - delta_t,
-            duration:     st.duration + delta_t,
+            end_sample: st.end_sample,
+            start_time: st.start_time - delta_t,
+            duration: st.duration + delta_t,
         };
         delta_t = 0.0;
 
@@ -110,9 +110,9 @@ fn squish(s: Vec<Segment_>) -> Vec<Segment> {
         let st = &s[idx];
         let mut sb = Segment {
             start_sample: st.start_sample,
-            end_sample:   st.end_sample,
-            start_time:   st.start_time,
-            duration:     st.duration,
+            end_sample: st.end_sample,
+            start_time: st.start_time,
+            duration: st.duration,
         };
         let mut segment_duration = st.duration;
         let mut segment_size = st.size;
@@ -139,8 +139,8 @@ fn squish(s: Vec<Segment_>) -> Vec<Segment> {
         let start_idx = idx;
         while idx > 8 && idx + 1 < s.len() {
             let sn = &s[idx + 1];
-            if segment_duration + sn.duration > MAX_SEGMENT_DURATION_MERGED ||
-                segment_size + sn.size > MAX_SEGMENT_SIZE
+            if segment_duration + sn.duration > MAX_SEGMENT_DURATION_MERGED
+                || segment_size + sn.size > MAX_SEGMENT_SIZE
             {
                 // Make an exception if the initial segment is really short.
                 if !(idx == start_idx && s[idx].duration < 1.2) {

@@ -21,8 +21,8 @@ use crate::types::*;
 pub struct FragmentSource {
     pub src_track_id: u32,
     pub dst_track_id: u32,
-    pub from_sample:  u32,
-    pub to_sample:    u32,
+    pub from_sample: u32,
+    pub to_sample: u32,
 }
 
 /// Build a Media Initialization Section for fMP4 segments.
@@ -31,8 +31,8 @@ pub fn media_init_section(mp4: &MP4, tracks: &[u32]) -> MP4 {
 
     // Start with the FileType box.
     let ftyp = FileTypeBox {
-        major_brand:       FourCC::new("iso5"),
-        minor_version:     1,
+        major_brand: FourCC::new("iso5"),
+        minor_version: 1,
         compatible_brands: vec![FourCC::new("avc1"), FourCC::new("mp41")],
     };
     boxes.push(MP4Box::FileTypeBox(ftyp));
@@ -167,7 +167,7 @@ fn fmp4_track(movie: &MovieBox, trak: &TrackBox, track_id: u32) -> TrackBox {
         b"sbtl" | b"subt" => {
             media_boxes.push(MP4Box::HandlerBox(HandlerBox {
                 handler_type: FourCC::new("subt"),
-                name:         ZString("SubtitleHandler".into()),
+                name: ZString("SubtitleHandler".into()),
             }));
         },
         _ => {
@@ -252,9 +252,9 @@ fn fmp4_track(movie: &MovieBox, trak: &TrackBox, track_id: u32) -> TrackBox {
 // entire track. For now this is pretty coarse and we mostly check
 // the whole track for defaults.
 struct SampleDefaults {
-    sample_duration:                Option<u32>,
-    sample_flags:                   Option<SampleFlags>,
-    sample_size:                    Option<u32>,
+    sample_duration: Option<u32>,
+    sample_flags: Option<SampleFlags>,
+    sample_size: Option<u32>,
     sample_composition_time_offset: Option<i32>,
 }
 
@@ -501,9 +501,9 @@ fn track_fragment(
     for sample in &samples {
         // Add entry info
         let entry = TrackRunEntry {
-            sample_duration:                default_or(&dfl.sample_duration, sample.duration),
-            sample_flags:                   default_or(&dfl.sample_flags, build_sample_flags(sample.is_sync)),
-            sample_size:                    default_or(&dfl.sample_size, sample.size),
+            sample_duration: default_or(&dfl.sample_duration, sample.duration),
+            sample_flags: default_or(&dfl.sample_flags, build_sample_flags(sample.is_sync)),
+            sample_size: default_or(&dfl.sample_size, sample.size),
             sample_composition_time_offset: default_or(
                 &dfl.sample_composition_time_offset,
                 sample.composition_delta,
