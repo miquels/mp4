@@ -3,16 +3,18 @@
 //! The functions in this crate can repackage a normal `MP4` file
 //! on-the-fly into a `HLS VOD` stream.
 //!
-//! A `HLS` stream consists of:
+//! A `HLS` stream starts with a `master.m3u8` `HLS` manifest.
 //!
-//! - a `master.m3u8` `HLS` manifest, which references:
-//! - several `media.m3u8` manifests, one per track
-//! - which each refer to
-//!   o a `Media Init Section` for the track
-//!   o `fMP4` / `CMAF` fragments c.q. segments for the track.
+//! The `master` manifest references sub-manifests, one per track.
 //!
-//! The `master.m3u8` manifest can also refer directly to `WebVTT` subtitle files.
-//! Subtitles embedded in the `MP4` file are served as a `HLS` track.
+//! - video manifests: `fMP4` / `CMAF` fragments c.q. segments
+//! - audio manifests: `fMP4` / `CMAF` fragments c.q. segments
+//! - subtitle manifests: fragmented `WEBVTT`, or a single `WEBVTT` file.
+//!
+//! Embedded mp4 subtitles in `tx3g` format are transmuxed into fragmented `WEBVTT`.
+//!
+//! External subtitles in either `srt` (automatically transformed to `vtt`)
+//! or `vtt` format can also be included in the manifest.
 //!
 //! Start at [`HlsManifest`](crate::streaming::hls::HlsManifest) and
 //! [`MediaSegment`](crate::streaming::hls::MediaSegment).
