@@ -3,8 +3,8 @@ use std::io;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 
 use anyhow::Result;
-use axum::{Router, body, response::Response, routing::get};
-use axum::extract::{Path, Query};
+use axum::{AddExtensionLayer, Router, body, response::Response, routing::get};
+use axum::extract::{Extension, Path, Query};
 use bytes::Bytes;
 use headers::{HeaderMapExt, UserAgent};
 use http::{Method, Request, StatusCode};
@@ -79,11 +79,11 @@ async fn main() -> Result<()> {
 async fn serve(opts: ServeOpts) -> Result<()> {
     use http::header::{HeaderName, ORIGIN, RANGE};
 
-    // XXX FIXME in shared state!
     let dir = opts.dir.clone();
 
     let middleware_stack = ServiceBuilder::new()
         .layer(TraceLayer::new_for_http())
+        .layer(AddExtensionLayer::new(dir))
         .layer(CorsLayer::new()
             .allow_origin(cors::any())
             .allow_methods(vec![Method::GET, Method::HEAD])
@@ -127,6 +127,7 @@ pub struct Params {
 async fn handle_request(
     Path(path): Path<String>,
     params: Option<Query<Params>>,
+    Extension(dir): Extension<String>,
     req: Request<body::Body>,
 ) -> Result<Response, StatusCode> {
     let (parts, _) = req.into_parts();
@@ -135,15 +136,37 @@ async fn handle_request(
         None => None,
         Some(Query(params)) => Some(params),
     };
-    handle_request2(path, params, req).await.map_err(|e| translate_io_error(e))
+    handle_request2(path, params, dir, req).await.map_err(|e| translate_io_error(e))
+}
+
+// This is not the best way to join paths, but it is reasonably secure.
+fn join_paths(dir: &str, path: &str) -> String {
+    let mut elems = Vec::new();
+    for elem in path.split('/').filter(|e| !e.is_empty()) {
+        match elem {
+            "." => continue,
+            ".." => { elems.pop(); },
+            _ => elems.push(elem),
+        }
+    }
+    let mut path = dir.to_string();
+    if !path.ends_with("/") {
+        path.push('/');
+    }
+    path.push_str(&elems.join("/"));
+    path
 }
 
 async fn handle_request2(
     path: String,
     params: Option<Params>,
+    dir: String,
     req: Request<()>
 ) -> io::Result<Response> {
 
+    let path = join_paths(&path, &dir);
+
+    // Return early if not modified.
     if let Some(response) = http_file::not_modified(&req, &path).await {
         return Ok(box_response(response));
     }
@@ -183,6 +206,7 @@ async fn handle_request2(
 }
     
 async fn mp4pseudo(req: &Request<()>, path: &str, params: Params) -> io::Result<Response> {
+
     // get tracks, then open mp4stream.
     let tracks = match params.track_id.as_ref() {
         Some(val) => {
@@ -194,6 +218,7 @@ async fn mp4pseudo(req: &Request<()>, path: &str, params: Params) -> io::Result<
         },
         None => return Err(io::Error::new(io::ErrorKind::InvalidData, "need track parameter")),
     };
+
     let mp4stream = pseudo::Mp4Stream::open(path, tracks)?;
     Ok(box_response(http_file::serve_file(req, mp4stream).await))
 }
@@ -204,19 +229,23 @@ async fn mp4pseudo(req: &Request<()>, path: &str, params: Params) -> io::Result<
 // - media.<TRACK_ID>.m3u8
 //
 async fn manifest(req: &Request<()>, path: &str, extra: &str) -> io::Result<Response> {
+
+    // See if this is the Notflix custom receiver running on Chromecast.
     let is_notflix = match req.headers().get("x-application").map(|v| v.to_str()) {
         Some(Ok(v)) => v.contains("Notflix"),
         _ => false,
     };
+    // Is it a chromecast?
     let is_cast = match req.headers().typed_get::<UserAgent>() {
         Some(ua) => ua.as_str().contains("CrKey/"),
         None => false,
     };
-    let simple_subs = is_cast && !is_notflix;
+    // Chromecast and not Notflix, filter subs.
+    let filter_subs = is_cast && !is_notflix;
 
     let data = task::block_in_place(|| {
         let mp4 = mp4lib::streaming::lru_cache::open_mp4(path, false)?;
-        hls::HlsManifest::from_uri(&*mp4, extra, simple_subs)
+        hls::HlsManifest::from_uri(&*mp4, extra, filter_subs)
     })?;
     Ok(box_response(http_file::serve_file(req, data).await))
 }
