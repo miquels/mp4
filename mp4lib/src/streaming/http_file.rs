@@ -370,10 +370,13 @@ mod http_file_server {
         if let Some(inm) = req.headers().get("if-none-match") {
             if let Ok(val) = inm.to_str() {
                 if let Some(caps) = regex!(r#"\.E[0-9a-fA-F]{2,8}""#).captures(val) {
+                    println!("XXX reckognized etag {}", &caps[1]);
                     etag_parts = u32::from_str_radix(&caps[1], 16).unwrap();
                 }
             }
         }
+
+        println!("XXX checking not_modified, etag_parts is", etag_parts);
 
         // Now open the file.
         let file = tokio::task::block_in_place(|| fs::File::open(file_path)).ok()?;
