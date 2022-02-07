@@ -41,7 +41,7 @@ use crate::track::SpecificTrackInfo;
 use crate::types::FourCC;
 
 use super::fragment::FragmentSource;
-use super::http_file::{HttpFile, MemFile};
+use super::http_file::{HttpFile, MemFile, delegate_http_file};
 use super::lru_cache::LruCache;
 use super::segment::Segment;
 use super::subtitle::Format;
@@ -671,9 +671,8 @@ fn hls_subtitle(dirname: &str, name: &str) -> io::Result<String> {
 /// HLS manifest data.
 ///
 /// This struct `impl`s `HttpFile`.
-#[derive(Delegate)]
-#[delegate(HttpFile)]
 pub struct HlsManifest(MemFile);
+delegate_http_file!(HlsManifest);
 
 impl HlsManifest {
     /// Translates the tail of an `Url` into a `HLS` manifest or subtitle file.
@@ -730,9 +729,8 @@ impl HlsManifest {
 }
 
 /// A media segment. An `fMP4` fragment, or a `CMAF` segment.
-#[derive(Delegate)]
-#[delegate(HttpFile)]
 pub struct MediaSegment(MemFile);
+delegate_http_file!(MediaSegment);
 
 impl MediaSegment {
     /// Translates the tail of an URL into an MP4 init segment or media segment.

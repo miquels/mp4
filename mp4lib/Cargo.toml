@@ -15,7 +15,7 @@ http-file-server = [
     "streaming", "bytes", "futures-core", "headers",
     "http", "http-body", "regex", "tokio"
 ]
-streaming = [ "ambassador", "mime_guess", "once_cell", "percent-encoding", "scan_fmt" ]
+streaming = [ "mime_guess", "once_cell", "percent-encoding", "scan_fmt" ]
 
 [dependencies]
 auto_impl = "0.3.0"

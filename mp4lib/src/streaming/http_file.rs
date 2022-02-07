@@ -8,19 +8,18 @@
 //!
 use std::cmp;
 use std::fs;
+use std::fmt::Write;
 use std::io;
 use std::ops::{Bound, Range, RangeBounds};
 use std::os::unix::fs::{FileExt, MetadataExt};
 use std::time::SystemTime;
 
-use ambassador::delegatable_trait;
 use once_cell::sync::Lazy;
 
 /// Methods for a struct that can be served via HTTP.
 ///
 /// Several structs in this library are meant to be served over HTTP.
 /// The `serve_file` function can serve structs that implement this trait.
-#[delegatable_trait]
 pub trait HttpFile {
     /// Return the pathname of the open file (if any).
     fn path(&self) -> Option<&str> {
@@ -57,40 +56,133 @@ pub trait HttpFile {
     }
 }
 
-// Build an etag from file metadata.
-//
-// Include a version-specific field, so that different versions of
-// this crate generate different etags. This is useful for content
-// we generate from an mp4 file, that migh differ in different
-// versions of this library.
-//
-// For now, during development, we use the timestamp of the executable
-// that was built. TODO- use package version when we are stable.
-pub(crate) fn build_etag(meta: fs::Metadata, version_specific: bool) -> String {
-    let mut secs = 0u64;
-    if let Ok(d) = meta.modified().map(|m| m.duration_since(SystemTime::UNIX_EPOCH)) {
-        secs = d.map(|s| s.as_secs()).unwrap_or(0);
-    };
+macro_rules! delegate_http_file {
+    ($type:ty) => {
+        impl HttpFile for $type {
+            fn path(&self) -> Option<&str> {
+                self.0.path()
+            }
+            fn size(&self) -> u64 {
+                self.0.size()
+            }
+            fn range_size(&self) -> u64 {
+                self.0.range_size()
+            }
+            fn modified(&self) -> Option<std::time::SystemTime> {
+                self.0.modified()
+            }
+            fn get_etag(&self) -> Option<&str> {
+                self.0.get_etag()
+            }
+            fn set_etag(&mut self, tag: &str) {
+                self.0.set_etag(tag)
+            }
+            fn get_range(&self) -> std::ops::Range<u64> {
+                self.0.get_range()
+            }
+            fn set_range(&mut self, range: impl std::ops::RangeBounds<u64>) -> std::io::Result<()> {
+                self.0.set_range(range)
+            }
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                self.0.read(buf)
+            }
+            fn mime_type(&self) -> &str {
+                self.0.mime_type()
+            }
+        }
+    }
+}
+pub(crate) use delegate_http_file;
 
-    static EXE_STAMP: Lazy<u64> = Lazy::new(|| {
+fn exe_stamp() -> Option<u64> {
+    static EXE_STAMP: Lazy<Option<u64>> = Lazy::new(|| {
         std::env::current_exe()
             .and_then(|p| p.metadata())
             .map(|m| m.mtime() as u64)
-            .unwrap_or(0)
+            .ok()
     });
-    let exe_stamp = *EXE_STAMP;
+    *EXE_STAMP
+}
 
-    if version_specific && exe_stamp > 0 {
-        format!(
-            "\"{:08x}.{:08x}.{:08x}.{}\"",
-            exe_stamp,
-            secs,
-            meta.ino(),
-            meta.size()
-        )
-    } else {
-        format!("\"{:08x}.{:08x}.{}\"", secs, meta.ino(), meta.size())
+fn crate_version() -> u64 {
+    static CRATE_VERSION: Lazy<u64> = Lazy::new(|| {
+        let mut v = 0;
+        let mut r = 0;
+        for n in env!("CARGO_PKG_VERSION").split(|c| c == '.' || c == '-' || c == '_') {
+            if let Ok(x) = n.parse::<u16>() {
+                r  = r * 256 + (x as u64);
+                v += 1;
+                if v == 3 {
+                    break;
+                }
+            }
+        }
+        r
+    });
+    *CRATE_VERSION
+}
+
+// Build an etag from file metadata.
+//
+// The etag is formed of a set of fields separated by dots. The
+// last field is in the form `E<hex-number`. The `hex-number` is
+// a bitfield that indicates what fields are present.
+//
+// This enables us to re-create the etag from parts on a `If-Non-Match`
+// check without interpreting the URL.
+pub(crate) struct E(u32);
+impl E {
+    pub const MODIFIED: u32 = 1;
+    pub const INODE: u32 = 2;
+    pub const SIZE: u32 = 4;
+    pub const EXE_STAMP: u32 = 8;
+    pub const CRATE_VERSION: u32 = 16;
+
+    pub const FILE: u32 = Self::MODIFIED | Self::INODE | Self::SIZE;
+    pub const GENERATED: u32 = Self::MODIFIED | Self::INODE | Self::SIZE | Self::EXE_STAMP;
+
+    pub fn has(&self, part: u32) -> bool {
+        (self.0 & part) > 0
     }
+}
+
+// Build the tag from parts.
+pub(crate) fn build_etag(meta: fs::Metadata, parts: u32) -> String {
+    let parts = E(parts);
+    let mut used = 0;
+    let mut tag = String::new();
+
+    let dot = |used| if used > 0 { "." } else { "" };
+
+    if parts.has(E::MODIFIED) {
+        if let Ok(d) = meta.modified().map(|m| m.duration_since(SystemTime::UNIX_EPOCH)) {
+            if let Ok(secs) = d.map(|s| s.as_secs()) {
+                let _ = write!(&mut tag, "{}{:x}", dot(used), secs);
+                used |= E::MODIFIED;
+            }
+        }
+    }
+    if parts.has(E::INODE) {
+        let _ = write!(&mut tag, "{}{:x}", dot(used), meta.ino());
+        used |= E::INODE;
+    }
+    if parts.has(E::SIZE) {
+        let _ = write!(&mut tag, "{}{:x}", dot(used), meta.len());
+        used |= E::SIZE;
+    }
+    if parts.has(E::EXE_STAMP) {
+        if let Some(tm) = exe_stamp() {
+            let _ = write!(&mut tag, "{}{:x}", dot(used), tm);
+            used |= E::EXE_STAMP;
+        }
+    }
+    if parts.has(E::CRATE_VERSION) {
+        let _ = write!(&mut tag, "{}{:x}", dot(used), crate_version());
+        used |= E::CRATE_VERSION;
+    }
+    let _ = write!(&mut tag, ".E{:02x}", used);
+
+    tag
 }
 
 macro_rules! impl_http_file {
@@ -197,7 +289,7 @@ impl MemFile {
         let mime_type = mime_type.into();
         let meta = file.metadata()?;
         let modified = meta.modified().ok();
-        let etag = Some(build_etag(meta, true));
+        let etag = Some(build_etag(meta, E::GENERATED));
 
         Ok(MemFile {
             start: 0,
@@ -248,6 +340,8 @@ mod http_file_server {
 
     use super::*;
 
+    type EmptyBody = http_body::Empty<Bytes>;
+
     macro_rules! regex {
         ($re:expr $(,)?) => {{
             static RE: once_cell::sync::OnceCell<regex::Regex> = once_cell::sync::OnceCell::new();
@@ -255,7 +349,7 @@ mod http_file_server {
         }};
     }
 
-    /// Early check to see if we can send an http `Not Modified` response.
+    /// Early check to see if we can send a `HTTP` `Not Modified` response.
     ///
     /// Functions like `HlsManifest::from_uri` and `MediaData::from_uri` generate
     /// data based on the contents of an MP4 file. The `Last-Modified` header
@@ -266,19 +360,42 @@ mod http_file_server {
     /// This function calculates and checks those values and returns a
     /// complete `Not Modified` response if appropriate.
     ///
-    pub fn not_modified<F, R>(req: &http::Request<R>, file_path: &str) -> Option<http::Response<Body<F>>>
+    pub async fn not_modified<R>(req: &http::Request<R>, file_path: &str) -> Option<http::Response<EmptyBody>>
     where
-        F: HttpFile + Unpin + Send + 'static,
         http::Request<R>: Send + 'static,
     {
-        const SUBTITLE: &'static str = r#"^(.*\.(?:srt|vtt)):into\.(srt|vtt))$"#;
+        // If we have a If-None-Match header with an ETag in it,
+        // then use the ETag parts indicated by the first hex number.
+        let mut etag_parts = E::FILE;
+        if let Some(inm) = req.headers().get("if-none-match") {
+            if let Ok(val) = inm.to_str() {
+                if let Some(caps) = regex!(r#"\.E[0-9a-fA-F]{2,8}""#).captures(val) {
+                    etag_parts = u32::from_str_radix(&caps[1], 16).unwrap();
+                }
+            }
+        }
 
-        let is_subtitle = regex!(SUBTITLE).is_match(file_path);
-        let is_pseudo = file_path.ends_with(".mp4") && req.uri().query().is_some();
-        let is_hls = file_path.contains(".mp4/");
+        // Now open the file.
+        let file = tokio::task::block_in_place(|| fs::File::open(file_path)).ok()?;
+        let mut file = FsFile::from_file(file, Some(file_path), etag_parts).ok()?;
 
-        let file = fs::File::open(file_path).ok()?;
-        let file = FsFile::from_file(file, file_path, is_subtitle || is_pseudo || is_hls).ok()?;
+        // If this is a generated file, the timestamp cannot be earlier than
+        // that of the executable.
+        if req.uri().path().contains(".mp4/")
+            || req.uri().path().contains(".into:")
+            || req.uri().query().is_some()
+        {
+            if let Some(m) = file.modified.as_mut() {
+                if let Some(exe) = exe_stamp() {
+                    let exe = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(exe);
+                    if *m < exe {
+                        *m = exe;
+                    }
+                }
+            }
+        }
+
+        // And check.
         file.not_modified(req)
     }
 
@@ -298,18 +415,18 @@ mod http_file_server {
     impl FsFile {
         /// Open file.
         pub fn open(path: &str) -> io::Result<FsFile> {
-            let file = FsFile::from_file(fs::File::open(path)?, path, false)?;
-            Ok(file)
+            let file = fs::File::open(path)?;
+            FsFile::from_file(file, Some(path), E::FILE)
         }
 
-        /// From an already opened file.
-        fn from_file<'a>(file: fs::File, path: &str, version_specific: bool) -> io::Result<FsFile> {
-            let path = Some(path.to_string());
+        // From an already opened file.
+        fn from_file<'a>(file: fs::File, path: Option<&str>, etag_parts: u32) -> io::Result<FsFile> {
+            let path = path.map(|p| p.to_string());
             let meta = file.metadata()?;
-            let modified = meta.modified()?;
+            let modified = meta.modified().ok();
             let size = meta.len();
 
-            let etag = build_etag(meta, version_specific);
+            let etag = build_etag(meta, etag_parts);
             let mime_type = match path.as_ref() {
                 Some(path) => mime_guess::from_path(path).first_or_octet_stream().to_string(),
                 None => "application/octet_stream".to_string(),
@@ -322,7 +439,7 @@ mod http_file_server {
                 start: 0,
                 end: size,
                 pos: 0,
-                modified: Some(modified),
+                modified,
                 etag: Some(etag),
                 mime_type,
             })
@@ -330,13 +447,12 @@ mod http_file_server {
 
         // Check if the file was not modified (based on LastModified / ETag).
         // If so, returns a complete not-modified response.
-        fn not_modified<F, R>(&self, req: &http::Request<R>) -> Option<http::Response<Body<F>>>
+        fn not_modified<R>(&self, req: &http::Request<R>) -> Option<http::Response<EmptyBody>>
         where
-            F: HttpFile + Unpin + Send + 'static,
             http::Request<R>: Send + 'static,
         {
             let (response, not_modified) = check_modified(req, self);
-            not_modified.then(move || response.body(Body::empty()).unwrap())
+            not_modified.then(move || response.body(EmptyBody::new()).unwrap())
         }
     }
 
@@ -397,10 +513,11 @@ mod http_file_server {
     /// `CORS` headers can be set on the `Response` after this function returns,
     /// or it can be handled by middleware.
     ///
-    pub async fn serve_file<F, R>(req: &http::Request<R>, mut file: F) -> http::Response<Body<F>>
+    pub async fn serve_file<B, F>(req: &http::Request<B>, mut file: F) -> http::Response<Body<F>>
     where
         F: HttpFile + Unpin + Send + 'static,
-        http::Request<R>: Send + 'static,
+        B: Send + 'static,
+        http::Request<B>: Send + 'static,
     {
         let (mut response, not_modified) = check_modified(req, &file);
         if not_modified {

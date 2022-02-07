@@ -72,7 +72,7 @@ impl Mp4Stream {
         let meta = file.metadata()?;
         let modified = meta.modified().unwrap();
         let len = meta.len();
-        let etag = build_etag(meta, true);
+        let etag = build_etag(meta, super::http_file::E::GENERATED);
 
         // This is kind of aribitraty.
         //

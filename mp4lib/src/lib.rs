@@ -38,9 +38,6 @@
 //!
 
 #[macro_use]
-extern crate ambassador;
-
-#[macro_use]
 mod ioerr;
 mod bitreader;
 pub(crate) mod sample_info;

@@ -7,7 +7,6 @@
 //! [`hls`](crate::streaming::hls).
 //!
 //! Note, `transmuxing` is not `transcoding`.
-#[macro_use]
 pub mod http_file;
 pub mod fragment;
 pub mod hls;
