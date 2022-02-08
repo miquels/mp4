@@ -10,7 +10,7 @@ name = "mp4server"
 path = "src/main.rs"
 
 [dependencies]
-mp4lib = { version = "0.1", path = "../mp4lib" }
+mp4lib = { version = "0.1", features = [ "axum-box-body"], path = "../mp4lib" }
 
 anyhow = "1.0.25"
 axum = "0.4.5"

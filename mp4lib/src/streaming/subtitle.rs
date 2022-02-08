@@ -10,7 +10,6 @@ use scan_fmt::scan_fmt;
 use super::fragment::FragmentSource;
 use crate::boxes::sbtl::Tx3GTextSample;
 use crate::boxes::*;
-use crate::mp4box::BoxInfo;
 use crate::mp4box::MP4;
 use crate::serialize::FromBytes;
 use crate::track::SampleInfo;
@@ -38,37 +37,6 @@ impl FromStr for Format {
             _ => Err(ioerr!(InvalidInput, "Could not parse format")),
         }
     }
-}
-
-/// Find the first subtitle track with a certain language.
-pub fn subtitle_track_bylang<'a>(mp4: &'a MP4, language: &str) -> Option<&'a TrackBox> {
-    let movie = mp4.movie();
-
-    for track in &movie.tracks() {
-        let mdia = track.media();
-        let mdhd = mdia.media_header();
-        let hdlr = mdia.handler();
-
-        if hdlr.handler_type != b"sbtl" {
-            continue;
-        }
-        if mdhd.language.to_string() != language {
-            continue;
-        }
-
-        let stsd = mdia.media_info().sample_table().sample_description();
-        match stsd.entries.iter().next() {
-            Some(entry) => {
-                if entry.fourcc() != b"tx3g" {
-                    continue;
-                }
-            },
-            None => continue,
-        }
-
-        return Some(*track);
-    }
-    None
 }
 
 fn ptime(secs: f64, format: Format) -> String {
@@ -130,6 +98,12 @@ fn cue(
 }
 
 /// Extract a subtitle track into VTT / SRT or 3GPP.
+///
+/// Note that if the `mp4` file resides on a classical spinning disk,
+/// this can be quite slow, since usually the subtitle track is
+/// interleaved with the video/audio tracks. Meaning that the disk
+/// will probably have to do a seek for each sample.
+///
 pub fn subtitle_extract(
     mp4: &MP4,
     track: &TrackBox,
@@ -247,6 +221,8 @@ pub fn fragment(mp4: &MP4, format: Format, frag: &FragmentSource, tm_off: f64) -
 ///
 /// Input and output formats can be webvtt and srt, format will be
 /// converted if needed. Output character set is always utf-8.
+///
+/// Return value is `(mime_type, raw_data)`.
 pub fn external(path: &str, to_format: &str) -> io::Result<(&'static str, Vec<u8>)> {
     // see if input and output formats are supported.
     let infmt = Format::from_str(path)?;
@@ -305,6 +281,7 @@ pub fn external(path: &str, to_format: &str) -> io::Result<(&'static str, Vec<u8
     Ok((mime, buf.into_bytes()))
 }
 
+/// Open a subtitle track file (`vtt` or `srt`) and calculate its duration.
 pub fn duration(fspath: &str) -> io::Result<f64> {
     let format = Format::from_str(fspath).map_err(|e| ioerr!(InvalidData, "{}: {}", fspath, e))?;
     let mut stf = SubtitleFile::open(fspath, format)?;

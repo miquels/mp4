@@ -10,7 +10,8 @@
 //! on which you can call methods like `read`, `read_at`, and more.
 //!
 //! The main use-case for this is a HTTP server that serves and rewrites
-//! files on-the-fly.
+//! files on-the-fly. If you want to implement that, see
+//! the [`http_handler`](crate::streaming::http_handler) module.
 //!
 use std::convert::TryInto;
 use std::fs;

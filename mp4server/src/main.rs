@@ -1,21 +1,17 @@
-use std::fs;
 use std::io;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 
 use anyhow::Result;
 use axum::{AddExtensionLayer, Router, body, response::Response, routing::get};
-use axum::extract::{Extension, Path, Query};
-use bytes::Bytes;
+use axum::extract::{Extension, Path};
 use headers::{HeaderMapExt, UserAgent};
 use http::{Method, Request, StatusCode};
-use serde::Deserialize;
 use structopt::StructOpt;
-use tokio::task;
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
 use tower_http::cors::{self, CorsLayer};
 
-use mp4lib::streaming::{pseudo, hls, http_file};
+use mp4lib::streaming::http_handler::{self, FsPath};
 
 #[derive(StructOpt, Debug)]
 #[structopt(setting = clap::AppSettings::VersionlessSubcommands)]
@@ -44,14 +40,6 @@ pub struct ServeOpts {
     #[structopt(short, long)]
     /// Root directory.
     pub dir: String,
-}
-
-// Helper. Straight from the documentation of once_cell.
-macro_rules! regex {
-    ($re:expr $(,)?) => {{
-        static RE: once_cell::sync::OnceCell<regex::Regex> = once_cell::sync::OnceCell::new();
-        RE.get_or_init(|| regex::Regex::new($re).unwrap())
-    }};
 }
 
 #[tokio::main]
@@ -122,119 +110,23 @@ async fn serve(opts: ServeOpts) -> Result<()> {
     Ok(())
 }
 
-#[derive(Deserialize, Debug)]
-pub struct Params {
-    pub track_id:   String,
-}
-
 async fn handle_request(
     Path(path): Path<String>,
-    params: Option<Query<Params>>,
     Extension(dir): Extension<String>,
     req: Request<body::Body>,
 ) -> Result<Response, StatusCode> {
     let (parts, _) = req.into_parts();
     let req = Request::from_parts(parts, ());
-    let params = match params {
-        None => None,
-        Some(Query(params)) => Some(params),
-    };
-    handle_request2(path, params, dir, req).await.map_err(|e| translate_io_error(e))
-}
-
-// This is not the best way to join paths, but it is reasonably secure.
-fn join_paths(dir: &str, path: &str) -> String {
-    let mut elems = Vec::new();
-    for elem in path.split('/').filter(|e| !e.is_empty()) {
-        match elem {
-            "." => continue,
-            ".." => { elems.pop(); },
-            _ => elems.push(elem),
-        }
-    }
-    let mut path = dir.to_string();
-    if !path.ends_with("/") {
-        path.push('/');
-    }
-    path.push_str(&elems.join("/"));
-    path
+    handle_request2(path, dir, req).await.map_err(|e| translate_io_error(e))
 }
 
 async fn handle_request2(
     path: String,
-    params: Option<Params>,
     dir: String,
     req: Request<()>
 ) -> io::Result<Response> {
 
-    let path = join_paths(&dir, &path);
-
-    const PATH_AND_EXTRA: &'static str = r#"^(.*\.mp4)/(info|.*\.(?:m3u8|mp4|m4a|vtt))$"#;
-    if let Some(caps) = regex!(PATH_AND_EXTRA).captures(&path) {
-        let (path, extra) = (&caps[1], &caps[2]);
-
-        if let Some(response) = http_file::not_modified(&req, path).await {
-            return Ok(box_response(response));
-        }
-
-        // HLS manifest.
-        if extra.ends_with(".m3u8") {
-            return manifest(&req, path, extra).await;
-        }
-
-        // Media data.
-        if extra.ends_with(".mp4") || extra.ends_with(".m4a") {
-            return media_segment(&req, path, extra).await;
-        }
-
-        // Media info.
-        if extra == "info" {
-            return media_info(&req, path).await;
-        }
-    }
-
-    // External subtitle format translation (subtitle.srt:into.vtt).
-    const SUBTITLE: &'static str = r#"^(.*\.(?:srt|vtt)):into\.(srt|vtt)$"#;
-    if let Some(caps) = regex!(SUBTITLE).captures(&path) {
-        if let Some(response) = http_file::not_modified(&req, &caps[1]).await {
-            return Ok(box_response(response));
-        }
-        return subtitle(&req, &caps[1], &caps[2]).await;
-    }
-
-    // Normal file (or pseudo streaming, still file path is normal). Check.
-    if let Some(response) = http_file::not_modified(&req, &path).await {
-        return Ok(box_response(response));
-    }
-
-    // Pseudo-streaming request.
-    if path.ends_with(".mp4") && params.is_some() {
-        return mp4pseudo(&req, &path, params.unwrap()).await;
-    }
-
-    // A normal file.
-    let file = http_file::FsFile::open(&path)?;
-    Ok(box_response(http_file::serve_file(&req, file).await))
-}
-    
-async fn mp4pseudo(req: &Request<()>, path: &str, params: Params) -> io::Result<Response> {
-
-    // get tracks, then open mp4stream.
-    let tracks: Vec<_> = params.track_id.split(',').filter_map(|t| t.parse::<u32>().ok()).collect();
-    if tracks.len() == 0 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "bad track parameter"));
-    }
-
-    let mp4stream = pseudo::Mp4Stream::open(path, tracks)?;
-    Ok(box_response(http_file::serve_file(req, mp4stream).await))
-}
-
-// serve m3u8 playlist files:
-//
-// - master.m3u8 / main.m3u8
-// - media.<TRACK_ID>.m3u8
-//
-async fn manifest(req: &Request<()>, path: &str, extra: &str) -> io::Result<Response> {
+    let path = FsPath::Combine((&dir, &path));
 
     // See if this is the Notflix custom receiver running on Chromecast.
     let is_notflix = match req.headers().get("x-application").map(|v| v.to_str()) {
@@ -249,42 +141,15 @@ async fn manifest(req: &Request<()>, path: &str, extra: &str) -> io::Result<Resp
     // Chromecast and not Notflix, filter subs.
     let filter_subs = is_cast && !is_notflix;
 
-    let data = task::block_in_place(|| {
-        let mp4 = mp4lib::streaming::lru_cache::open_mp4(path, false)?;
-        hls::HlsManifest::from_uri(&*mp4, extra, filter_subs)
-    })?;
-    Ok(box_response(http_file::serve_file(req, data).await))
-}
+    if let Some(response) = http_handler::handle_hls(&req, path, filter_subs).await? {
+        return Ok(response);
+    }
 
-// MP4 fragments / segments.
-async fn media_segment(req: &Request<()>, path: &str, extra: &str) -> io::Result<Response> {
-    let data = task::block_in_place(|| {
-        let mp4 = mp4lib::streaming::lru_cache::open_mp4(path, false)?;
-        hls::MediaSegment::from_uri(&*mp4, extra)
-    })?;
-    Ok(box_response(http_file::serve_file(req, data).await))
-}
+    if let Some(response) = http_handler::handle_pseudo(&req, path).await? {
+        return Ok(response);
+    }
 
-// MP4 media info, json.
-async fn media_info(req: &Request<()>, path: &str) -> io::Result<Response> {
-    let file = task::block_in_place(|| fs::File::open(path))?;
-    let mp4 = task::block_in_place(|| {
-        mp4lib::streaming::lru_cache::open_mp4(path, false)
-    })?;
-
-    let info = mp4lib::track::track_info(&mp4);
-    let body = serde_json::to_string_pretty(&info).unwrap();
-
-    let data = http_file::MemFile::from_file(body.into_bytes(), "text/json", &file)?;
-    Ok(box_response(http_file::serve_file(req, data).await))
-}
-
-async fn subtitle(req: &Request<()>, path: &str, into: &str) -> io::Result<Response> { 
-    let file = task::block_in_place(|| fs::File::open(path))?;
-    let (mime, body) =
-        task::block_in_place(|| mp4lib::streaming::subtitle::external(path, into))?;
-    let data = http_file::MemFile::from_file(body, mime, &file)?;
-    Ok(box_response(http_file::serve_file(req, data).await))
+    http_handler::handle_file(&req, path, None).await
 }
 
 fn translate_io_error(err: io::Error) -> StatusCode {
@@ -296,15 +161,4 @@ fn translate_io_error(err: io::Error) -> StatusCode {
         io::ErrorKind::InvalidData => SC::BAD_REQUEST,
         _ => SC::INTERNAL_SERVER_ERROR,
     }
-}
-
-// helper to tunr the body in the response into axum's body type.
-fn box_response<B>(resp: Response<B>) -> Response
-where
-    B: 'static + body::HttpBody<Data = Bytes> + Send,
-    <B as body::HttpBody>::Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
-{
-    let (parts, body) = resp.into_parts();
-    let body = axum::body::boxed(body);
-    http::Response::from_parts(parts, body)
 }

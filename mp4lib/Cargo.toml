@@ -10,12 +10,13 @@ name = "mp4lib"
 path = "src/lib.rs"
 
 [features]
-default = [ "http-file-server", "streaming" ]
-http-file-server = [
+default = [ "http-handler", "streaming" ]
+http-handler = [
     "streaming", "bytes", "futures-core", "headers",
     "http", "http-body", "regex", "tokio"
 ]
 streaming = [ "mime_guess", "once_cell", "percent-encoding", "scan_fmt" ]
+axum-box-body = [ "axum" ]
 
 [dependencies]
 auto_impl = "0.3.0"
@@ -43,3 +44,6 @@ http = { version = "0.2.6", optional = true }
 http-body = { version = "0.4.4", optional = true }
 regex = { version = "1.5.4", optional = true }
 tokio = { version = "1.16", features = [ "rt", "rt-multi-thread" ], optional = true }
+
+# axum-box-body
+axum = { version = "0.4.5", optional = true }
