@@ -36,10 +36,7 @@ pub trait HttpFile {
     fn modified(&self) -> Option<std::time::SystemTime>;
 
     /// Returns the HTTP ETag.
-    fn get_etag(&self) -> Option<&str>;
-
-    /// Set the HTTP ETag.
-    fn set_etag(&mut self, tag: &str);
+    fn etag(&self) -> Option<&str>;
 
     /// Get the limited range we're serving.
     fn get_range(&self) -> std::ops::Range<u64>;
@@ -50,12 +47,18 @@ pub trait HttpFile {
     /// Read data and advance file position.
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize>;
 
+    /// How much data is left to read.
+    fn bytes_left(&self) -> Option<u64> {
+        None
+    }
+
     /// MIME type.
     fn mime_type(&self) -> &str {
         "application/octet-stream"
     }
 }
 
+// Delegate macro, used by newtypes wrapping MemFile (such as HlsManifest).
 macro_rules! delegate_http_file {
     ($type:ty) => {
         impl HttpFile for $type {
@@ -71,11 +74,8 @@ macro_rules! delegate_http_file {
             fn modified(&self) -> Option<std::time::SystemTime> {
                 self.0.modified()
             }
-            fn get_etag(&self) -> Option<&str> {
-                self.0.get_etag()
-            }
-            fn set_etag(&mut self, tag: &str) {
-                self.0.set_etag(tag)
+            fn etag(&self) -> Option<&str> {
+                self.0.etag()
             }
             fn get_range(&self) -> std::ops::Range<u64> {
                 self.0.get_range()
@@ -94,16 +94,18 @@ macro_rules! delegate_http_file {
 }
 pub(crate) use delegate_http_file;
 
-fn exe_stamp() -> Option<u64> {
-    static EXE_STAMP: Lazy<Option<u64>> = Lazy::new(|| {
+// Return timestamp of current executable, both as SystemTime and unix timestamp.
+fn exe_stamp() -> Option<(SystemTime, u64)> {
+    static EXE_STAMP: Lazy<Option<(SystemTime, u64)>> = Lazy::new(|| {
         std::env::current_exe()
             .and_then(|p| p.metadata())
-            .map(|m| m.mtime() as u64)
+            .map(|m| (m.modified().unwrap(), m.mtime() as u64))
             .ok()
     });
     *EXE_STAMP
 }
 
+// Return crate version as a single number.
 fn crate_version() -> u64 {
     static CRATE_VERSION: Lazy<u64> = Lazy::new(|| {
         let mut v = 0;
@@ -171,7 +173,7 @@ pub(crate) fn build_etag(meta: fs::Metadata, parts: u32) -> String {
         used |= E::SIZE;
     }
     if parts.has(E::EXE_STAMP) {
-        if let Some(tm) = exe_stamp() {
+        if let Some((_, tm)) = exe_stamp() {
             let _ = write!(&mut tag, "{}{:x}", dot(used), tm);
             used |= E::EXE_STAMP;
         }
@@ -185,6 +187,9 @@ pub(crate) fn build_etag(meta: fs::Metadata, parts: u32) -> String {
     tag
 }
 
+// MemFile and FsFile share much of the same members and methods,
+// so put the common implementation in a macro for re-use.
+// This is where inheritance would come in handy, really.
 macro_rules! impl_http_file {
     ($type:ty { $($methods:tt)* }) => {
 
@@ -205,13 +210,8 @@ macro_rules! impl_http_file {
             }
 
             /// Returns the HTTP ETag.
-            fn get_etag(&self) -> Option<&str> {
+            fn etag(&self) -> Option<&str> {
                 self.etag.as_ref().map(|t| t.as_str())
-            }
-
-            /// Set the HTTP ETag.
-            fn set_etag(&mut self, tag: &str) {
-                self.etag = Some(tag.to_string());
             }
 
             /// Get the limited range we're serving.
@@ -246,6 +246,11 @@ macro_rules! impl_http_file {
             /// Return the MIME type of this content.
             fn mime_type(&self) -> &str {
                 self.mime_type.as_str()
+            }
+
+            /// How much data is left to read.
+            fn bytes_left(&self) -> Option<u64> {
+                Some(self.end - self.pos)
             }
 
             $($methods)*
@@ -288,8 +293,18 @@ impl MemFile {
     ) -> io::Result<MemFile> {
         let mime_type = mime_type.into();
         let meta = file.metadata()?;
-        let modified = meta.modified().ok();
+        let mut modified = meta.modified().ok();
         let etag = Some(build_etag(meta, E::GENERATED));
+
+        // Timestamp of generated file is never older than that
+        // of the current executable.
+        if let Some(m) = modified.as_mut() {
+            if let Some((exe, _)) = exe_stamp() {
+                if *m < exe {
+                    *m = exe;
+                }
+            }
+        }
 
         Ok(MemFile {
             start: 0,
@@ -369,18 +384,14 @@ mod http_file_server {
         let mut etag_parts = E::FILE;
         if let Some(inm) = req.headers().get("if-none-match") {
             if let Ok(val) = inm.to_str() {
-                if let Some(caps) = regex!(r#"\.E[0-9a-fA-F]{2,8}""#).captures(val) {
-                    println!("XXX reckognized etag {}", &caps[1]);
+                if let Some(caps) = regex!(r#"\.E([0-9a-fA-F]{2,8})""#).captures(val) {
                     etag_parts = u32::from_str_radix(&caps[1], 16).unwrap();
                 }
             }
         }
 
-        println!("XXX checking not_modified, etag_parts is", etag_parts);
-
         // Now open the file.
-        let file = tokio::task::block_in_place(|| fs::File::open(file_path)).ok()?;
-        let mut file = FsFile::from_file(file, Some(file_path), etag_parts).ok()?;
+        let mut file = tokio::task::block_in_place(|| FsFile::open2(file_path, etag_parts)).ok()?;
 
         // If this is a generated file, the timestamp cannot be earlier than
         // that of the executable.
@@ -389,8 +400,7 @@ mod http_file_server {
             || req.uri().query().is_some()
         {
             if let Some(m) = file.modified.as_mut() {
-                if let Some(exe) = exe_stamp() {
-                    let exe = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(exe);
+                if let Some((exe, _)) = exe_stamp() {
                     if *m < exe {
                         *m = exe;
                     }
@@ -405,7 +415,7 @@ mod http_file_server {
     /// Implementation of `HttpFile` for a plain filesystem file.
     pub struct FsFile {
         file: fs::File,
-        path: Option<String>,
+        path: String,
         size: u64,
         start: u64,
         end: u64,
@@ -418,26 +428,21 @@ mod http_file_server {
     impl FsFile {
         /// Open file.
         pub fn open(path: &str) -> io::Result<FsFile> {
-            let file = fs::File::open(path)?;
-            FsFile::from_file(file, Some(path), E::FILE)
+            FsFile::open2(path, E::FILE)
         }
 
-        // From an already opened file.
-        fn from_file<'a>(file: fs::File, path: Option<&str>, etag_parts: u32) -> io::Result<FsFile> {
-            let path = path.map(|p| p.to_string());
+        fn open2(path: &str, etag_parts: u32) -> io::Result<FsFile> {
+            let file = fs::File::open(path)?;
             let meta = file.metadata()?;
             let modified = meta.modified().ok();
             let size = meta.len();
 
             let etag = build_etag(meta, etag_parts);
-            let mime_type = match path.as_ref() {
-                Some(path) => mime_guess::from_path(path).first_or_octet_stream().to_string(),
-                None => "application/octet_stream".to_string(),
-            };
+            let mime_type = mime_guess::from_path(path).first_or_octet_stream().to_string();
 
             Ok(FsFile {
                 file,
-                path,
+                path: path.to_string(),
                 size,
                 start: 0,
                 end: size,
@@ -462,7 +467,7 @@ mod http_file_server {
     impl_http_file!(FsFile {
         /// Return the pathname of the open file.
         fn path(&self) -> Option<&str> {
-            self.path.as_ref().map(|s| s.as_str())
+            Some(self.path.as_str())
         }
 
         /// Read data and advance file position.
@@ -488,7 +493,7 @@ mod http_file_server {
         // build minimal response headers.
         let mut response = http::Response::builder();
         let resp_headers = response.headers_mut().unwrap();
-        if let Some(etag) = file.get_etag() {
+        if let Some(etag) = file.etag() {
             let etag = ETag::from_str(&format!(r#""{}""#, etag)).unwrap();
             resp_headers.typed_insert(etag);
         }
@@ -564,7 +569,7 @@ mod http_file_server {
                 Some(if_range) => {
                     let lms = file.modified().map(|m| LastModified::from(m));
                     let etag = file
-                        .get_etag()
+                        .etag()
                         .and_then(|t| ETag::from_str(&format!(r#""{}""#, t)).ok());
                     !if_range.is_modified(etag.as_ref(), lms.as_ref())
                 },
@@ -591,10 +596,10 @@ mod http_file_server {
         http::Request<R>: Send + 'static,
     {
         // Check If-None-Match.
-        if let Some(etag) = file.get_etag() {
+        if let Some(etag) = file.etag() {
             if let Some(inm) = req.headers().typed_get::<IfNoneMatch>() {
                 let etag = ETag::from_str(&format!(r#""{}""#, etag)).unwrap();
-                if inm.precondition_passes(&etag) {
+                if !inm.precondition_passes(&etag) {
                     return Some(StatusCode::NOT_MODIFIED);
                 }
             }
@@ -676,6 +681,15 @@ mod http_file_server {
             _cx: &mut Context<'_>,
         ) -> Poll<Result<Option<http::HeaderMap>, Self::Error>> {
             Poll::Ready(Ok(None))
+        }
+
+        fn size_hint(&self) -> http_body::SizeHint {
+            if let Some(file) = self.file.as_ref() {
+                if let Some(left) = file.bytes_left() {
+                    return http_body::SizeHint::with_exact(left);
+                }
+            }
+            http_body::SizeHint::new()
         }
     }
 

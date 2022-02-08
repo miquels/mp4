@@ -58,17 +58,18 @@ macro_rules! regex {
 async fn main() -> Result<()> {
     let opts = MainOpts::from_args();
 
-    let mut builder = env_logger::Builder::new();
     if let Some(ref log_opts) = opts.log {
-        builder.parse_filters(log_opts);
+        let opts = if !log_opts.contains("=") {
+            format!("tower={0},tower_http={0},mp4lib={0},mp4server={0}", log_opts)
+        } else {
+            log_opts.to_string()
+        };
+        tracing_subscriber::fmt().with_env_filter(&opts).init();
     } else if let Ok(ref log_opts) = std::env::var("RUST_LOG") {
-        builder.parse_filters(log_opts);
+        tracing_subscriber::fmt().with_env_filter(log_opts).init();
     } else {
-        builder.parse_filters("info");
+        tracing_subscriber::fmt().with_env_filter("info").init();
     }
-    builder.init();
-
-    tracing_subscriber::fmt::init();
 
     match opts.cmd {
         Command::Serve(opts) => return serve(opts).await,
@@ -103,10 +104,12 @@ async fn serve(opts: ServeOpts) -> Result<()> {
         let sockaddr_v4 = SocketAddr::new(addrv4, opts.port);
         let sockaddr_v6 = SocketAddr::new(addrv6, opts.port);
         let app2 = app.clone();
-        tokio::join!(
-            axum::Server::bind(&sockaddr_v4).serve(app.into_make_service())
-            axum::Server::bind(&sockaddr_v6).serve(app2.into_make_service())
+        let (r1, r2) = tokio::join!(
+            axum::Server::bind(&sockaddr_v4).serve(app.into_make_service()),
+            axum::Server::bind(&sockaddr_v6).serve(app2.into_make_service()),
         );
+        r1.expect("IPv4 server");
+        r2.expect("IPv6 server");
     }
 
     #[cfg(not(target_os = "freebsd"))]
@@ -119,9 +122,9 @@ async fn serve(opts: ServeOpts) -> Result<()> {
     Ok(())
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct Params {
-    pub track_id:   Option<String>,
+    pub track_id:   String,
 }
 
 async fn handle_request(
@@ -164,9 +167,42 @@ async fn handle_request2(
     req: Request<()>
 ) -> io::Result<Response> {
 
-    let path = join_paths(&path, &dir);
+    let path = join_paths(&dir, &path);
 
-    // Return early if not modified.
+    const PATH_AND_EXTRA: &'static str = r#"^(.*\.mp4)/(info|.*\.(?:m3u8|mp4|m4a|vtt))$"#;
+    if let Some(caps) = regex!(PATH_AND_EXTRA).captures(&path) {
+        let (path, extra) = (&caps[1], &caps[2]);
+
+        if let Some(response) = http_file::not_modified(&req, path).await {
+            return Ok(box_response(response));
+        }
+
+        // HLS manifest.
+        if extra.ends_with(".m3u8") {
+            return manifest(&req, path, extra).await;
+        }
+
+        // Media data.
+        if extra.ends_with(".mp4") || extra.ends_with(".m4a") {
+            return media_segment(&req, path, extra).await;
+        }
+
+        // Media info.
+        if extra == "info" {
+            return media_info(&req, path).await;
+        }
+    }
+
+    // External subtitle format translation (subtitle.srt:into.vtt).
+    const SUBTITLE: &'static str = r#"^(.*\.(?:srt|vtt)):into\.(srt|vtt)$"#;
+    if let Some(caps) = regex!(SUBTITLE).captures(&path) {
+        if let Some(response) = http_file::not_modified(&req, &caps[1]).await {
+            return Ok(box_response(response));
+        }
+        return subtitle(&req, &caps[1], &caps[2]).await;
+    }
+
+    // Normal file (or pseudo streaming, still file path is normal). Check.
     if let Some(response) = http_file::not_modified(&req, &path).await {
         return Ok(box_response(response));
     }
@@ -174,30 +210,6 @@ async fn handle_request2(
     // Pseudo-streaming request.
     if path.ends_with(".mp4") && params.is_some() {
         return mp4pseudo(&req, &path, params.unwrap()).await;
-    }
-
-    // Subtitle format translation (subtitle.srt:into.vtt).
-    const SUBTITLE: &'static str = r#"^(.*\.(?:srt|vtt)):into\.(srt|vtt))$"#;
-    if let Some(caps) = regex!(SUBTITLE).captures(&path) {
-        return subtitle(&req, &caps[1], &caps[2]).await;
-    }
-
-    // HLS manifest.
-    const MANIFEST: &'static str = r#"^(.*\.mp4)/(.*\.m3u8)$"#;
-    if let Some(caps) = regex!(MANIFEST).captures(&path) {
-        return manifest(&req, &caps[1], &caps[2]).await;
-    }
-
-    // Media data.
-    const MEDIA_SEGMENT: &'static str = r#"^(.*\.mp4)/(.*\.(?:mp4|m4a))$"#;
-    if let Some(caps) = regex!(MEDIA_SEGMENT).captures(&path) {
-        return media_segment(&req, &caps[1], &caps[2]).await;
-    }
-
-    // Media info.
-    const MEDIA_INFO: &'static str = r#"^(.*\.mp4)/info"#;
-    if let Some(caps) = regex!(MEDIA_INFO).captures(&path) {
-        return media_info(&req, &caps[1]).await;
     }
 
     // A normal file.
@@ -208,16 +220,10 @@ async fn handle_request2(
 async fn mp4pseudo(req: &Request<()>, path: &str, params: Params) -> io::Result<Response> {
 
     // get tracks, then open mp4stream.
-    let tracks = match params.track_id.as_ref() {
-        Some(val) => {
-            let tracks: Vec<_> = val.split(',').filter_map(|t| t.parse::<u32>().ok()).collect();
-            if tracks.len() == 0 {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "bad track parameter"));
-            }
-            tracks
-        },
-        None => return Err(io::Error::new(io::ErrorKind::InvalidData, "need track parameter")),
-    };
+    let tracks: Vec<_> = params.track_id.split(',').filter_map(|t| t.parse::<u32>().ok()).collect();
+    if tracks.len() == 0 {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "bad track parameter"));
+    }
 
     let mp4stream = pseudo::Mp4Stream::open(path, tracks)?;
     Ok(box_response(http_file::serve_file(req, mp4stream).await))

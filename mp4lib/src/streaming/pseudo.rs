@@ -193,13 +193,8 @@ impl HttpFile for Mp4Stream {
     }
 
     /// Returns the HTTP ETag.
-    fn get_etag(&self) -> Option<&str> {
+    fn etag(&self) -> Option<&str> {
         Some(&self.etag)
-    }
-
-    /// Set the HTTP ETag.
-    fn set_etag(&mut self, tag: &str) {
-        self.etag = tag.to_string();
     }
 
     /// Get the limited range we're serving.

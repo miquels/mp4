@@ -186,7 +186,7 @@ pub fn track_to_segments(trak: &TrackBox, segment_duration: Option<u32>) -> io::
     let mut stss_iter = match table.sync_samples() {
         Some(stss) => Some(stss.iter()),
         None => {
-            println!("subtitles");
+            // println!("subtitles");
             if !handler.is_subtitle() {
                 return Err(ioerr!(InvalidData, "track {}: no SyncSampleBox"));
             }
@@ -194,10 +194,10 @@ pub fn track_to_segments(trak: &TrackBox, segment_duration: Option<u32>) -> io::
             None
         },
     };
-    println!("stss_iter is {:?}", stss_iter.is_some());
+    // println!("stss_iter is {:?}", stss_iter.is_some());
 
     let mut segments = Vec::new();
-    let mut cur_time = 0;
+    let mut cur_time: u64 = 0;
     let mut cur_seg_duration = 0u32;
     let mut cur_seg_size = 0u32;
     let mut cur_segment = Segment_::default();
@@ -263,7 +263,8 @@ pub fn track_to_segments(trak: &TrackBox, segment_duration: Option<u32>) -> io::
         }
         cur_seg_duration += sample_duration;
         cur_seg_size += sample_size;
-        cur_time += sample_duration;
+        // println!("X X X XXX cur_time {} duration: {}", cur_time, sample_duration);
+        cur_time += sample_duration as u64;
     }
 
     let segments = if handler.is_subtitle() {
@@ -287,7 +288,7 @@ pub fn track_to_segments_timed(trak: &TrackBox, timing_segments: &[Segment]) -> 
     let mut stts_iter = table.time_to_sample().iter();
     let mut ctss_iter = table.composition_time_to_sample().map(|ctts| ctts.iter());
 
-    let mut cur_time = 0;
+    let mut cur_time: u64 = 0;
     let mut seg_duration = 0;
     let mut segments = Vec::new();
     let mut cur_segment = Segment::default();
@@ -341,7 +342,7 @@ pub fn track_to_segments_timed(trak: &TrackBox, timing_segments: &[Segment]) -> 
             segment_end_time = next_segment_end_time();
         }
         seg_duration += sample_duration;
-        cur_time += sample_duration;
+        cur_time += sample_duration as u64;
     }
 
     Ok(segments)
