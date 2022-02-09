@@ -87,7 +87,6 @@ use std::fmt::Display;
 use std::fmt::Write;
 use std::fs;
 use std::io;
-use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -105,7 +104,7 @@ use crate::types::FourCC;
 use super::fragment::FragmentSource;
 use super::http_file::{HttpFile, MemFile, delegate_http_file};
 use super::lru_cache::LruCache;
-use super::segment::Segment;
+use super::segmenter::Segment;
 use super::subtitle::Format;
 
 const SUBTITLE_LANG: [&'static str; 5] = ["en", "nl", "de", "fr", "es"];
@@ -632,7 +631,7 @@ fn track_to_segments(mp4: &MP4, track_id: u32, duration: Option<u32>) -> io::Res
         .movie()
         .track_by_id(track_id)
         .ok_or_else(|| ioerr!(NotFound, "track not found"))?;
-    let segments = super::segment::track_to_segments(track, duration)?;
+    let segments = super::segmenter::track_to_segments(track, duration)?;
     let segments = Arc::new(segments);
     SEGMENTS.put(key, segments.clone());
     Ok(segments)
@@ -662,7 +661,7 @@ pub fn hls_track(mp4: &MP4, track_id: u32) -> io::Result<String> {
         let mut segments = track_to_segments(mp4, video_id, seg_duration)?;
         if track_id != video_id {
             let segs: &[Segment] = segments.as_ref();
-            segments = Arc::new(super::segment::track_to_segments_timed(trak, segs)?);
+            segments = Arc::new(super::segmenter::track_to_segments_timed(trak, segs)?);
         }
         segments
     } else {
@@ -816,14 +815,14 @@ impl MediaSegment {
     /// - `s/c.TRACK_ID.SEQUENCE.FROM_SAMPLE.TO_SAMPLE.vtt` => webvtt fragment
     /// - `e/EXTERNALFILE.EXT[:into.ext]` => external file next to `.mp4` (`.srt`, `.vtt`)
     ///
-    pub fn from_uri(mp4: &MP4, url_tail: &str) -> io::Result<MediaSegment> {
-        let (mime_type, content) = MediaSegment::from_uri_(mp4, url_tail)?;
+    pub fn from_uri(mp4: &MP4, url_tail: &str, range_end: Option<u64>) -> io::Result<MediaSegment> {
+        let (mime_type, content) = MediaSegment::from_uri_(mp4, url_tail, range_end)?;
         let file = &*mp4.data_ref.file;
-        let mem_file = MemFile::from_file(content, mime_type, file)?;
+        let mem_file = MemFile::from_file_shared(content, mime_type, file)?;
         Ok(MediaSegment(mem_file))
     }
 
-    fn from_uri_(mp4: &MP4, url_tail: &str) -> io::Result<(&'static str, Vec<u8>)> {
+    fn from_uri_(mp4: &MP4, url_tail: &str, range_end: Option<u64>) -> io::Result<(&'static str, Arc<Vec<u8>>)> {
         // initialization section.
         if let Ok((track_id, ext)) = scan_fmt!(url_tail, "init.{}.{}{e}", u32, String) {
             match ext.as_str() {
@@ -832,11 +831,11 @@ impl MediaSegment {
                     let mut buffer = MemBuffer::new();
                     init.write(&mut buffer)?;
                     let data = buffer.into_vec();
-                    return Ok(("video/mp4", data));
+                    return Ok(("video/mp4", Arc::new(data)));
                 },
                 "vtt" => {
                     let buffer = b"WEBVTT\n\n".to_vec();
-                    return Ok(("text/vtt", buffer));
+                    return Ok(("text/vtt", Arc::new(buffer)));
                 },
                 _ => return Err(ioerr!(InvalidData, "Bad request")),
             }
@@ -852,7 +851,8 @@ impl MediaSegment {
             let dirname = dirname(mp4.input_file.as_ref(), name)?;
             let path = join_path(dirname, name);
 
-            return super::subtitle::external(&path, format);
+            let (mime, data) = super::subtitle::external(&path, format)?;
+            return Ok((mime, Arc::new(data)));
         }
 
         let tups = match scan_fmt!(url_tail, "{[vas]}/c.{}.{}.{}-{}.", char, u32, u32, u32, u32) {
@@ -876,12 +876,9 @@ impl MediaSegment {
         let content = match typ {
             's' => {
                 //let ts = seq_id as f64 / 1000.0;
-                super::subtitle::fragment(&mp4, Format::Vtt, &fs, 0.0)?
+                Arc::new(super::subtitle::fragment(&mp4, Format::Vtt, &fs, 0.0)?)
             },
-            // XXX FIXME: caching of segments partially read.
-            // was depening on whether we've read them fully.
-            // better to just drop them if the sequence is higher.
-            _ => movie_fragment(&mp4, seq_id, fs, None)?.0,
+            _ => movie_fragment(&mp4, seq_id, fs, range_end)?,
         };
 
         Ok((mime, content))
@@ -899,89 +896,63 @@ struct FragmentKey {
     source: FragmentSource,
 }
 
+// Caching wrapper around fragment::movie_fragment. Mainly to
+// avoid doing work if the client is using range requests.
+//
+// If the request is for a partial range, we cache the data in
+// an LRU cache. If the request has no range, or the range
+// extends to te end of the fragment, we remove the fragment
+// from the cache (if it was cached).
 fn movie_fragment(
     mp4: &MP4,
     seq_id: u32,
     fs: FragmentSource,
-    range: Option<Range<u64>>,
-) -> io::Result<(Vec<u8>, u64)> {
+    range_end: Option<u64>,
+) -> io::Result<Arc<Vec<u8>>> {
     #[rustfmt::skip]
     static FRAGMENTS: Lazy<LruCache<FragmentKey, Arc<Vec<u8>>>> = {
         Lazy::new(|| LruCache::new(Duration::new(60, 0)))
     };
 
-    // Remap usize range to u64.
-    let range = if let Some(range) = range {
-        if range.end >= usize::MAX as u64 {
-            return Err(ioerr!(InvalidData, "requested fragment too large"));
+    // No filename means no key. Now this can never happen,
+    // but better safe than sorry.
+    let file = match mp4.input_file.as_ref() {
+        Some(f) => f.to_string(),
+        None => {
+            let frag = super::fragment::movie_fragment(&mp4, seq_id, &[fs])?;
+            let mut buffer = MemBuffer::new();
+            frag.to_bytes(&mut buffer)?;
+            return Ok(Arc::new(buffer.into_vec()));
         }
-        Some(Range {
-            start: range.start as usize,
-            end: range.end as usize,
-        })
-    } else {
-        None
     };
 
     // See if we have the data in the cache.
-    let file = mp4
-        .input_file
-        .as_ref()
-        .map(|s| s.to_owned())
-        .unwrap_or(String::new());
     let key = FragmentKey {
         file,
         source: fs.clone(),
     };
-    let mut cached = false;
-    let frag = mp4.input_file.as_ref().and_then(|_| FRAGMENTS.get(&key));
-    let data = if let Some(frag) = frag {
-        cached = true;
-        frag
-    } else {
-        // Not in the cache, so generate it.
-        let frag = super::fragment::movie_fragment(&mp4, seq_id, &[fs])?;
-        let mut buffer = MemBuffer::new();
-        frag.to_bytes(&mut buffer)?;
-        Arc::new(buffer.into_vec())
+    let (frag, cached) = match FRAGMENTS.get(&key) {
+        Some(frag) => (frag, true),
+        None => {
+            // Not in the cache, so generate it.
+            let frag = super::fragment::movie_fragment(&mp4, seq_id, &[fs])?;
+            let mut buffer = MemBuffer::new();
+            frag.to_bytes(&mut buffer)?;
+            (Arc::new(buffer.into_vec()), false)
+        }
     };
 
-    // remap no range to full range.
-    let mut range = range.unwrap_or(Range {
-        start: 0,
-        end: data.len(),
-    });
-
-    // check for invalid range.
-    if range.start >= range.end || range.start >= data.len() {
-        return Err(ioerr!(InvalidData, "416 invalid range"));
-    }
-
-    // we might be able to satisfy part of the range.
-    if range.end > data.len() {
-        range.end = data.len();
-    }
-    let size = data.len() as u64;
-
-    // reached the end, remove from cache.
-    if range.end == data.len() && cached {
-        // println!("removin from cache");
+    // cache management.
+    let partial = range_end.map(|r| r != 0 && r < frag.len() as u64).unwrap_or(false);
+    if cached && !partial {
         FRAGMENTS.remove(&key);
     }
-    if range.start != 0 || range.end < data.len() {
-        // partial data from a range.
-        let partial = data[range].to_owned();
-        if !cached && key.file.len() > 0 {
-            // cache it for later.
-            // println!("savin to cache");
-            FRAGMENTS.put(key, data);
-        }
-        Ok((partial, size))
-    } else {
-        // Try to unwrap the Arc, if noone else is using it we get it without cloning.
-        let data = Arc::try_unwrap(data).unwrap_or_else(|data| data.to_vec());
-        Ok((data, size))
+    if !cached && partial {
+        FRAGMENTS.put(key, frag.clone());
     }
+    FRAGMENTS.expire();
+
+    Ok(frag)
 }
 
 fn dirname(ref_path: Option<&String>, name: &str) -> io::Result<String> {

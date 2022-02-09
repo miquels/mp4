@@ -49,41 +49,51 @@ macro_rules! regex {
     }};
 }
 
+trait BoxResponseBody {
+    fn box_body(self) -> http::Response<BoxBody>;
+}
+
 #[cfg(feature = "axum-box-body")]
-mod box_body {
+mod box_response_body {
     use http_body::Body as HttpBody;
+    use super::BoxResponseBody;
     pub type BoxBody = axum::body::BoxBody;
 
     // The `axum::body::boxed` helper has an optimization where, if
     // a body is already boxed, it won't be boxed again. So if possible,
     // enable the "axum-box-body" feature and enjoy that optimization.
-    pub fn box_response<B>(resp: http::Response<B>) -> http::Response<BoxBody>
+    impl<B> BoxResponseBody for http::Response<B>
     where
         B: HttpBody<Data = bytes::Bytes, Error = std::io::Error> + Send + 'static,
     {
-        let (parts, body) = resp.into_parts();
-        let body = axum::body::boxed(body);
-        http::Response::from_parts(parts, body)
+        fn box_body(self) -> http::Response<BoxBody> {
+            let (parts, body) = self.into_parts();
+            let body = axum::body::boxed(body);
+            http::Response::from_parts(parts, body)
+        }
     }
 }
 
 #[cfg(not(feature = "axum-box-body"))]
-mod box_body {
+mod box_response_body {
     use http_body::Body as HttpBody;
+    use super::BoxResponseBody;
     pub type BoxBody = http_body::combinators::UnsyncBoxBody<bytes::Bytes, std::io::Error>;
 
     // This double-boxes, unfortunately.
-    pub fn box_response<B>(resp: http::Response<B>) -> http::Response<BoxBody>
+    impl<B> BoxResponseBody for http::Response<B>
     where
         B: HttpBody<Data = bytes::Bytes, Error = std::io::Error> + Send + 'static,
     {
-        let (parts, body) = resp.into_parts();
-        let body = body.boxed_unsync();
-        http::Response::from_parts(parts, body)
+        fn box_body(self) -> http::Response<BoxBody> {
+            let (parts, body) = self.into_parts();
+            let body = body.boxed_unsync();
+            http::Response::from_parts(parts, body)
+        }
     }
 }
 
-use box_body::*;
+use box_response_body::*;
 
 /// The type of path used by the handler.
 #[derive(Clone, Copy)]
@@ -133,8 +143,8 @@ pub async fn handle_hls(
     };
     let (path, extra) = (&caps[1], &caps[2]);
 
-    if let Some(response) = not_modified::<_, MemFile>(&req, path).await {
-        return Ok(Some(box_response(response)));
+    if let Some(response) = not_modified(&req, path).await {
+        return Ok(Some(response));
     }
 
     // HLS manifest.
@@ -143,26 +153,36 @@ pub async fn handle_hls(
             let mp4 = super::lru_cache::open_mp4(path, false)?;
             hls::HlsManifest::from_uri(&*mp4, extra, filter_subs)
         })?;
-        return Ok(Some(box_response(serve_file(req, data.0).await)));
+        return Ok(Some(serve_file(req, data.0).await.box_body()));
     }
 
     // Media data.
-    if extra.ends_with(".mp4") || extra.ends_with(".m4a") {
+    if extra.ends_with(".mp4") || extra.ends_with(".m4a") || extra.ends_with(".vtt") {
         let data = task::block_in_place(|| {
             let mp4 = super::lru_cache::open_mp4(path, false)?;
-            hls::MediaSegment::from_uri(&*mp4, extra)
+            hls::MediaSegment::from_uri(&*mp4, extra, range_end(req))
         })?;
-        return Ok(Some(box_response(serve_file(req, data.0).await)));
+        return Ok(Some(serve_file(req, data.0).await.box_body()));
     }
 
     Ok(None)
+}
+
+fn range_end(req: &Request<()>) -> Option<u64> {
+    let range = req.headers().typed_get::<HttpRange>()?.iter().next()?;
+    use std::ops::Bound::*;
+    match range.1 {
+        Included(n) => Some(n + 1),
+        Excluded(n) => Some(n),
+        Unbounded => Some(0),
+    }
 }
 
 /// Handle `pseudostreaming` `URLs`.
 ///
 /// This handler handles three types of URLs:
 ///
-/// - `/...../movie.mp4/info`  
+/// - `/...../movie.mp4/info.json`  
 ///   return movie and track information in `JSON` format
 ///
 /// - `/...../movie.srt:into.vtt`  
@@ -181,29 +201,35 @@ pub async fn handle_pseudo(req: &Request<()>, path: FsPath<'_>) -> io::Result<Op
     // External subtitle format translation (subtitle.srt:into.vtt).
     const SUBTITLE: &'static str = r#"^(.*\.(?:srt|vtt)):into\.(srt|vtt)$"#;
     if let Some(caps) = regex!(SUBTITLE).captures(&path) {
-        if let Some(response) = not_modified::<_, MemFile>(&req, &caps[1]).await {
-            return Ok(Some(box_response(response)));
+        let (path, extra) = (&caps[1], &caps[2]);
+        if let Some(response) = not_modified(&req, path).await {
+            return Ok(Some(response));
         }
         let file = task::block_in_place(|| fs::File::open(&path))?;
-        let (mime, body) = task::block_in_place(|| super::subtitle::external(&path, &caps[2]))?;
+        let (mime, body) = task::block_in_place(|| super::subtitle::external(path, extra))?;
         let data = http_file::MemFile::from_file(body, mime, &file)?;
-        return Ok(Some(box_response(serve_file(req, data).await)));
+        return Ok(Some(serve_file(req, data).await.box_body()));
     }
 
     // Info.
-    const INFO: &'static str = r#"^(.*\.mp4)/info$"#;
+    const INFO: &'static str = r#"^(.*\.mp4)/info.json$"#;
     if let Some(caps) = regex!(INFO).captures(&path) {
-        if let Some(response) = not_modified::<_, MemFile>(&req, &caps[1]).await {
-            return Ok(Some(box_response(response)));
+        let path = &caps[1];
+        if let Some(response) = not_modified(&req, path).await {
+            return Ok(Some(response));
         }
-        let file = task::block_in_place(|| fs::File::open(&path))?;
+        let file = task::block_in_place(|| fs::File::open(&caps[1]))?;
         let mp4 = task::block_in_place(|| super::lru_cache::open_mp4(path, false))?;
 
         let info = crate::track::track_info(&mp4);
         let body = serde_json::to_string_pretty(&info).unwrap();
 
         let data = http_file::MemFile::from_file(body.into_bytes(), "text/json", &file)?;
-        return Ok(Some(box_response(serve_file(req, data).await)));
+        return Ok(Some(serve_file(req, data).await.box_body()));
+    }
+
+    if !path.ends_with(".mp4") {
+        return Ok(None);
     }
 
     // Pseudo streaming.
@@ -227,15 +253,15 @@ pub async fn handle_pseudo(req: &Request<()>, path: FsPath<'_>) -> io::Result<Op
         .filter_map(|t| t.parse::<u32>().ok())
         .collect();
     if tracks.len() == 0 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "bad track parameter"));
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "400 bad track parameter"));
     }
 
-    if let Some(response) = not_modified::<_, MemFile>(&req, &path).await {
-        return Ok(Some(box_response(response)));
+    if let Some(response) = not_modified(&req, &path).await {
+        return Ok(Some(response));
     }
 
     let mp4stream = pseudo::Mp4Stream::open(path, tracks)?;
-    Ok(Some(box_response(serve_file(req, mp4stream).await)))
+    Ok(Some(serve_file(req, mp4stream).await.box_body()))
 }
 
 /// Handle a standard file.
@@ -264,9 +290,9 @@ pub async fn handle_file(req: &Request<()>, path: FsPath<'_>, index: Option<&str
                 let response = http::response::Builder::new()
                     .header("Location", &path)
                     .status(StatusCode::TEMPORARY_REDIRECT)
-                    .body(Body::<MemFile>::empty())
+                    .body::<Body>(Body::empty())
                     .unwrap();
-                return Ok(box_response(response));
+                return Ok(response.box_body());
             }
 
             // Try to open the index.
@@ -275,7 +301,7 @@ pub async fn handle_file(req: &Request<()>, path: FsPath<'_>, index: Option<&str
         },
     };
 
-    Ok(box_response(serve_file(req, file).await))
+    Ok(serve_file(req, file).await.box_body())
 }
 
 /// Early check to see if we can send a `HTTP` `Not Modified` response.
@@ -289,10 +315,9 @@ pub async fn handle_file(req: &Request<()>, path: FsPath<'_>, index: Option<&str
 /// This function calculates and checks those values and returns a
 /// complete `Not Modified` response if appropriate.
 ///
-pub async fn not_modified<R, F>(req: &http::Request<R>, file_path: &str) -> Option<http::Response<Body<F>>>
+pub async fn not_modified<R>(req: &http::Request<R>, file_path: &str) -> Option<http::Response<BoxBody>>
 where
     http::Request<R>: Send + 'static,
-    F: HttpFile + Unpin + Send + 'static,
 {
     // If we have a If-None-Match header with an ETag in it,
     // then use the ETag parts indicated by the first hex number.
@@ -325,7 +350,7 @@ where
 
     // And check.
     let (response, not_modified) = check_modified(req, &file);
-    not_modified.then(move || response.body(Body::empty()).unwrap())
+    not_modified.then(move || response.body::<Body>(Body::empty()).unwrap().box_body())
 }
 
 /// Implementation of `HttpFile` for a plain filesystem file.
@@ -348,7 +373,18 @@ impl FsFile {
     }
 
     fn open2(path: &str, etag_parts: u32) -> io::Result<FsFile> {
-        let file = fs::File::open(path)?;
+        let file = match fs::File::open(path) {
+            Ok(file) => file,
+            Err(err) => {
+                // remap EISDIR to ENOENT so that requests for
+                // .../movie.mp4/typo correctly return "404 not found"
+                // instead of "500 internal server error".
+                match err.raw_os_error() {
+                    Some(libc::EISDIR) => return Err(io::Error::from_raw_os_error(libc::ENOENT)),
+                    _ => return Err(err),
+                }
+            }
+        };
         let meta = file.metadata()?;
         let modified = meta.modified().ok();
         let size = meta.len();
@@ -526,7 +562,7 @@ where
 
 /// Body that implements `Stream<Item=Bytes>`, as wel as `http_body::Body`.
 // pub struct Body<F: HttpFile + Unpin + Send + 'static> {
-pub struct Body<F> {
+pub struct Body<F=MemFile> {
     file: Option<F>,
     todo: u64,
     in_place: bool,
@@ -649,7 +685,7 @@ where
 fn decode_path(path: &str) -> io::Result<String> {
     match percent_decode_str(path).decode_utf8() {
         Ok(path) => Ok(path.to_string()),
-        Err(_) => return Err(IoError::new(ErrorKind::InvalidData, "Bad Request (path not utf-8)")),
+        Err(_) => return Err(IoError::new(ErrorKind::InvalidData, "400 Bad Request (path not utf-8)")),
     }
 }
 
@@ -660,7 +696,7 @@ fn join_paths(dir: &str, path: &str) -> io::Result<String> {
             "." => continue,
             ".." => {
                 if elems.is_empty() {
-                    return Err(IoError::new(ErrorKind::InvalidData, "Bad Request (invalid path)"));
+                    return Err(IoError::new(ErrorKind::InvalidData, "400 Bad Request (invalid path)"));
                 }
                 elems.pop();
             },

@@ -12,7 +12,7 @@ pub mod fragment;
 pub mod hls;
 pub mod lru_cache;
 pub mod pseudo;
-pub mod segment;
+pub mod segmenter;
 pub mod subtitle;
 
 #[cfg_attr(docsrs, doc(cfg(feature = "http-handler")))]

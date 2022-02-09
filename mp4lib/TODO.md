@@ -14,6 +14,10 @@ In no particular order.
   probably the current split with `streaming` in a separate module
   is good enough.
 
+- restructure the 'streaming' module. For example, the MediaSegment
+  stuff does not belong in hls.rs, it belongs in perhaps cmaf.rs,
+  or fragment.rs.
+
 - investigate how hard it is to add MKV support (for reading at least)
 
 - investigate interfacing with `gstreamer`. it would be very cool to be able

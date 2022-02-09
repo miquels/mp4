@@ -9,6 +9,7 @@ use std::fmt::Write;
 use std::io;
 use std::ops::{Bound, Range, RangeBounds};
 use std::os::unix::fs::MetadataExt;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use once_cell::sync::Lazy;
@@ -231,7 +232,7 @@ macro_rules! impl_http_file {
                 };
 
                 if self.start >= self.size {
-                    return Err(io::Error::new(io::ErrorKind::InvalidInput, "range out of bounds"));
+                    return Err(io::Error::new(io::ErrorKind::InvalidInput, "400 range out of bounds"));
                 }
                 if self.end > self.size {
                     self.end = self.size;
@@ -257,6 +258,22 @@ macro_rules! impl_http_file {
 }
 pub(crate) use impl_http_file;
 
+pub(crate) enum MemData {
+    Vec(Vec<u8>),
+    Arc(Arc<Vec<u8>>),
+}
+
+impl std::ops::Deref for MemData {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            &MemData::Vec(ref v) => v.deref(),
+            &MemData::Arc(ref a) => a.deref(),
+        }
+    }
+}
+
 /// Implementation of `HttpFile` for an in-memory file.
 pub struct MemFile {
     start: u64,
@@ -266,7 +283,7 @@ pub struct MemFile {
     modified: Option<SystemTime>,
     etag: Option<String>,
     mime_type: String,
-    pub(crate) content: Vec<u8>,
+    pub(crate) content: MemData,
 }
 
 impl MemFile {
@@ -280,13 +297,30 @@ impl MemFile {
             modified: None,
             etag: None,
             mime_type: mime_type.to_string(),
-            content,
+            content: MemData::Vec(content),
         }
     }
 
     /// Referring to an already opened file for modified time / etag.
     pub fn from_file<'a>(
         content: Vec<u8>,
+        mime_type: impl Into<String>,
+        file: &fs::File,
+    ) -> io::Result<MemFile> {
+        MemFile::do_from_file(MemData::Vec(content), mime_type, file)
+    }
+
+    /// Referring to an already opened file for modified time / etag.
+    pub fn from_file_shared<'a>(
+        content: Arc<Vec<u8>>,
+        mime_type: impl Into<String>,
+        file: &fs::File,
+    ) -> io::Result<MemFile> {
+        MemFile::do_from_file(MemData::Arc(content), mime_type, file)
+    }
+
+    fn do_from_file<'a>(
+        content: MemData,
         mime_type: impl Into<String>,
         file: &fs::File,
     ) -> io::Result<MemFile> {
