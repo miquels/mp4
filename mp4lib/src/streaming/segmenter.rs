@@ -56,10 +56,13 @@ fn squish_subtitle(s: Vec<Segment_>) -> Vec<Segment> {
 
         // Empty segment?
         if s[idx].size <= 2 && idx < s.len() - 1 {
-            if st.duration > 10.0 {
+            if st.duration >= 3.0 {
                 // Long. Give some extra lead-time to the next sample.
-                delta_t = 5.0;
-                sb.duration -= 5.0;
+                delta_t = 2.0;
+                sb.duration -= 2.0;
+                // 0-0 means "no data".
+                sb.start_sample = 0;
+                sb.end_sample = 0;
             } else {
                 // Short. Merge with the next sample.
                 let sn = &s[idx + 1];
@@ -71,7 +74,7 @@ fn squish_subtitle(s: Vec<Segment_>) -> Vec<Segment> {
 
         // Segment with content?
         if s[idx].size > 2 && idx < s.len() - 1 {
-            while idx < s.len() - 1 {
+            while idx < s.len() - 1 && sb.duration < 10.0 {
                 let sn = &s[idx + 1];
 
                 // always merge contiguous content.
@@ -83,12 +86,12 @@ fn squish_subtitle(s: Vec<Segment_>) -> Vec<Segment> {
                 }
 
                 // empty.
-                if sn.duration > 8.0 {
+                if sn.duration > 5.0 && sn.duration < 10.0 {
                     // merge, but give some extra lead-time to the next sample.
                     // shorter durations will be merged in the next iteration.
                     sb.end_sample = sn.end_sample;
-                    sb.duration += sn.duration - 5.0;
-                    delta_t = 5.0;
+                    sb.duration += sn.duration - 2.0;
+                    delta_t = 2.0;
                     idx += 1;
                 }
                 break;

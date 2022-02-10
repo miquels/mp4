@@ -163,6 +163,19 @@ pub fn subtitle_extract(
 /// Outputs raw data. If this is to be sent in a CMAF container, it
 /// still needs to be wrapped by a moof + mdat.
 pub fn fragment(mp4: &MP4, format: Format, frag: &FragmentSource, tm_off: f64) -> io::Result<Vec<u8>> {
+    let mut buffer = Vec::new();
+
+    // shortcut for empty fragments.
+    if frag.from_sample == 0 && frag.to_sample == 0 {
+        if format == Format::Vtt {
+            buffer.extend_from_slice(b"WEBVTT\n\n");
+            return Ok(buffer);
+        }
+        if format == Format::Srt {
+            return Ok(buffer);
+        }
+    }
+
     let track = mp4
         .movie()
         .track_by_id(frag.src_track_id)
@@ -175,7 +188,6 @@ pub fn fragment(mp4: &MP4, format: Format, frag: &FragmentSource, tm_off: f64) -
         &b"\r\n"[..]
     };
 
-    let mut buffer = Vec::new();
     let mut seq = frag.from_sample;
     iter.seek(frag.from_sample)?;
 
