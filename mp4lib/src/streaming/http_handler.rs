@@ -375,15 +375,7 @@ impl FsFile {
     fn open2(path: &str, etag_parts: u32) -> io::Result<FsFile> {
         let file = match fs::File::open(path) {
             Ok(file) => file,
-            Err(err) => {
-                // remap EISDIR to ENOENT so that requests for
-                // .../movie.mp4/typo correctly return "404 not found"
-                // instead of "500 internal server error".
-                match err.raw_os_error() {
-                    Some(libc::EISDIR) => return Err(io::Error::from_raw_os_error(libc::ENOENT)),
-                    _ => return Err(err),
-                }
-            }
+            Err(err) => return Err(map_io_error(err)),
         };
         let meta = file.metadata()?;
         let modified = meta.modified().ok();
@@ -709,4 +701,15 @@ fn join_paths(dir: &str, path: &str) -> io::Result<String> {
     }
     path.push_str(&elems.join("/"));
     Ok(path)
+}
+
+// remap EISDIR to ENOENT so that requests for
+// .../movie.mp4/typo correctly return "404 not found"
+// instead of "500 internal server error".
+fn map_io_error(err: io::Error) -> io::Error {
+    match err.raw_os_error() {
+        Some(libc::ENOTDIR) => io::Error::from_raw_os_error(libc::ENOENT),
+        Some(libc::EISDIR) => io::Error::from_raw_os_error(libc::ENOENT),
+        _ => return err,
+    }
 }

@@ -262,7 +262,7 @@ fn fragment(opts: FragmentOpts) -> Result<()> {
         .movie()
         .track_by_id(opts.track)
         .ok_or(anyhow!("track {} not found", opts.track))?;
-    let segments = mp4lib::streaming::segment::track_to_segments(track, opts.duration)?;
+    let segments = mp4lib::streaming::segmenter::track_to_segments(track, opts.duration)?;
     tracks.push(opts.track);
 
     // See if we wanted an extra track.
@@ -273,7 +273,7 @@ fn fragment(opts: FragmentOpts) -> Result<()> {
             .movie()
             .track_by_id(t2)
             .ok_or(anyhow!("track {} not found", t2))?;
-        segments2 = mp4lib::streaming::segment::track_to_segments_timed(track, &segments)?;
+        segments2 = mp4lib::streaming::segmenter::track_to_segments_timed(track, &segments)?;
         track2 = t2;
         tracks.push(track2);
     }
@@ -556,7 +556,7 @@ fn debug(opts: DebugOpts) -> Result<()> {
             },
             None => return Err(anyhow!("debug: fragment: need --track")),
         };
-        let segments = mp4lib::streaming::segment::track_to_segments(track, None)?;
+        let segments = mp4lib::streaming::segmenter::track_to_segments(track, None)?;
         let longest = segments.iter().fold(0_f64, |max, t| {
             if t.duration.partial_cmp(&max) == Some(std::cmp::Ordering::Greater) {
                 t.duration
