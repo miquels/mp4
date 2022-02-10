@@ -3,9 +3,10 @@ use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 
 use anyhow::Result;
 use axum::{AddExtensionLayer, Router, body, response::Response, routing::get};
-use axum::extract::{Extension, Path};
+use axum::extract::{ConnectInfo, Extension, Path};
 use headers::{HeaderMapExt, UserAgent};
 use http::{Method, Request, StatusCode};
+use http_body::Body as _;
 use structopt::StructOpt;
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
@@ -91,10 +92,11 @@ async fn serve(opts: ServeOpts) -> Result<()> {
         let addrv6 = IpAddr::V6(Ipv6Addr::from(0u128));
         let sockaddr_v4 = SocketAddr::new(addrv4, opts.port);
         let sockaddr_v6 = SocketAddr::new(addrv6, opts.port);
-        let app2 = app.clone();
+        let svc_v4 = app.clone().into_make_service_with_connect_info::<SocketAddr, _>();
+        let svc_v6 = app.into_make_service_with_connect_info::<SocketAddr, _>();
         let (r1, r2) = tokio::join!(
-            axum::Server::bind(&sockaddr_v4).serve(app.into_make_service()),
-            axum::Server::bind(&sockaddr_v6).serve(app2.into_make_service()),
+            axum::Server::bind(&sockaddr_v4).serve(svc_v4),
+            axum::Server::bind(&sockaddr_v6).serve(svc_v6),
         );
         r1.expect("IPv4 server");
         r2.expect("IPv6 server");
@@ -104,7 +106,8 @@ async fn serve(opts: ServeOpts) -> Result<()> {
     {
         let addr = IpAddr::V6(Ipv6Addr::from(0u128));
         let sockaddr = SocketAddr::new(addr, opts.port);
-        axum::Server::bind(&sockaddr).serve(app.into_make_service()).await.unwrap();
+        let svc = app.into_make_service_with_connect_info::<SocketAddr, _>();
+        axum::Server::bind(&sockaddr).serve(svc).await.unwrap();
     }
 
     Ok(())
@@ -113,17 +116,40 @@ async fn serve(opts: ServeOpts) -> Result<()> {
 async fn handle_request(
     Path(path): Path<String>,
     Extension(dir): Extension<String>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     req: Request<body::Body>,
 ) -> Result<Response, StatusCode> {
     let (parts, _) = req.into_parts();
     let req = Request::from_parts(parts, ());
-    handle_request2(path, dir, req).await.map_err(|e| translate_io_error(e))
+    let start = std::time::Instant::now();
+
+    let res = handle_request2(path, dir, &req).await.map_err(|e| translate_io_error(e));
+
+    let now = time::OffsetDateTime::now_local().unwrap_or(time::OffsetDateTime::now_utc());
+    let (size, status) = match res.as_ref() {
+        Ok(resp) => (resp.body().size_hint().exact().unwrap_or(0), resp.status()),
+        Err(sc) => (0, *sc),
+    };
+    let pnq = req.uri().path_and_query().map(|p| p.to_string()).unwrap_or(String::from("-"));
+    println!(
+        "{} {} \"{} {} {:?}\" {} {} {:?}",
+        now,
+        addr,
+        req.method(),
+        pnq,
+        req.version(),
+        status.as_u16(),
+        size,
+        start.elapsed(),
+    );
+
+    res
 }
 
 async fn handle_request2(
     path: String,
     dir: String,
-    req: Request<()>
+    req: &Request<()>
 ) -> io::Result<Response> {
 
     let path = FsPath::Combine((&dir, &path));
@@ -158,7 +184,14 @@ fn translate_io_error(err: io::Error) -> StatusCode {
         io::ErrorKind::NotFound => SC::NOT_FOUND,
         io::ErrorKind::PermissionDenied => SC::FORBIDDEN,
         io::ErrorKind::TimedOut => SC::REQUEST_TIMEOUT,
-        io::ErrorKind::InvalidData => SC::BAD_REQUEST,
-        _ => SC::INTERNAL_SERVER_ERROR,
+        _ => {
+            let e = err.to_string();
+            let field = e.split_whitespace().next().unwrap();
+            if let Ok(status) = field.parse::<u16>() {
+                SC::from_u16(status).unwrap_or(SC::INTERNAL_SERVER_ERROR)
+            } else {
+                SC::INTERNAL_SERVER_ERROR
+            }
+        },
     }
 }
