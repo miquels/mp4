@@ -81,9 +81,9 @@ fn cue(
     );
 
     for line in subt.text.split('\n') {
-        //if format == Format::Vtt {
-        //    cue.push_str("- ");
-        //}
+        if line == "" {
+            continue;
+        }
         for c in line.chars() {
             match c {
                 '&' => cue.push_str("&amp;"),
@@ -94,6 +94,8 @@ fn cue(
         }
         cue.push_str(eol);
     }
+    cue.push_str(eol);
+
     cue
 }
 
@@ -128,7 +130,6 @@ pub fn subtitle_extract(
         }
         write!(output, "\n")?;
     }
-    let eol = if format == Format::Vtt { "\n" } else { "\r\n" };
 
     let mut buf = Vec::new();
     buf.resize(256, 0);
@@ -151,7 +152,7 @@ pub fn subtitle_extract(
             continue;
         }
         let cue = cue(format, timescale, Some(seq), sample, subt, 0f64);
-        write!(output, "{}{}", cue, eol)?;
+        output.write(cue.as_bytes())?;
         seq += 1;
     }
 
@@ -182,11 +183,6 @@ pub fn fragment(mp4: &MP4, format: Format, frag: &FragmentSource, tm_off: f64) -
         .ok_or_else(|| ioerr!(NotFound, "track not found"))?;
     let mut iter = track.sample_info_iter();
     let timescale = iter.timescale();
-    let eol = if format == Format::Vtt {
-        &b"\n"[..]
-    } else {
-        &b"\r\n"[..]
-    };
 
     let mut seq = frag.from_sample;
     iter.seek(frag.from_sample)?;
@@ -213,7 +209,6 @@ pub fn fragment(mp4: &MP4, format: Format, frag: &FragmentSource, tm_off: f64) -
                         if subt.text.len() > 0 {
                             let cue = cue(format, timescale, None, sample, subt, tm_off);
                             buffer.extend_from_slice(cue.as_bytes());
-                            buffer.extend_from_slice(eol);
                         }
                     }
                 },
