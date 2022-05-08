@@ -794,7 +794,7 @@ impl HlsManifest {
         };
 
         let file = &*mp4.data_ref.file;
-        let mem_file = MemFile::from_file(data.into_bytes(), "application/vnd.apple.mpegurl", file)?;
+        let mem_file = MemFile::from_file(data.into_bytes(), "application/vnd.apple.mpegurl; charset=utf-8", file)?;
         Ok(HlsManifest(mem_file))
     }
 
@@ -839,7 +839,7 @@ impl MediaSegment {
                 },
                 "vtt" => {
                     let buffer = b"WEBVTT\n\n".to_vec();
-                    return Ok(("text/vtt", Arc::new(buffer)));
+                    return Ok(("text/vtt; charset=utf-8", Arc::new(buffer)));
                 },
                 _ => return Err(ioerr!(InvalidData, "Bad request")),
             }
@@ -868,7 +868,7 @@ impl MediaSegment {
         let mime = match typ {
             'v' => "video/mp4",
             'a' => "audio/mp4",
-            's' => "text/vtt",
+            's' => "text/vtt; charset=utf-8",
             _ => unreachable!(),
         };
         let fs = FragmentSource {

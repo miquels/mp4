@@ -35,7 +35,7 @@ use bytes::Bytes;
 use futures_core::Stream;
 use headers::{AcceptRanges, ContentLength, ContentRange, Date, ETag, HeaderMapExt};
 use headers::{IfModifiedSince, IfNoneMatch, IfRange, LastModified, Range as HttpRange};
-use http::{Method, Request, Response, StatusCode};
+use http::{header, Method, Request, Response, StatusCode};
 use percent_encoding::percent_decode_str;
 use tokio::task;
 
@@ -485,6 +485,7 @@ where
         },
     }
     resp_headers.typed_insert(ContentLength(file.range_size()));
+    resp_headers.insert(header::CONTENT_TYPE, file.mime_type().parse().unwrap());
 
     // just HEAD?
     if *req.method() == Method::HEAD {
