@@ -7,6 +7,7 @@ use std::convert::TryInto;
 use std::fmt::{Debug, Display, Write};
 use std::io;
 use std::mem;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime};
 
 use chrono::{
@@ -17,6 +18,9 @@ use serde::Serialize;
 
 use crate::mp4box::FullBox;
 use crate::serialize::{FromBytes, ReadBytes, ToBytes, WriteBytes};
+
+#[doc(hidden)]
+pub static LIMIT_ARRAY_DEBUG: AtomicUsize = AtomicUsize::new(20);
 
 // Convenience macro to implement FromBytes/ToBytes for newtypes.
 macro_rules! def_from_to_bytes_newtype {
@@ -798,7 +802,8 @@ where
             if self.vec.len() > 4 {
                 writeln!(f, "\n// Array length: {}", self.vec.len())?;
             }
-            if self.vec.len() > 20 {
+            let maxlen = LIMIT_ARRAY_DEBUG.load(Ordering::Acquire);
+            if maxlen > 0 && self.vec.len() > maxlen {
                 writeln!(f, "// (only showing first, second, and last entry)")?;
                 let v = vec![&self.vec[0], &self.vec[1], &self.vec[self.vec.len() - 1]];
                 return f.debug_list().entries(v.into_iter()).finish();

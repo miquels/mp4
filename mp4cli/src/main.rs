@@ -150,6 +150,10 @@ pub struct BoxesOpts {
     /// Select a track.
     pub track: Option<u32>,
 
+    #[structopt(long)]
+    /// Do not truncate arrays > 20 entries.
+    pub nolimit: bool,
+
     /// Input filename.
     pub input: String,
 }
@@ -470,6 +474,11 @@ fn dump(opts: DumpOpts) -> Result<()> {
 fn boxes(opts: BoxesOpts) -> Result<()> {
     let mut reader = Mp4File::open(&opts.input, true)?;
     let mut mp4 = MP4::read(&mut reader)?;
+
+    if opts.nolimit {
+        use std::sync::atomic::Ordering;
+        mp4lib::types::LIMIT_ARRAY_DEBUG.store(0, Ordering::SeqCst);
+    }
 
     if let Some(opt_track) = opts.track {
         // filter out tracks we don't want.
