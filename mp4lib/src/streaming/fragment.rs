@@ -167,7 +167,7 @@ fn fmp4_track(movie: &MovieBox, trak: &TrackBox, track_id: u32) -> TrackBox {
         b"sbtl" | b"subt" => {
             media_boxes.push(MP4Box::HandlerBox(HandlerBox {
                 handler_type: FourCC::new("subt"),
-                name: ZString("SubtitleHandler".into()),
+                name: ZString::from("SubtitleHandler"),
             }));
         },
         _ => {

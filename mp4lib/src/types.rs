@@ -357,16 +357,11 @@ impl Default for IsoLanguageCode {
 
 /// Zero terminated ASCII string.
 #[derive(Clone, Default, Serialize)]
-pub struct ZString(pub String);
+pub struct ZString(String);
 
 impl ZString {
-    fn as_str(&self) -> &str {
-        let len = if self.0.ends_with("\0") {
-            self.0.len() - 1
-        } else {
-            self.0.len()
-        };
-        &(self.0)[..len]
+    pub fn as_str(&self) -> &str {
+        self.0.strip_suffix("\0").unwrap_or(self.0.as_str())
     }
 }
 
@@ -377,23 +372,27 @@ impl std::ops::Deref for ZString {
     }
 }
 
+impl From<&str> for ZString {
+    fn from(s: &str) -> Self {
+        let mut z = s.to_string();
+        z.push(0 as char);
+        ZString(z)
+    }
+}
+
 impl FromBytes for ZString {
     fn from_bytes<R: ReadBytes>(bytes: &mut R) -> io::Result<Self> {
         let left = bytes.left();
         let data = bytes.read(left)?;
-        let mut s = String::new();
-        let mut idx = 0;
-        let maxlen = data.len();
-        while idx < maxlen {
-            let b = data[idx];
-            s.push(b as char);
-            idx += 1;
-            if b == 0 {
-                break;
-            }
+
+        if let Ok(s) = std::str::from_utf8(data) {
+            return Ok(ZString(s.to_string()));
         }
+
+        let s = data.iter().map(|c| *c as char).collect();
         Ok(ZString(s))
     }
+
     fn min_size() -> usize {
         0
     }
@@ -401,15 +400,7 @@ impl FromBytes for ZString {
 
 impl ToBytes for ZString {
     fn to_bytes<W: WriteBytes>(&self, bytes: &mut W) -> io::Result<()> {
-        let mut v = Vec::new();
-        for c in self.0.chars() {
-            if (c as u32) < 256 {
-                v.push(c as u8);
-            } else {
-                v.push(0xff);
-            }
-        }
-        bytes.write(&v)
+        bytes.write(self.0.as_bytes())
     }
 }
 

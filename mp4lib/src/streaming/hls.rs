@@ -129,7 +129,7 @@ struct ExtXMedia {
     group_id: String,
     name: String,
     channels: Option<u16>,
-    language: Option<&'static str>,
+    language: Option<String>,
     auto_select: bool,
     default: bool,
     forced: bool,
@@ -199,7 +199,7 @@ fn uniqify_audio(media: &mut Vec<ExtXMedia>) {
 fn uniqify_subtitles(media: &mut Vec<ExtXMedia>, remove_forced: bool) {
     let mut hm = HashMap::new();
     for idx in 0..media.len() {
-        let mut key = media[idx].language.unwrap_or("").to_string();
+        let mut key = media[idx].language.as_ref().map(|s| s.as_str()).unwrap_or("").to_string();
         if !remove_forced && media[idx].forced {
             key += ".FORCED";
         }
@@ -257,7 +257,7 @@ impl Display for ExtXStreamInf {
     }
 }
 
-fn lang(lang: &str) -> (Option<&'static str>, &'static str) {
+fn lang<'a>(lang: &'a str) -> (Option<&'a str>, &'a str) {
     // shortcut for known language tags, with localized name.
     match lang {
         "en" | "eng" => return (Some("en"), "English"),
@@ -266,6 +266,8 @@ fn lang(lang: &str) -> (Option<&'static str>, &'static str) {
         "de" | "ger" => return (Some("de"), "German"),
         "es" | "spa" => return (Some("es"), "Español"),
         "za" | "afr" | "zaf" => return (Some("za"), "Afrikaans"),
+        "zh" | "chi" | "cn" => return (Some("zh"), "Chinese"),
+        "hi" | "hin" => return (Some("hi"), "Hindi"),
         "und" => return (None, "Undetermined"),
         _ => {},
     }
@@ -276,13 +278,13 @@ fn lang(lang: &str) -> (Option<&'static str>, &'static str) {
     let language = match lang.len() {
         2 => Language::from_639_1(lang),
         3 => Language::from_639_3(lang),
-        _ => return (None, "Undetermined"),
+        _ => return (None, lang),
     };
 
     // Did we succeed?
     let language = match language {
         Some(l) => l,
-        None => return (None, "Undetermined"),
+        None => return (Some(lang), lang),
     };
 
     // use 2-letter code if it exists, otherwise 3-letter code.
@@ -421,7 +423,8 @@ pub fn hls_master(mp4: &MP4, external_subs: bool, filter_subs: bool) -> String {
             audio_codecs.insert(info.codec_id.clone(), avg_bw);
         }
 
-        let (lang, name) = lang(&track.language.to_string());
+        let track_lang = track.language.to_string();
+        let (lang, name) = lang(&track_lang);
         let mut name = name.to_string();
         if let Some(ref handler_name) = track.name {
             name += &format!(" - {}", handler_name);
@@ -433,7 +436,7 @@ pub fn hls_master(mp4: &MP4, external_subs: bool, filter_subs: bool) -> String {
         let audio = ExtXMedia {
             type_: "AUDIO",
             group_id: format!("audio/{}", info.codec_id),
-            language: lang,
+            language: lang.map(|s| s.to_string()),
             channels: Some(info.channel_count + info.lfe_channel as u16),
             name,
             auto_select: !commentary,
@@ -474,7 +477,7 @@ pub fn hls_master(mp4: &MP4, external_subs: bool, filter_subs: bool) -> String {
             let subm = ExtXMedia {
                 type_: "SUBTITLES",
                 group_id: "subs".to_string(),
-                language: lang,
+                language: lang.map(|s| s.to_string()),
                 channels: None,
                 name: name.to_string(),
                 auto_select: true,
@@ -501,7 +504,8 @@ pub fn hls_master(mp4: &MP4, external_subs: bool, filter_subs: bool) -> String {
         }
 
         // Track language.
-        let (lang, name) = lang(&track.language.to_string());
+        let track_lang = track.language.to_string();
+        let (lang, name) = lang(&track_lang);
         if !want_language(lang, &SUBTITLE_LANG) {
             continue;
         }
@@ -513,17 +517,17 @@ pub fn hls_master(mp4: &MP4, external_subs: bool, filter_subs: bool) -> String {
         let mut forced = false;
         let mut sdh = false;
         if let Some(ref track_name) = track.name {
-            let lname = track_name.0.to_lowercase();
+            let lname = track_name.to_lowercase();
             if lname.contains("forced") {
                 forced = true;
                 name = format!("{} (forced)", name);
             }
-            if track_name.0.contains("SDH") || (lname.contains("hearing") && lname.contains("impaired")) {
+            if track_name.contains("SDH") || (lname.contains("hearing") && lname.contains("impaired")) {
                 sdh = true;
                 name = format!("{} (SDH)", name);
             }
             if !forced && !sdh {
-                name = track_name.0.clone();
+                name = track_name.to_string();
             }
         }
 
@@ -531,7 +535,7 @@ pub fn hls_master(mp4: &MP4, external_subs: bool, filter_subs: bool) -> String {
         // This is not quite correct, we also should compare forced and sdh.
         if subtitles
             .iter()
-            .any(|s| !s.uri.starts_with("media.") && s.language == lang && s.sdh == sdh && s.forced == forced)
+            .any(|s| !s.uri.starts_with("media.") && s.language.as_ref().map(|s| s.as_str()) == lang && s.sdh == sdh && s.forced == forced)
         {
             continue;
         }
@@ -539,7 +543,7 @@ pub fn hls_master(mp4: &MP4, external_subs: bool, filter_subs: bool) -> String {
         let sub = ExtXMedia {
             type_: "SUBTITLES",
             group_id: "subs".to_string(),
-            language: lang,
+            language: lang.map(|s| s.to_string()),
             channels: None,
             name: name.to_string(),
             auto_select: true,
