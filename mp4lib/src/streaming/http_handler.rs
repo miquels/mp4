@@ -34,7 +34,7 @@ use std::time::SystemTime;
 use bytes::Bytes;
 use futures_core::Stream;
 use headers::{AcceptRanges, ContentLength, ContentRange, Date, ETag, HeaderMapExt};
-use headers::{IfModifiedSince, IfNoneMatch, IfRange, LastModified, Range as HttpRange};
+use headers::{IfModifiedSince, IfNoneMatch, IfRange, LastModified, Range as HttpRange, UserAgent};
 use http::{header, Method, Request, Response, StatusCode};
 use percent_encoding::percent_decode_str;
 use tokio::task;
@@ -147,11 +147,19 @@ pub async fn handle_hls(
         return Ok(Some(response));
     }
 
+    // Chromecast cannot handle segments > 8M
+    // Should we handle this here, or should it be an
+    // argument to `handle_hls` ?
+    let max_segment_size = match req.headers().typed_get::<UserAgent>() {
+      Some(ua) if ua.as_str().contains("CrKey/") => Some(8_000_000),
+      _ => None,
+    };
+
     // HLS manifest.
     if extra.ends_with(".m3u8") {
         let data = task::block_in_place(|| {
             let mp4 = super::lru_cache::open_mp4(path, false)?;
-            hls::HlsManifest::from_uri(&*mp4, extra, filter_subs)
+            hls::HlsManifest::from_uri(&*mp4, extra, filter_subs, max_segment_size)
         })?;
         return Ok(Some(serve_file(req, data.0).await.box_body()));
     }

@@ -5,12 +5,10 @@
 //!
 use std::cmp::Ordering;
 use std::io;
-
 use crate::boxes::*;
 
-const MAX_SEGMENT_SIZE: u32 = 7_200_000;
-const MAX_SEGMENT_APPEND: u32 = 800_000;
 const MAX_SEGMENT_DURATION_MERGED: f64 = 6.0;
+const MAX_SEGMENT_DURATION_MERGED2: f64 = 10.0;
 
 /// A segment.
 ///
@@ -41,70 +39,58 @@ struct Segment_ {
 fn squish_subtitle(s: Vec<Segment_>) -> Vec<Segment> {
     let mut v = Vec::new();
     let mut idx = 0;
-    let mut delta_t = 0f64;
 
     while idx < s.len() {
+
         // Create a new Segment struct from the Segment_ struct.
         let st = &s[idx];
         let mut sb = Segment {
             start_sample: st.start_sample,
             end_sample: st.end_sample,
-            start_time: st.start_time - delta_t,
-            duration: st.duration + delta_t,
+            start_time: st.start_time,
+            duration: st.duration,
         };
-        delta_t = 0.0;
+        idx += 1;
 
-        // Empty segment?
-        if s[idx].size <= 2 && idx < s.len() - 1 {
-            if st.duration >= 3.0 {
-                // Long. Give some extra lead-time to the next sample.
-                delta_t = 2.0;
-                sb.duration -= 2.0;
-                // 0-0 means "no data".
-                sb.start_sample = 0;
-                sb.end_sample = 0;
-            } else {
-                // Short. Merge with the next sample.
-                let sn = &s[idx + 1];
+        // Merge leading empty segment(s)
+        while idx < s.len() && s[idx].size <= 2 {
+            sb.end_sample = s[idx].end_sample;
+            sb.duration += s[idx].duration;
+            idx += 1;
+        }
+
+        // Merge segments.
+        if idx < s.len() && s[idx].size > 2 {
+            let mut duration = 0.0;
+            while idx < s.len() {
+                let sn = &s[idx];
+                if duration + sn.duration > 10.0 {
+                    break;
+                }
+                duration += sn.duration;
+
+                // If this is an empty sample, look one sample ahead
+                // to see if it's non-empty and if the total still
+                // fits in this segment.
+                if sn.size <= 2 && idx < s.len() - 1 {
+                    let sn = &s[idx+1];
+                    if sn.size > 2 && duration + sn.duration > 10.0 {
+                        break;
+                    }
+                }
+
                 sb.end_sample = sn.end_sample;
                 sb.duration += sn.duration;
                 idx += 1;
             }
         }
 
-        // Segment with content?
-        if s[idx].size > 2 && idx < s.len() - 1 {
-            while idx < s.len() - 1 && sb.duration < 10.0 {
-                let sn = &s[idx + 1];
-
-                // always merge contiguous content.
-                if sn.size > 2 || sn.duration < 1.0 {
-                    sb.end_sample = sn.end_sample;
-                    sb.duration += sn.duration;
-                    idx += 1;
-                    continue;
-                }
-
-                // empty.
-                if sn.duration > 5.0 && sn.duration < 10.0 {
-                    // merge, but give some extra lead-time to the next sample.
-                    // shorter durations will be merged in the next iteration.
-                    sb.end_sample = sn.end_sample;
-                    sb.duration += sn.duration - 2.0;
-                    delta_t = 2.0;
-                    idx += 1;
-                }
-                break;
-            }
-        }
-
         v.push(sb);
-        idx += 1;
     }
     v
 }
 
-fn squish(s: Vec<Segment_>) -> Vec<Segment> {
+fn squish(s: Vec<Segment_>, max_segment_size: u32) -> Vec<Segment> {
     let mut v = Vec::new();
 
     let mut idx = 0;
@@ -117,21 +103,8 @@ fn squish(s: Vec<Segment_>) -> Vec<Segment> {
             start_time: st.start_time,
             duration: st.duration,
         };
-        let mut segment_duration = st.duration;
         let mut segment_size = st.size;
-
-        // If the next segment is small, and non-sync, tack it onto this one.
-        // I should have documented this better- I'm sure why we do this.
-        if idx + 1 < s.len() {
-            let sn = &s[idx + 1];
-            if !sn.is_sync && sn.size < MAX_SEGMENT_APPEND {
-                sb.end_sample = sn.end_sample;
-                sb.duration += sn.duration;
-                segment_size += sn.size;
-                segment_duration += sn.duration;
-                idx += 1;
-            }
-        }
+        idx += 1;
 
         // Merge short segments. Not at the beginning though, having a
         // few short segments at the start might be better.
@@ -140,25 +113,29 @@ fn squish(s: Vec<Segment_>) -> Vec<Segment> {
         // in multiple MOOF/MDAT frags and flush after each one. Some
         // players can take advantage of that.
         let start_idx = idx;
-        while idx > 8 && idx + 1 < s.len() {
-            let sn = &s[idx + 1];
-            if segment_duration + sn.duration > MAX_SEGMENT_DURATION_MERGED
-                || segment_size + sn.size > MAX_SEGMENT_SIZE
-            {
-                // Make an exception if the initial segment is really short.
-                if !(idx == start_idx && s[idx].duration < 1.2) {
-                    break;
-                }
+        while idx > 8 && idx < s.len() {
+            let sn = &s[idx];
+
+            let short_initial = idx == start_idx && sb.duration < 1.2;
+            let max_duration = if short_initial || !sn.is_sync {
+                MAX_SEGMENT_DURATION_MERGED2
+            } else {
+                MAX_SEGMENT_DURATION_MERGED
+            };
+
+            let too_long = sb.duration + sn.duration > max_duration;
+            let too_big = max_segment_size > 0 && segment_size + sn.size > max_segment_size;
+            if too_big || too_long {
+                break;
             }
+
             sb.end_sample = sn.end_sample;
             sb.duration += sn.duration;
             segment_size += sn.size;
-            segment_duration += sn.duration;
             idx += 1;
         }
 
         v.push(sb);
-        idx += 1;
     }
     v
 }
@@ -173,7 +150,7 @@ fn squish(s: Vec<Segment_>) -> Vec<Segment> {
 /// You use this to segment the video tracks into segments. The
 /// resulting timing data can then be used to segment the audio
 /// track(s) into segments with the exact same start_time and duration.
-pub fn track_to_segments(trak: &TrackBox, segment_duration: Option<u32>) -> io::Result<Vec<Segment>> {
+pub fn track_to_segments(trak: &TrackBox, segment_duration: Option<u32>, max_segment_size: Option<u32>) -> io::Result<Vec<Segment>> {
     let media = trak.media();
     let table = media.media_info().sample_table();
     let handler = media.handler();
@@ -239,11 +216,7 @@ pub fn track_to_segments(trak: &TrackBox, segment_duration: Option<u32>) -> io::
                 // Cut the segment here if it would become too big.
                 // Some players (e.g. my Chromecast) cannot handle
                 // large segments. I suspect it runs out of memory.
-                if cur_seg_size + sample_size > MAX_SEGMENT_SIZE {
-                    true
-                } else {
-                    is_sync
-                }
+                max_segment_size.map(|m| cur_seg_size + sample_size > m).unwrap_or(is_sync)
             },
         };
 
@@ -273,7 +246,7 @@ pub fn track_to_segments(trak: &TrackBox, segment_duration: Option<u32>) -> io::
     let segments = if handler.is_subtitle() {
         squish_subtitle(segments)
     } else {
-        squish(segments)
+        squish(segments, max_segment_size.unwrap_or(0))
     };
     Ok(segments)
 }

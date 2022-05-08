@@ -618,7 +618,7 @@ pub fn hls_master(mp4: &MP4, external_subs: bool, filter_subs: bool) -> String {
     m
 }
 
-fn track_to_segments(mp4: &MP4, track_id: u32, duration: Option<u32>) -> io::Result<Arc<Vec<Segment>>> {
+fn track_to_segments(mp4: &MP4, track_id: u32, duration: Option<u32>, max_segment_size: Option<u32>) -> io::Result<Arc<Vec<Segment>>> {
     #[rustfmt::skip]
     static SEGMENTS: Lazy<LruCache<(String, u32), Arc<Vec<Segment>>>> = {
         Lazy::new(|| LruCache::new(Duration::new(60, 0)))
@@ -635,7 +635,7 @@ fn track_to_segments(mp4: &MP4, track_id: u32, duration: Option<u32>) -> io::Res
         .movie()
         .track_by_id(track_id)
         .ok_or_else(|| ioerr!(NotFound, "track not found"))?;
-    let segments = super::segmenter::track_to_segments(track, duration)?;
+    let segments = super::segmenter::track_to_segments(track, duration, max_segment_size)?;
     let segments = Arc::new(segments);
     SEGMENTS.put(key, segments.clone());
     Ok(segments)
@@ -645,7 +645,12 @@ fn track_to_segments(mp4: &MP4, track_id: u32, duration: Option<u32>) -> io::Res
 ///
 /// This is also an `m3u8` file. It contains a list of media segments.
 ///
-pub fn hls_track(mp4: &MP4, track_id: u32) -> io::Result<String> {
+/// If `max_segment_size` is set, it defines the maximum size of an fMP4
+/// segment (or fragment). This means that segments may not be split in
+/// GOP-sized chunks, and that a segment can start with a non-sync sample.
+/// This is needed for Chromecasts (set around 8_000_000).
+///
+pub fn hls_track(mp4: &MP4, track_id: u32, max_segment_size: Option<u32>) -> io::Result<String> {
     let movie = mp4.movie();
     let trak = movie
         .track_by_id(track_id)
@@ -662,7 +667,7 @@ pub fn hls_track(mp4: &MP4, track_id: u32) -> io::Result<String> {
             None => return Err(ioerr!(NotFound, "mp4 file has no video track")),
         };
 
-        let mut segments = track_to_segments(mp4, video_id, seg_duration)?;
+        let mut segments = track_to_segments(mp4, video_id, seg_duration, max_segment_size)?;
         if track_id != video_id {
             let segs: &[Segment] = segments.as_ref();
             segments = Arc::new(super::segmenter::track_to_segments_timed(trak, segs)?);
@@ -671,7 +676,7 @@ pub fn hls_track(mp4: &MP4, track_id: u32) -> io::Result<String> {
     } else {
         // Subtitles do not have the same number of segments and duration.
         // They are a master list, like the video.
-        track_to_segments(mp4, track_id, None)?
+        track_to_segments(mp4, track_id, None, None)?
     };
 
     let (prefix, suffix) = match &handler_type.to_be_bytes()[..] {
@@ -772,13 +777,13 @@ impl HlsManifest {
     ///
     /// Each manifest will have entries that refer to per-track media segments.
     ///
-    pub fn from_uri(mp4: &MP4, url_tail: &str, filter_subs: bool) -> io::Result<HlsManifest> {
+    pub fn from_uri(mp4: &MP4, url_tail: &str, filter_subs: bool, max_segment_size: Option<u32>) -> io::Result<HlsManifest> {
         let data = if url_tail == "main.m3u8" || url_tail == "master.m3u8" {
             // HLS master playlist.
             hls_master(&mp4, true, filter_subs)
         } else if let Ok(track) = scan_fmt!(url_tail, "media.{}.m3u8{e}", u32) {
             // HLS media playlist.
-            hls_track(&mp4, track)?
+            hls_track(&mp4, track, max_segment_size)?
         } else if let Ok((name, _)) = scan_fmt!(url_tail, "media.ext:{}:{}.m3u8{e}", String, String) {
             // external file next to .mp4.
             if name.ends_with(".srt") || name.ends_with(".vtt") {
