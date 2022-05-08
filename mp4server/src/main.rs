@@ -2,7 +2,7 @@ use std::io;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 
 use anyhow::Result;
-use axum::{AddExtensionLayer, Router, body, response::Response, routing::get};
+use axum::{Router, body, response::Response, routing::get};
 use axum::extract::{ConnectInfo, Extension, Path};
 use headers::{HeaderMapExt, UserAgent};
 use http::{Method, Request, StatusCode};
@@ -11,6 +11,7 @@ use structopt::StructOpt;
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
 use tower_http::cors::{self, CorsLayer};
+// use tower_http::compression::CompressionLayer;
 
 use mp4lib::streaming::http_handler::{self, FsPath};
 
@@ -71,14 +72,18 @@ async fn serve(opts: ServeOpts) -> Result<()> {
 
     let dir = opts.dir.clone();
 
+    let x_app = HeaderName::from_static("x-application");
+    let x_plb = HeaderName::from_static("x-playback-session-id");
+
     let middleware_stack = ServiceBuilder::new()
         .layer(TraceLayer::new_for_http())
-        .layer(AddExtensionLayer::new(dir))
+        .layer(Extension(dir))
+        // .layer(CompressionLayer::new())
         .layer(CorsLayer::new()
-            .allow_origin(cors::any())
+            .allow_origin(cors::AllowOrigin::mirror_request())
             .allow_methods(vec![Method::GET, Method::HEAD])
-            .allow_headers(vec![HeaderName::from_static("x-application"), ORIGIN, RANGE ])
-            .expose_headers(cors::any())
+            .allow_headers(vec![x_app, x_plb, ORIGIN, RANGE ])
+            .expose_headers(cors::Any)
             .max_age(std::time::Duration::from_secs(86400)));
 
     let app = Router::new()
@@ -92,8 +97,8 @@ async fn serve(opts: ServeOpts) -> Result<()> {
         let addrv6 = IpAddr::V6(Ipv6Addr::from(0u128));
         let sockaddr_v4 = SocketAddr::new(addrv4, opts.port);
         let sockaddr_v6 = SocketAddr::new(addrv6, opts.port);
-        let svc_v4 = app.clone().into_make_service_with_connect_info::<SocketAddr, _>();
-        let svc_v6 = app.into_make_service_with_connect_info::<SocketAddr, _>();
+        let svc_v4 = app.clone().into_make_service_with_connect_info::<SocketAddr>();
+        let svc_v6 = app.into_make_service_with_connect_info::<SocketAddr>();
         let (r1, r2) = tokio::join!(
             axum::Server::bind(&sockaddr_v4).serve(svc_v4),
             axum::Server::bind(&sockaddr_v6).serve(svc_v6),

@@ -46,4 +46,4 @@ regex = { version = "1.5.4", optional = true }
 tokio = { version = "1.16", features = [ "rt", "rt-multi-thread" ], optional = true }
 
 # axum-box-body
-axum = { version = "0.4.5", optional = true }
+axum = { version = "0.5.4", optional = true }
