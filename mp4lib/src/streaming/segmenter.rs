@@ -50,6 +50,7 @@ fn squish_subtitle(s: Vec<Segment_>) -> Vec<Segment> {
             start_time: st.start_time,
             duration: st.duration,
         };
+        let mut is_empty = st.size <= 2;
         idx += 1;
 
         // Merge leading empty segment(s)
@@ -59,30 +60,30 @@ fn squish_subtitle(s: Vec<Segment_>) -> Vec<Segment> {
             idx += 1;
         }
 
-        // Merge segments.
-        if idx < s.len() && s[idx].size > 2 {
-            let mut duration = 0.0;
+        // Merge segments up to 10 seconds, or 20 seconds if the
+        // trailing segments are empty.
+        if !is_empty || sb.duration < 5.0 {
+            let mut duration = sb.duration;
             while idx < s.len() {
                 let sn = &s[idx];
-                if duration + sn.duration > 10.0 {
+                let d = duration + sn.duration;
+                if (sn.size > 2 && d > 10.0) || d > 20.0 {
                     break;
                 }
                 duration += sn.duration;
-
-                // If this is an empty sample, look one sample ahead
-                // to see if it's non-empty and if the total still
-                // fits in this segment.
-                if sn.size <= 2 && idx < s.len() - 1 {
-                    let sn = &s[idx+1];
-                    if sn.size > 2 && duration + sn.duration > 10.0 {
-                        break;
-                    }
+                if sn.size > 2 {
+                    is_empty = false;
                 }
-
                 sb.end_sample = sn.end_sample;
                 sb.duration += sn.duration;
                 idx += 1;
             }
+        }
+
+        // Optimization for when the segment is empty.
+        if is_empty {
+            sb.start_sample = 0;
+            sb.end_sample = 0;
         }
 
         v.push(sb);

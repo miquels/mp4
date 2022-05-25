@@ -65,7 +65,15 @@ fn cue(
     let eol = if format == Format::Vtt { "\n" } else { "\r\n" };
 
     let starttime = sample.decode_time as f64 / (timescale as f64);
-    let endtime = starttime + (sample.duration as f64 / (timescale as f64));
+    let mut duration = sample.duration as f64 / (timescale as f64);
+    // If two cues are back-to-back, the endtime of the first cue can
+    // be the same as the starttime of the second cue. That is valid
+    // and the spec says that they do not overlap. However, it's
+    // better to be safe than sorry.
+    if duration >= 0.02 {
+        duration -= 0.01;
+    }
+    let endtime = starttime + duration;
     let mut cue = String::new();
 
     if let Some(seq) = seq {
@@ -139,7 +147,12 @@ pub fn subtitle_extract(
             buf.resize(sample.size as usize, 0);
         }
         let data = &mut buf[..sample.size as usize];
-        mp4.data_ref.read_exact_at(data, sample.fpos)?;
+        if data.len() <= 2 {
+            // empty sample. no need to read it from disk.
+            data.fill(0);
+        } else {
+            mp4.data_ref.read_exact_at(data, sample.fpos)?;
+        }
         let subt = match Tx3GTextSample::from_bytes(&mut &data[..]) {
             Ok(subt) => subt,
             Err(_) => continue,
