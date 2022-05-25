@@ -213,10 +213,14 @@ pub fn track_to_segments(trak: &TrackBox, segment_duration: Option<u32>, max_seg
                     // no stss iter? every sample is a sync sample.
                     true
                 };
-                // Cut the segment here if it would become too big.
-                // Some players (e.g. my Chromecast) cannot handle
-                // large segments. I suspect it runs out of memory.
-                max_segment_size.map(|m| cur_seg_size + sample_size > m).unwrap_or(is_sync)
+                if is_sync {
+                    is_sync
+                } else {
+                    // Cut the segment here if it would become too big.
+                    // Some players (e.g. my Chromecast) cannot handle
+                    // large segments. I suspect it runs out of memory.
+                    max_segment_size.map(|m| cur_seg_size + sample_size > m).unwrap_or(false)
+                }
             },
         };
 
