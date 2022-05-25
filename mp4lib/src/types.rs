@@ -1008,10 +1008,10 @@ impl FromBytes for PString {
         if let Ok(s) = std::str::from_utf8(data) {
             return Ok(PString(s.to_string()));
         }
-        // If it's not utf-8, mutilate the data.
+        // If it's not utf-8, interpret it as ISO-8859-something
         let mut s = String::new();
         for d in data {
-            s.push(std::cmp::min(*d, 127) as char);
+            s.push(*d as char);
         }
         Ok(PString(s))
     }
@@ -1055,10 +1055,10 @@ impl FromBytes for P16String {
         if let Ok(s) = std::str::from_utf8(data) {
             return Ok(P16String(s.to_string()));
         }
-        // If it's not utf-8, mutilate the data.
+        // If it's not utf-8, interpret it as ISO-8859-something
         let mut s = String::new();
         for d in data {
-            s.push(std::cmp::min(*d, 127) as char);
+            s.push(*d as char);
         }
         Ok(P16String(s))
     }
