@@ -11,7 +11,10 @@ use structopt::StructOpt;
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
 use tower_http::cors::{self, CorsLayer};
-// use tower_http::compression::CompressionLayer;
+use tower_http::compression::{
+    CompressionLayer, 
+    predicate::{Predicate, NotForContentType, DefaultPredicate},
+};
 
 use mp4lib::streaming::http_handler::{self, FsPath};
 
@@ -75,10 +78,14 @@ async fn serve(opts: ServeOpts) -> Result<()> {
     let x_app = HeaderName::from_static("x-application");
     let x_plb = HeaderName::from_static("x-playback-session-id");
 
+    let compress_predicate = DefaultPredicate::new()
+        .and(NotForContentType::const_new("movie/"))
+        .and(NotForContentType::const_new("audio/"));
+
     let middleware_stack = ServiceBuilder::new()
         .layer(TraceLayer::new_for_http())
         .layer(Extension(dir))
-        // .layer(CompressionLayer::new())
+        .layer(CompressionLayer::new().compress_when(compress_predicate))
         .layer(CorsLayer::new()
             .allow_origin(cors::AllowOrigin::mirror_request())
             .allow_methods(vec![Method::GET, Method::HEAD])
