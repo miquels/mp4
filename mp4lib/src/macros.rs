@@ -100,11 +100,12 @@ macro_rules! impl_fullbox {
             fn version(&self) -> Option<u8> { Some(0) }
         }
     };
-    ($name:ident, [$maxver:tt $(,$deps:ident)+ ]) => {
+    ($name:ident, [$maxver:tt $(,$deps:ident)* ]) => {
         // Check all the dependencies for the minimum ver.
         // TODO what about conflicting versions for deps?
         impl FullBox for $name {
             fn version(&self) -> Option<u8> {
+                #[allow(unused_mut)]
                 let mut v = 0;
                 $(
                     if let Some(depver) = self.$deps.version() {
@@ -112,15 +113,16 @@ macro_rules! impl_fullbox {
                             v = depver;
                         }
                     }
-                )+
+                )*
                 Some(v)
             }
             /// XXX FIXME do not use flags as deps. Should be a separate trait?
             fn flags(&self) -> u32 {
+                #[allow(unused_mut)]
                 let mut flags = 0;
                 $(
                     flags |= self.$deps.flags();
-                )+
+                )*
                 flags
             }
         }

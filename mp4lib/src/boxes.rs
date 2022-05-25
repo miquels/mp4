@@ -50,6 +50,7 @@ def_boxes! {
 
     AppleItemListBox, b"ilst" => ilst;
 
+    ChapterListBox, b"chpl" => chpl;
     ChunkOffsetBox, b"stco" => stco;
     ChunkLargeOffsetBox, b"co64";
     CompositionOffsetBox, b"ctts" => ctts;
@@ -91,6 +92,7 @@ def_boxes! {
     TrackHeaderBox, b"tkhd" => tkhd;
     TrackFragmentBox, b"traf" => traf;
     TrackFragmentHeaderBox, b"tfhd" => tfhd;
+    TrackReferenceBox, b"tref" => tref;
     TrackRunBox, b"trun" => trun;
     TimeToSampleBox, b"stts" => stts;
 
