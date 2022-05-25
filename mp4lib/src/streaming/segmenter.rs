@@ -7,8 +7,8 @@ use std::cmp::Ordering;
 use std::io;
 use crate::boxes::*;
 
-const MAX_SEGMENT_DURATION_MERGED: f64 = 6.0;
-const MAX_SEGMENT_DURATION_MERGED2: f64 = 10.0;
+const MAX_SEGMENT_DURATION_MERGED: f64 = 6.01;
+const MAX_SEGMENT_DURATION_MERGED2: f64 = 10.01;
 
 /// A segment.
 ///
