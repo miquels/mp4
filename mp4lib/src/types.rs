@@ -1070,7 +1070,7 @@ impl FromBytes for P16String {
 impl ToBytes for P16String {
     fn to_bytes<W: WriteBytes>(&self, stream: &mut W) -> io::Result<()> {
         let len = std::cmp::min(self.0.len(), 254);
-        (len as u8).to_bytes(stream)?;
+        (len as u16).to_bytes(stream)?;
         stream.write(self.0[..len].as_bytes())
     }
 }
