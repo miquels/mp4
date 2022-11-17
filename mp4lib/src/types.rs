@@ -238,7 +238,13 @@ impl Time {
         (self.0 as i64) - (OFFSET_TO_UNIX as i64)
     }
     fn to_rfc3339(&self) -> String {
-        Local.timestamp(self.to_unixtime(), 0).to_rfc3339()
+        let ts = Local.timestamp_opt(self.to_unixtime(), 0);
+        if let chrono::LocalResult::Single(c) = ts {
+            c.to_rfc3339()
+        } else {
+            // Never happens.
+            "FAILED_TO_GET_LOCALTIME".to_string()
+        }
     }
 }
 
