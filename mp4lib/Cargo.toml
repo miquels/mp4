@@ -17,6 +17,7 @@ http-handler = [
 ]
 streaming = [ "mime_guess", "once_cell", "percent-encoding", "scan_fmt" ]
 axum-box-body = [ "axum" ]
+hyper-body = [ "hyper" ]
 
 [dependencies]
 auto_impl = "0.3.0"
@@ -47,3 +48,6 @@ tokio = { version = "1.16", features = [ "rt", "rt-multi-thread" ], optional = t
 
 # axum-box-body
 axum = { version = "0.5.4", optional = true }
+
+# hyper-body
+hyper = { version = "0.14", features = ["stream"], optional = true }

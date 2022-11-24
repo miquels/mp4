@@ -74,7 +74,28 @@ mod box_response_body {
     }
 }
 
-#[cfg(not(feature = "axum-box-body"))]
+#[cfg(feature = "hyper-body")]
+mod box_response_body {
+    use futures_core::Stream;
+    use super::BoxResponseBody;
+    pub type BoxBody = hyper::Body;
+
+    // The `axum::body::boxed` helper has an optimization where, if
+    // a body is already boxed, it won't be boxed again. So if possible,
+    // enable the "axum-box-body" feature and enjoy that optimization.
+    impl<B> BoxResponseBody for http::Response<B>
+    where
+        B: Stream<Item = std::io::Result<bytes::Bytes>> + Send + 'static,
+    {
+        fn box_body(self) -> http::Response<BoxBody> {
+            let (parts, body) = self.into_parts();
+            let body = hyper::Body::wrap_stream(body);
+            http::Response::from_parts(parts, body)
+        }
+    }
+}
+
+#[cfg(not(any(feature = "axum-box-body", feature = "hyper-body")))]
 mod box_response_body {
     use http_body::Body as HttpBody;
     use super::BoxResponseBody;
