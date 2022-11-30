@@ -123,17 +123,25 @@ const PATH_ESCAPE: &AsciiSet = &CONTROLS
     .add(b'\'')
     .add(b'?');
 
+/// Audio / Subtitle track.
 pub struct ExtXMedia {
+    /// MP4 track id
     pub track_id: u32,
-    pub type_: &'static str,
+    type_: &'static str,
     group_id: String,
+    /// Name, usually just the language.
     pub name: String,
+    /// Channels, 2 = stereo, 3 = 2.1, 4 = 4.0, 5 = 5.0, 6 = 5.1, 7 = 7.0, 8 = 7.1, 9 = 7.2
     pub channels: Option<u16>,
+    /// Language in 2-letter or 3-letter form.
     pub language: Option<String>,
     auto_select: bool,
-    pub default: bool,
+    default: bool,
+    /// Forced subtitle track.
     pub forced: bool,
+    /// SDH subtitles.
     pub sdh: bool,
+    /// Commentary track (usually audio).
     pub commentary: bool,
     uri: String,
 }
@@ -173,11 +181,17 @@ impl Display for ExtXMedia {
     }
 }
 
+/// Video track.
 pub struct Video {
+    /// MP4 track id
     pub track_id: u32,
+    /// Peak bandwidth
     pub bandwidth: u64,
+    /// Codec (e.g. "avc1.4d401f")
     pub codec: String,
+    /// Width x height
     pub resolution: (u16, u16),
+    /// Frames per second
     pub frame_rate: f64,
 }
 
@@ -326,6 +340,9 @@ fn lookup_subtitles(mp4path: Option<&String>) -> Vec<String> {
     subs
 }
 
+/// Set of video, audio and subtitle tracks.
+///
+/// The `Display` trait outputs this data as a `m3u8` file.
 pub struct HlsMaster {
     pub audio_tracks: Vec<ExtXMedia>,
     pub subtitles:    Vec<ExtXMedia>,
@@ -386,24 +403,8 @@ impl Display for HlsMaster {
 impl HlsMaster {
     /// Generate a master `HLS` playlist (`m3u8`) from an `MP4` object.
     ///
-    /// The extra parameters are:
-    ///
-    /// - `external_subs`: if `true`, the directory of the original `mp4` file
-    ///   is scanned for `.srt` and `.vtt` files that have the same `"base"`
-    ///   (the part of the filename before the `.mp4` extension) and those are
-    ///   included in the playlist.
-    ///
-    ///   The generated playlist contains relative URLs, one per track. Each
-    ///   one is in itself another `m3u8` playlist. They come in 2 variants:
-    ///
-    ///   - `media.N.m3u8`: the playlist for track `N` (starting from 1).
-    ///   - `./media.ext:EXTERNALSUB:as.m3u8`: refers to an external
-    ///     subtitle file (`EXTERNALSUB`) which gets translated to
-    ///     `fragmented webvtt`.
-    ///
-    ///   The `http` server that serves these playlists must
-    ///   interpret these URLs and serve the corresponding track playlist.
-    ///
+    /// See the documentation of the [`hls_master`][hls_master] function
+    /// for details.
     pub fn new(mp4: &MP4, external_subs: bool) -> HlsMaster {
         let mut audio_codecs = HashMap::new();
         let mut audio_tracks = Vec::new();
@@ -676,8 +677,31 @@ impl HlsMaster {
     }
 }
 
-/// This just calls `HlsMaster::new` and then `.uniqify_subtitles` if
-/// `filter_subs` is `true`.
+/// Generate a master `HLS` playlist (`m3u8`) from an `MP4` object.
+///
+/// The extra parameters are:
+///
+/// - `external_subs`: if `true`, the directory of the original `mp4` file
+///   is scanned for `.srt` and `.vtt` files that have the same `"base"`
+///   (the part of the filename before the `.mp4` extension) and those are
+///   included in the playlist.
+///
+/// - `filter_subs`: some HLS players only show one subtitle per language, even
+///   if multiple are available (say, `main`, `SDH`, `FORCED`, `commentary`.
+///   If `filter_subs` is `true`, we try to only include the `main` subtitle
+///   for each language in the playlist.
+///
+///   The generated playlist contains relative URLs, one per track. Each
+///   one is in itself another `m3u8` playlist. They come in 2 variants:
+///
+///   - `media.N.m3u8`: the playlist for track `N` (starting from 1).
+///   - `./media.ext:EXTERNALSUB:as.m3u8`: refers to an external
+///     subtitle file (`EXTERNALSUB`) which gets translated to
+///     `fragmented webvtt`.
+///
+///   The `http` server that serves these playlists must
+///   interpret these URLs and serve the corresponding track playlist.
+///
 pub fn hls_master(mp4: &MP4, external_subs: bool, filter_subs: bool) -> String {
     let mut master = HlsMaster::new(&mp4, external_subs);
     if filter_subs {
