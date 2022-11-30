@@ -84,7 +84,6 @@
 use std::cmp;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
-use std::fmt::Write;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -124,17 +123,18 @@ const PATH_ESCAPE: &AsciiSet = &CONTROLS
     .add(b'\'')
     .add(b'?');
 
-struct ExtXMedia {
-    type_: &'static str,
+pub struct ExtXMedia {
+    pub track_id: u32,
+    pub type_: &'static str,
     group_id: String,
-    name: String,
-    channels: Option<u16>,
-    language: Option<String>,
+    pub name: String,
+    pub channels: Option<u16>,
+    pub language: Option<String>,
     auto_select: bool,
-    default: bool,
-    forced: bool,
-    sdh: bool,
-    commentary: bool,
+    pub default: bool,
+    pub forced: bool,
+    pub sdh: bool,
+    pub commentary: bool,
     uri: String,
 }
 
@@ -160,7 +160,7 @@ impl Display for ExtXMedia {
             c.push("public.accessibility.describes-video");
         }
         if c.len() > 0 {
-            write!(f, r#"CHARACTERISTICS="{}","#, c.join("?"))?;
+            write!(f, r#"CHARACTERISTICS="{}","#, c.join(","))?;
         }
         write!(
             f,
@@ -173,60 +173,23 @@ impl Display for ExtXMedia {
     }
 }
 
-// If there are entries with the same name, add #1, #2 etc to the name to make them unique.
-fn uniqify_audio(media: &mut Vec<ExtXMedia>) {
-    let mut hm = HashMap::new();
-    let mut idx = 0;
-    while idx < media.len() {
-        let e = hm.entry(&media[idx].name).or_insert(Vec::new());
-        e.push(idx);
-        idx += 1;
-    }
-    let dups: Vec<_> = hm.drain().map(|e| e.1).filter(|v| v.len() > 1).collect();
-
-    for indexes in dups {
-        let mut n = 1;
-        for idx in indexes {
-            media[idx].name += &format!(" #{}", n);
-            n += 1;
-        }
-    }
-}
-
-// If there are entries with the same language, pick the one:
-// - that doesn't have the forced flag set, or
-// - the first we see.
-fn uniqify_subtitles(media: &mut Vec<ExtXMedia>, remove_forced: bool) {
-    let mut hm = HashMap::new();
-    for idx in 0..media.len() {
-        let mut key = media[idx].language.as_ref().map(|s| s.as_str()).unwrap_or("").to_string();
-        if !remove_forced && media[idx].forced {
-            key += ".FORCED";
-        }
-        if hm.contains_key(&key) {
-            continue;
-        }
-        hm.insert(key, idx);
-    }
-    let keep: HashSet<_> = hm.into_values().collect();
-
-    let nmedia = media
-        .drain(..)
-        .enumerate()
-        .filter_map(|(n, e)| if keep.contains(&n) { Some(e) } else { None })
-        .collect();
-    *media = nmedia;
+pub struct Video {
+    pub track_id: u32,
+    pub bandwidth: u64,
+    pub codec: String,
+    pub resolution: (u16, u16),
+    pub frame_rate: f64,
 }
 
 #[derive(Default)]
 struct ExtXStreamInf {
-    audio: Option<String>,
     avg_bandwidth: Option<u64>,
     bandwidth: u64,
-    codecs: Vec<String>,
-    subtitles: bool,
     resolution: (u16, u16),
     frame_rate: f64,
+    codecs: Vec<String>,
+    subtitles: bool,
+    audio: Option<String>,
     uri: String,
 }
 
@@ -363,118 +326,227 @@ fn lookup_subtitles(mp4path: Option<&String>) -> Vec<String> {
     subs
 }
 
-/// Generate a master `HLS` playlist (`m3u8`) from an `MP4` object.
-///
-/// The extra parameters are:
-///
-/// - `external_subs`: if `true`, the directory of the original `mp4` file
-///   is scanned for `.srt` and `.vtt` files that have the same `"base"`
-///   (the part of the filename before the `.mp4` extension) and those are
-///   included in the playlist.
-///
-/// - `filter_subs`: some HLS players only show one subtitle per language, even
-///   if multiple are available (say, `main`, `SDH`, `FORCED`, `commentary`.
-///   If `filter_subs` is `true`, we try to only include the `main` subtitle
-///   for each language in the playlist.
-///
-///   The generated playlist contains relative URLs, one per track. Each
-///   one is in itself another `m3u8` playlist. They come in 2 variants:
-///
-///   - `media.N.m3u8`: the playlist for track `N` (starting from 1).
-///   - `./media.ext:EXTERNALSUB:as.m3u8`: refers to an external
-///     subtitle file (`EXTERNALSUB`) which gets translated to
-///     `fragmented webvtt`.
-///
-///   The `http` server that serves these playlists must
-///   interpret these URLs and serve the corresponding track playlist.
-///
-pub fn hls_master(mp4: &MP4, external_subs: bool, filter_subs: bool) -> String {
-    let mut m = String::new();
-    m += "#EXTM3U\n";
-    m += "# Created by mp4lib.rs\n";
-    m += "#\n";
-    m += "#EXT-X-VERSION:6\n";
-    m += "\n";
+pub struct HlsMaster {
+    pub audio_tracks: Vec<ExtXMedia>,
+    pub subtitles:    Vec<ExtXMedia>,
+    pub video:        Option<Video>,
+    audio_codecs:     HashMap<String, u64>,
+}
 
-    let mut audio_codecs = HashMap::new();
-    let mut audio_tracks = Vec::new();
+impl Display for HlsMaster {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "#EXTM3U\n")?;
+        write!(f, "# Created by mp4lib.rs\n")?;
+        write!(f, "#\n")?;
+        write!(f, "#EXT-X-VERSION:6\n")?;
+        write!(f, "\n")?;
 
-    // Audio tracks.
-    for track in crate::track::track_info(mp4).iter() {
-        let info = match &track.specific_info {
-            SpecificTrackInfo::AudioTrackInfo(info) => info,
-            _ => continue,
-        };
-        // Skip empty tracks.
-        if track.duration.as_secs() == 0 {
-            continue;
-        }
-
-        if audio_codecs.len() == 0 {
-            m += "# AUDIO\n";
-        }
-
-        let avg_bw = track.size / cmp::max(1, track.duration.as_secs());
-        if let Some(entry) = audio_codecs.get_mut(&info.codec_id) {
-            if avg_bw > *entry {
-                *entry = avg_bw;
+        if self.audio_tracks.len() > 0 {
+            write!(f, "# AUDIO\n")?;
+            for a in &self.audio_tracks {
+                a.fmt(f)?;
             }
-        } else {
-            audio_codecs.insert(info.codec_id.clone(), avg_bw);
         }
 
-        let track_lang = track.language.to_string();
-        let (lang, name) = lang(&track_lang);
-        let mut name = name.to_string();
-        if let Some(ref handler_name) = track.name {
-            name += &format!(" - {}", handler_name);
-        } else if info.channel_count >= 3 {
-            name += &format!(" ({}.{})", info.channel_count, info.lfe_channel as u8);
+        if self.subtitles.len() > 0 {
+            write!(f, "# SUBTITLES\n")?;
+            for a in &self.subtitles {
+                a.fmt(f)?;
+            }
         }
-        let commentary = name.contains("Commentary");
 
-        let audio = ExtXMedia {
-            type_: "AUDIO",
-            group_id: format!("audio/{}", info.codec_id),
-            language: lang.map(|s| s.to_string()),
-            channels: Some(info.channel_count + info.lfe_channel as u16),
-            name,
-            auto_select: !commentary,
-            default: false,
-            forced: false,
-            sdh: false,
-            commentary,
-            uri: format!("media.{}.m3u8", track.id),
-        };
-        audio_tracks.push(audio);
+        if let Some(video) = self.video.as_ref() {
+            let mut streaminf = ExtXStreamInf {
+                bandwidth: video.bandwidth,
+                codecs: vec![ video.codec.clone() ],
+                subtitles: self.subtitles.len() > 0,
+                resolution: video.resolution,
+                frame_rate: video.frame_rate,
+                uri: format!("media.{}.m3u8", video.track_id),
+                .. ExtXStreamInf::default()
+            };
+
+            write!(f, "\n# VIDEO\n")?;
+            if self.audio_codecs.len() > 0 {
+                for (audio_codec, audio_bw) in self.audio_codecs.iter() {
+                    streaminf.audio = Some(format!("audio/{}", audio_codec));
+                    streaminf.bandwidth = video.bandwidth + *audio_bw as u64;
+                    streaminf.codecs = vec![video.codec.to_string(), audio_codec.to_string()];
+                    streaminf.fmt(f)?;
+                }
+            } else {
+                streaminf.fmt(f)?;
+            }
+        }
+
+        Ok(())
     }
+}
 
-    uniqify_audio(&mut audio_tracks);
-    for audio in &audio_tracks {
-        let _ = write!(m, "{}", audio);
-    }
+impl HlsMaster {
+    /// Generate a master `HLS` playlist (`m3u8`) from an `MP4` object.
+    ///
+    /// The extra parameters are:
+    ///
+    /// - `external_subs`: if `true`, the directory of the original `mp4` file
+    ///   is scanned for `.srt` and `.vtt` files that have the same `"base"`
+    ///   (the part of the filename before the `.mp4` extension) and those are
+    ///   included in the playlist.
+    ///
+    ///   The generated playlist contains relative URLs, one per track. Each
+    ///   one is in itself another `m3u8` playlist. They come in 2 variants:
+    ///
+    ///   - `media.N.m3u8`: the playlist for track `N` (starting from 1).
+    ///   - `./media.ext:EXTERNALSUB:as.m3u8`: refers to an external
+    ///     subtitle file (`EXTERNALSUB`) which gets translated to
+    ///     `fragmented webvtt`.
+    ///
+    ///   The `http` server that serves these playlists must
+    ///   interpret these URLs and serve the corresponding track playlist.
+    ///
+    pub fn new(mp4: &MP4, external_subs: bool) -> HlsMaster {
+        let mut audio_codecs = HashMap::new();
+        let mut audio_tracks = Vec::new();
 
-    // Subtitle tracks.
-    let mut sublang = HashSet::new();
-    let mut subtitles = Vec::new();
-
-    // External subtitles.
-    if external_subs {
-        for sub in lookup_subtitles(mp4.input_file.as_ref()).iter() {
-            // look up language and language code.
-            let (language, sdh, forced) = subtitle_info_from_name(sub);
-            let (lang, name) = lang(&language);
-
-            // no duplicates.
-            if sublang.contains(name) {
+        // Audio tracks.
+        for track in crate::track::track_info(mp4).iter() {
+            let info = match &track.specific_info {
+                SpecificTrackInfo::AudioTrackInfo(info) => info,
+                _ => continue,
+            };
+            // Skip empty tracks.
+            if track.duration.as_secs() == 0 {
                 continue;
             }
-            sublang.insert(name.to_string());
 
-            // FIXME: encode here, or when serializing to m3u8 ?
-            let sub = utf8_percent_encode(&sub, PATH_ESCAPE).to_string();
+            let avg_bw = track.size / cmp::max(1, track.duration.as_secs());
+            if let Some(entry) = audio_codecs.get_mut(&info.codec_id) {
+                if avg_bw > *entry {
+                    *entry = avg_bw;
+                }
+            } else {
+                audio_codecs.insert(info.codec_id.clone(), avg_bw);
+            }
 
-            let subm = ExtXMedia {
+            let track_lang = track.language.to_string();
+            let (lang, name) = lang(&track_lang);
+            let mut name = name.to_string();
+            if let Some(ref handler_name) = track.name {
+                name += &format!(" - {}", handler_name);
+            } else if info.channel_count >= 3 {
+                name += &format!(" ({}.{})", info.channel_count, info.lfe_channel as u8);
+            }
+            let commentary = name.contains("Commentary");
+
+            let audio = ExtXMedia {
+                track_id: track.id,
+                type_: "AUDIO",
+                group_id: format!("audio/{}", info.codec_id),
+                language: lang.map(|s| s.to_string()),
+                channels: Some(info.channel_count + info.lfe_channel as u16),
+                name,
+                auto_select: !commentary,
+                default: false,
+                forced: false,
+                sdh: false,
+                commentary,
+                uri: format!("media.{}.m3u8", track.id),
+            };
+            audio_tracks.push(audio);
+        }
+
+        Self::uniqify_extxmedia(&mut audio_tracks);
+
+        // Subtitle tracks.
+        let mut sublang = HashSet::new();
+        let mut subtitles = Vec::new();
+
+        // External subtitles.
+        if external_subs {
+            for sub in lookup_subtitles(mp4.input_file.as_ref()).iter() {
+                // look up language and language code.
+                let (language, sdh, forced) = subtitle_info_from_name(sub);
+                let (lang, name) = lang(&language);
+
+                // no duplicates.
+                if sublang.contains(name) {
+                    continue;
+                }
+                sublang.insert(name.to_string());
+
+                // FIXME: encode here, or when serializing to m3u8 ?
+                let sub = utf8_percent_encode(&sub, PATH_ESCAPE).to_string();
+
+                let subm = ExtXMedia {
+                    track_id: 0,
+                    type_: "SUBTITLES",
+                    group_id: "subs".to_string(),
+                    language: lang.map(|s| s.to_string()),
+                    channels: None,
+                    name: name.to_string(),
+                    auto_select: true,
+                    default: false,
+                    forced,
+                    sdh,
+                    commentary: false,
+                    // note, either keep the "./", or escape the ":".
+                    uri: format!("./media.ext:{}:as.m3u8", sub),
+                };
+                subtitles.push(subm);
+            }
+        }
+
+        // Embedded subtitles.
+        for track in crate::track::track_info(mp4).iter() {
+            match &track.specific_info {
+                SpecificTrackInfo::SubtitleTrackInfo(_) => {},
+                _ => continue,
+            }
+            // Skip empty tracks.
+            if track.duration.as_secs() == 0 {
+                continue;
+            }
+
+            // Track language.
+            let track_lang = track.language.to_string();
+            let (lang, name) = lang(&track_lang);
+            let mut name = name.to_string();
+
+            // Track name. Might be a descriptive name, but can also be one of:
+            // - "Forced"
+            // - "Hearing Impaired"
+            let mut forced = false;
+            let mut sdh = false;
+            if let Some(ref track_name) = track.name {
+                let lname = track_name.to_lowercase();
+                if lname.contains("forced") {
+                    forced = true;
+                    name = format!("{} (forced)", name);
+                }
+                if track_name.contains("SDH") || (lname.contains("hearing") && lname.contains("impaired")) {
+                    sdh = true;
+                    name = format!("{} (SDH)", name);
+                }
+                if !forced && !sdh {
+                    name = track_name.to_string();
+                }
+            }
+
+            if !forced && !want_language(lang, &SUBTITLE_LANG) {
+                continue;
+            }
+
+            // skip if we already have an external subtitle track file.
+            // This is not quite correct, we also should compare forced and sdh.
+            if subtitles
+                .iter()
+                .any(|s| !s.uri.starts_with("media.") && s.language.as_ref().map(|s| s.as_str()) == lang && s.sdh == sdh && s.forced == forced)
+            {
+                continue;
+            }
+
+            let sub = ExtXMedia {
+                track_id: track.id,
                 type_: "SUBTITLES",
                 group_id: "subs".to_string(),
                 language: lang.map(|s| s.to_string()),
@@ -485,137 +557,133 @@ pub fn hls_master(mp4: &MP4, external_subs: bool, filter_subs: bool) -> String {
                 forced,
                 sdh,
                 commentary: false,
-                // note, either keep the "./", or escape the ":".
-                uri: format!("./media.ext:{}:as.m3u8", sub),
+                uri: format!("media.{}.m3u8", track.id),
             };
-            subtitles.push(subm);
+            subtitles.push(sub);
+        }
+
+        if subtitles.len() > 0 {
+
+            Self::uniqify_extxmedia(&mut subtitles);
+
+            // sort the subtitles so that 'sdh' and 'forced come after none-sdh/forced.
+            //
+            // this is because if we have multiple subtitles in the same language,
+            // and the player only shows one entry per language, we want to have
+            // the "normal" subtitles.
+            subtitles.sort_by(|a, b| {
+                if a.language != b.language {
+                    return a.language.cmp(&b.language);
+                }
+                if a.sdh != b.sdh {
+                    return a.sdh.cmp(&b.sdh);
+                }
+                a.forced.cmp(&b.forced)
+            });
+        }
+
+        // video track.
+        let mut video = None;
+        for track in crate::track::track_info(mp4).iter() {
+            let info = match &track.specific_info {
+                SpecificTrackInfo::VideoTrackInfo(info) => info,
+                _ => continue,
+            };
+            // Skip empty tracks.
+            if track.duration.as_secs() == 0 {
+                continue;
+            }
+            let avg_bw = track.size / cmp::max(1, track.duration.as_secs());
+            video = Some(Video {
+                track_id: track.id,
+                bandwidth: avg_bw,
+                codec: info.codec_id.clone(),
+                resolution: (info.width, info.height),
+                frame_rate: info.frame_rate,
+            });
+            break;
+        }
+
+        HlsMaster {
+            audio_codecs,
+            audio_tracks,
+            subtitles,
+            video,
         }
     }
 
-    // Embedded subtitles.
-    for track in crate::track::track_info(mp4).iter() {
-        match &track.specific_info {
-            SpecificTrackInfo::SubtitleTrackInfo(_) => {},
-            _ => continue,
-        }
-        // Skip empty tracks.
-        if track.duration.as_secs() == 0 {
-            continue;
-        }
-
-        // Track language.
-        let track_lang = track.language.to_string();
-        let (lang, name) = lang(&track_lang);
-        if !want_language(lang, &SUBTITLE_LANG) {
-            continue;
-        }
-        let mut name = name.to_string();
-
-        // Track name. Might be a descriptive name, but can also be one of:
-        // - "Forced"
-        // - "Hearing Impaired"
-        let mut forced = false;
-        let mut sdh = false;
-        if let Some(ref track_name) = track.name {
-            let lname = track_name.to_lowercase();
-            if lname.contains("forced") {
-                forced = true;
-                name = format!("{} (forced)", name);
+    /// Remove all tracks not in `track_ids`.
+    pub fn filter_tracks(&mut self, track_ids: &[u32]) {
+        self.audio_tracks.retain(|t| track_ids.contains(&t.track_id));
+        self.subtitles.retain(|t| track_ids.contains(&t.track_id));
+        if let Some(video) = self.video.as_ref() {
+            if !track_ids.contains(&video.track_id) {
+                self.video = None;
             }
-            if track_name.contains("SDH") || (lname.contains("hearing") && lname.contains("impaired")) {
-                sdh = true;
-                name = format!("{} (SDH)", name);
-            }
-            if !forced && !sdh {
-                name = track_name.to_string();
-            }
-        }
-
-        // skip if we already have an external subtitle track file.
-        // This is not quite correct, we also should compare forced and sdh.
-        if subtitles
-            .iter()
-            .any(|s| !s.uri.starts_with("media.") && s.language.as_ref().map(|s| s.as_str()) == lang && s.sdh == sdh && s.forced == forced)
-        {
-            continue;
-        }
-
-        let sub = ExtXMedia {
-            type_: "SUBTITLES",
-            group_id: "subs".to_string(),
-            language: lang.map(|s| s.to_string()),
-            channels: None,
-            name: name.to_string(),
-            auto_select: true,
-            default: false,
-            forced,
-            sdh,
-            commentary: false,
-            uri: format!("media.{}.m3u8", track.id),
-        };
-        subtitles.push(sub);
-    }
-
-    if subtitles.len() > 0 {
-        m += "\n# SUBTITLES\n";
-
-        // sort the subtitles so that 'sdh' and 'forced come after none-sdh/forced.
-        //
-        // this is because if we have multiple subtitles in the same language,
-        // and the player only shows one entry per language, we want to have
-        // the "normal" subtitles.
-        subtitles.sort_by(|a, b| {
-            if a.language != b.language {
-                return a.language.cmp(&b.language);
-            }
-            if a.sdh != b.sdh {
-                return a.sdh.cmp(&b.sdh);
-            }
-            a.forced.cmp(&b.forced)
-        });
-
-        if filter_subs {
-            uniqify_subtitles(&mut subtitles, true);
-        }
-
-        for sub in &subtitles {
-            let _ = write!(m, "{}", sub);
         }
     }
 
-    // video track.
-    m += "\n# VIDEO\n";
-    for track in crate::track::track_info(mp4).iter() {
-        let info = match &track.specific_info {
-            SpecificTrackInfo::VideoTrackInfo(info) => info,
-            _ => continue,
-        };
-        // Skip empty tracks.
-        if track.duration.as_secs() == 0 {
-            continue;
+    // If there are entries with the same name, add #1, #2 etc
+    // to the name to make them unique.
+    fn uniqify_extxmedia(media: &mut Vec<ExtXMedia>) {
+        let mut hm = HashMap::new();
+        let mut idx = 0;
+        while idx < media.len() {
+            let e = hm.entry(&media[idx].name).or_insert(Vec::new());
+            e.push(idx);
+            idx += 1;
         }
-        let avg_bw = track.size / cmp::max(1, track.duration.as_secs());
-        let mut ext = ExtXStreamInf {
-            bandwidth: avg_bw,
-            codecs: vec![info.codec_id.clone()],
-            resolution: (info.width, info.height),
-            frame_rate: info.frame_rate,
-            uri: format!("media.{}.m3u8", track.id),
-            subtitles: subtitles.len() > 0,
-            ..ExtXStreamInf::default()
-        };
-        for (audio_codec, audio_bw) in audio_codecs.iter() {
-            ext.audio = Some(format!("audio/{}", audio_codec));
-            ext.bandwidth = avg_bw + audio_bw;
-            ext.codecs = vec![info.codec_id.clone(), audio_codec.to_string()];
-            let _ = write!(m, "{}", ext);
-        }
-        if audio_codecs.len() == 0 {
-            let _ = write!(m, "{}", ext);
+        let dups: Vec<_> = hm.drain().map(|e| e.1).filter(|v| v.len() > 1).collect();
+
+        for indexes in dups {
+            let mut n = 1;
+            for idx in indexes {
+                media[idx].name += &format!(" #{}", n);
+                n += 1;
+            }
         }
     }
 
-    m
+    /// Some HLS players only show one subtitle per language, even
+    /// if multiple are available (say, `main`, `SDH`, `FORCED`, `commentary`.
+    ///
+    /// This method filters the subtitles so that for each language,
+    /// only the 'main' subtitle remains.
+    pub fn uniqify_subtitles(&mut self, remove_forced: bool) {
+        // If there are entries with the same language, pick the one:
+        // - that doesn't have the forced flag set, or
+        // - the first we see.
+        let media = &mut self.subtitles;
+        let mut hm = HashMap::new();
+        for idx in 0..media.len() {
+            let mut key = media[idx].language.as_ref().map(|s| s.as_str()).unwrap_or("").to_string();
+            if !remove_forced && media[idx].forced {
+                key += ".FORCED";
+            }
+            if hm.contains_key(&key) {
+                continue;
+            }
+            hm.insert(key, idx);
+        }
+        let keep: HashSet<_> = hm.into_values().collect();
+
+        let nmedia = media
+            .drain(..)
+            .enumerate()
+            .filter_map(|(n, e)| if keep.contains(&n) { Some(e) } else { None })
+            .collect();
+        *media = nmedia;
+    }
+}
+
+/// This just calls `HlsMaster::new` and then `.uniqify_subtitles` if
+/// `filter_subs` is `true`.
+pub fn hls_master(mp4: &MP4, external_subs: bool, filter_subs: bool) -> String {
+    let mut master = HlsMaster::new(&mp4, external_subs);
+    if filter_subs {
+        master.uniqify_subtitles(true);
+    }
+    master.to_string()
 }
 
 fn track_to_segments(mp4: &MP4, track_id: u32, duration: Option<u32>, max_segment_size: Option<u32>) -> io::Result<Arc<Vec<Segment>>> {
@@ -780,7 +848,11 @@ impl HlsManifest {
     pub fn from_uri(mp4: &MP4, url_tail: &str, filter_subs: bool, max_segment_size: Option<u32>) -> io::Result<HlsManifest> {
         let data = if url_tail == "main.m3u8" || url_tail == "master.m3u8" {
             // HLS master playlist.
-            hls_master(&mp4, true, filter_subs)
+            let mut master = HlsMaster::new(&mp4, true);
+            if filter_subs {
+                master.uniqify_subtitles(true);
+            }
+            master.to_string()
         } else if let Ok(track) = scan_fmt!(url_tail, "media.{}.m3u8{e}", u32) {
             // HLS media playlist.
             hls_track(&mp4, track, max_segment_size)?
