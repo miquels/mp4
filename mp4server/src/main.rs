@@ -2,19 +2,19 @@ use std::io;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 
 use anyhow::Result;
-use axum::{Router, body, response::Response, routing::get};
 use axum::extract::{ConnectInfo, Extension, Path};
+use axum::{body, response::Response, routing::get, Router};
 use headers::{HeaderMapExt, UserAgent};
 use http::{Method, Request, StatusCode};
 use http_body::Body as _;
 use structopt::StructOpt;
 use tower::ServiceBuilder;
-use tower_http::trace::TraceLayer;
-use tower_http::cors::{self, CorsLayer};
 use tower_http::compression::{
-    CompressionLayer, 
-    predicate::{Predicate, NotForContentType, DefaultPredicate},
+    predicate::{DefaultPredicate, NotForContentType, Predicate},
+    CompressionLayer,
 };
+use tower_http::cors::{self, CorsLayer};
+use tower_http::trace::TraceLayer;
 
 use mp4lib::streaming::http_handler::{self, FsPath};
 
@@ -86,12 +86,14 @@ async fn serve(opts: ServeOpts) -> Result<()> {
         .layer(TraceLayer::new_for_http())
         .layer(Extension(dir))
         .layer(CompressionLayer::new().compress_when(compress_predicate))
-        .layer(CorsLayer::new()
-            .allow_origin(cors::AllowOrigin::mirror_request())
-            .allow_methods(vec![Method::GET, Method::HEAD])
-            .allow_headers(vec![x_app, x_plb, ORIGIN, RANGE ])
-            .expose_headers(cors::Any)
-            .max_age(std::time::Duration::from_secs(86400)));
+        .layer(
+            CorsLayer::new()
+                .allow_origin(cors::AllowOrigin::mirror_request())
+                .allow_methods(vec![Method::GET, Method::HEAD])
+                .allow_headers(vec![x_app, x_plb, ORIGIN, RANGE])
+                .expose_headers(cors::Any)
+                .max_age(std::time::Duration::from_secs(86400)),
+        );
 
     let app = Router::new()
         .route("/data/*path", get(handle_request).head(handle_request))
@@ -135,14 +137,20 @@ async fn handle_request(
     let req = Request::from_parts(parts, ());
     let start = std::time::Instant::now();
 
-    let res = handle_request2(path, dir, &req).await.map_err(|e| translate_io_error(e));
+    let res = handle_request2(path, dir, &req)
+        .await
+        .map_err(|e| translate_io_error(e));
 
     let now = time::OffsetDateTime::now_local().unwrap_or(time::OffsetDateTime::now_utc());
     let (size, status) = match res.as_ref() {
         Ok(resp) => (resp.body().size_hint().exact().unwrap_or(0), resp.status()),
         Err(sc) => (0, *sc),
     };
-    let pnq = req.uri().path_and_query().map(|p| p.to_string()).unwrap_or(String::from("-"));
+    let pnq = req
+        .uri()
+        .path_and_query()
+        .map(|p| p.to_string())
+        .unwrap_or(String::from("-"));
     println!(
         "{} {} \"{} {} {:?}\" {} {} {:?}",
         now,
@@ -158,12 +166,7 @@ async fn handle_request(
     res
 }
 
-async fn handle_request2(
-    path: String,
-    dir: String,
-    req: &Request<()>
-) -> io::Result<Response> {
-
+async fn handle_request2(path: String, dir: String, req: &Request<()>) -> io::Result<Response> {
     let path = FsPath::Combine((&dir, &path));
 
     // See if this is the Notflix custom receiver running on Chromecast.

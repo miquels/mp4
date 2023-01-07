@@ -55,8 +55,8 @@ trait BoxResponseBody {
 
 #[cfg(feature = "axum-box-body")]
 mod box_response_body {
-    use http_body::Body as HttpBody;
     use super::BoxResponseBody;
+    use http_body::Body as HttpBody;
     pub type BoxBody = axum::body::BoxBody;
 
     // The `axum::body::boxed` helper has an optimization where, if
@@ -76,8 +76,8 @@ mod box_response_body {
 
 #[cfg(feature = "hyper-body")]
 mod box_response_body {
-    use futures_core::Stream;
     use super::BoxResponseBody;
+    use futures_core::Stream;
     pub type BoxBody = hyper::Body;
 
     // We simply use hyper::Body, which is also pretty efficient.
@@ -96,8 +96,8 @@ mod box_response_body {
 
 #[cfg(not(any(feature = "axum-box-body", feature = "hyper-body")))]
 mod box_response_body {
-    use http_body::Body as HttpBody;
     use super::BoxResponseBody;
+    use http_body::Body as HttpBody;
     pub type BoxBody = http_body::combinators::UnsyncBoxBody<bytes::Bytes, std::io::Error>;
 
     // This double-boxes, unfortunately.
@@ -171,8 +171,8 @@ pub async fn handle_hls(
     // Should we handle this here, or should it be an
     // argument to `handle_hls` ?
     let max_segment_size = match req.headers().typed_get::<UserAgent>() {
-      Some(ua) if ua.as_str().contains("CrKey/") => Some(8_000_000),
-      _ => None,
+        Some(ua) if ua.as_str().contains("CrKey/") => Some(8_000_000),
+        _ => None,
     };
 
     // HLS manifest.
@@ -283,7 +283,10 @@ pub async fn handle_pseudo(req: &Request<()>, path: FsPath<'_>) -> io::Result<Op
         .filter_map(|t| t.parse::<u32>().ok())
         .collect();
     if tracks.len() == 0 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "400 bad track parameter"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "400 bad track parameter",
+        ));
     }
 
     if let Some(response) = not_modified(&req, &path).await {
@@ -295,7 +298,11 @@ pub async fn handle_pseudo(req: &Request<()>, path: FsPath<'_>) -> io::Result<Op
 }
 
 /// Handle a standard file.
-pub async fn handle_file(req: &Request<()>, path: FsPath<'_>, index: Option<&str>) -> io::Result<Response<BoxBody>> {
+pub async fn handle_file(
+    req: &Request<()>,
+    path: FsPath<'_>,
+    index: Option<&str>,
+) -> io::Result<Response<BoxBody>> {
     let mut path = path.resolve(req)?;
 
     let file = match FsFile::open(&path) {
@@ -585,7 +592,7 @@ where
 
 /// Body that implements `Stream<Item=Bytes>`, as wel as `http_body::Body`.
 // pub struct Body<F: HttpFile + Unpin + Send + 'static> {
-pub struct Body<F=MemFile> {
+pub struct Body<F = MemFile> {
     file: Option<F>,
     todo: u64,
     in_place: bool,
@@ -708,7 +715,12 @@ where
 fn decode_path(path: &str) -> io::Result<String> {
     match percent_decode_str(path).decode_utf8() {
         Ok(path) => Ok(path.to_string()),
-        Err(_) => return Err(IoError::new(ErrorKind::InvalidData, "400 Bad Request (path not utf-8)")),
+        Err(_) => {
+            return Err(IoError::new(
+                ErrorKind::InvalidData,
+                "400 Bad Request (path not utf-8)",
+            ))
+        },
     }
 }
 
@@ -719,7 +731,10 @@ fn join_paths(dir: &str, path: &str) -> io::Result<String> {
             "." => continue,
             ".." => {
                 if elems.is_empty() {
-                    return Err(IoError::new(ErrorKind::InvalidData, "400 Bad Request (invalid path)"));
+                    return Err(IoError::new(
+                        ErrorKind::InvalidData,
+                        "400 Bad Request (invalid path)",
+                    ));
                 }
                 elems.pop();
             },

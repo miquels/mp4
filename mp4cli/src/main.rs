@@ -70,10 +70,10 @@ pub struct RewriteOpts {
     pub fragment: bool,
     #[structopt(short, long)]
     /// Select track.
-    pub track:    Option<u32>,
+    pub track: Option<u32>,
 
     /// Input filename.
-    pub input:  String,
+    pub input: String,
     /// Output filename.
     pub output: String,
 }
@@ -301,8 +301,8 @@ fn fragment(opts: FragmentOpts) -> Result<()> {
             let fs = FragmentSource {
                 src_track_id: opts.track,
                 dst_track_id: 1,
-                from_sample:  segment.start_sample,
-                to_sample:    segment.end_sample,
+                from_sample: segment.start_sample,
+                to_sample: segment.end_sample,
             };
             frag_src.push(fs);
             //let mut frag = mp4lib::streaming::fragment::movie_fragment(&mp4, seq, &[ fs ])?;
@@ -315,8 +315,8 @@ fn fragment(opts: FragmentOpts) -> Result<()> {
             let fs = FragmentSource {
                 src_track_id: track2,
                 dst_track_id: 2,
-                from_sample:  segment.start_sample,
-                to_sample:    segment.end_sample,
+                from_sample: segment.start_sample,
+                to_sample: segment.end_sample,
             };
             frag_src.push(fs);
             //let mut frag = mp4lib::streaming::fragment::movie_fragment(&mp4, seq, &[ fs ])?;
@@ -558,11 +558,10 @@ fn debug(opts: DebugOpts) -> Result<()> {
 
     if opts.fragment {
         let track = match opts.track {
-            Some(track) => {
-                mp4.movie()
-                    .track_by_id(track)
-                    .ok_or(anyhow!("track {} not found", track))?
-            },
+            Some(track) => mp4
+                .movie()
+                .track_by_id(track)
+                .ok_or(anyhow!("track {} not found", track))?,
             None => return Err(anyhow!("debug: fragment: need --track")),
         };
         let segments = mp4lib::streaming::segmenter::track_to_segments(track, None, None)?;

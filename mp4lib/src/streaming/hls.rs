@@ -101,7 +101,7 @@ use crate::track::SpecificTrackInfo;
 use crate::types::FourCC;
 
 use super::fragment::FragmentSource;
-use super::http_file::{HttpFile, MemFile, delegate_http_file};
+use super::http_file::{delegate_http_file, HttpFile, MemFile};
 use super::lru_cache::LruCache;
 use super::segmenter::Segment;
 use super::subtitle::Format;
@@ -339,6 +339,7 @@ fn lookup_subtitles(mp4path: Option<&String>) -> Vec<String> {
         }
         Ok::<_, io::Error>(())
     })();
+    subs.sort_unstable();
     subs
 }
 
@@ -347,9 +348,9 @@ fn lookup_subtitles(mp4path: Option<&String>) -> Vec<String> {
 /// The `Display` trait outputs this data as a `m3u8` file.
 pub struct HlsMaster {
     pub audio_tracks: Vec<ExtXMedia>,
-    pub subtitles:    Vec<ExtXMedia>,
-    pub video:        Option<Video>,
-    audio_codecs:     HashMap<String, u64>,
+    pub subtitles: Vec<ExtXMedia>,
+    pub video: Option<Video>,
+    audio_codecs: HashMap<String, u64>,
 }
 
 impl Display for HlsMaster {
@@ -377,12 +378,12 @@ impl Display for HlsMaster {
         if let Some(video) = self.video.as_ref() {
             let mut streaminf = ExtXStreamInf {
                 bandwidth: video.bandwidth,
-                codecs: vec![ video.codec.clone() ],
+                codecs: vec![video.codec.clone()],
                 subtitles: self.subtitles.len() > 0,
                 resolution: video.resolution,
                 frame_rate: video.frame_rate,
                 uri: format!("media.{}.m3u8", video.track_id),
-                .. ExtXStreamInf::default()
+                ..ExtXStreamInf::default()
             };
 
             write!(f, "\n# VIDEO\n")?;
@@ -543,10 +544,12 @@ impl HlsMaster {
 
             // skip if we already have an external subtitle track file.
             // This is not quite correct, we also should compare forced and sdh.
-            if subtitles
-                .iter()
-                .any(|s| !s.uri.starts_with("media.") && s.language.as_ref().map(|s| s.as_str()) == lang && s.sdh == sdh && s.forced == forced)
-            {
+            if subtitles.iter().any(|s| {
+                !s.uri.starts_with("media.")
+                    && s.language.as_ref().map(|s| s.as_str()) == lang
+                    && s.sdh == sdh
+                    && s.forced == forced
+            }) {
                 continue;
             }
 
@@ -569,7 +572,6 @@ impl HlsMaster {
         }
 
         if subtitles.len() > 0 {
-
             Self::uniqify_extxmedia(&mut subtitles);
 
             // sort the subtitles so that 'sdh' and 'forced come after none-sdh/forced.
@@ -662,7 +664,12 @@ impl HlsMaster {
         let media = &mut self.subtitles;
         let mut hm = HashMap::new();
         for idx in 0..media.len() {
-            let mut key = media[idx].language.as_ref().map(|s| s.as_str()).unwrap_or("").to_string();
+            let mut key = media[idx]
+                .language
+                .as_ref()
+                .map(|s| s.as_str())
+                .unwrap_or("")
+                .to_string();
             if !remove_forced && media[idx].forced {
                 key += ".FORCED";
             }
@@ -715,7 +722,12 @@ pub fn hls_master(mp4: &MP4, external_subs: bool, filter_subs: bool) -> String {
     master.to_string()
 }
 
-fn track_to_segments(mp4: &MP4, track_id: u32, duration: Option<u32>, max_segment_size: Option<u32>) -> io::Result<Arc<Vec<Segment>>> {
+fn track_to_segments(
+    mp4: &MP4,
+    track_id: u32,
+    duration: Option<u32>,
+    max_segment_size: Option<u32>,
+) -> io::Result<Arc<Vec<Segment>>> {
     #[rustfmt::skip]
     static SEGMENTS: Lazy<LruCache<(String, u32), Arc<Vec<Segment>>>> = {
         Lazy::new(|| LruCache::new(Duration::new(60, 0)))
@@ -874,7 +886,12 @@ impl HlsManifest {
     ///
     /// Each manifest will have entries that refer to per-track media segments.
     ///
-    pub fn from_uri(mp4: &MP4, url_tail: &str, filter_subs: bool, max_segment_size: Option<u32>) -> io::Result<HlsManifest> {
+    pub fn from_uri(
+        mp4: &MP4,
+        url_tail: &str,
+        filter_subs: bool,
+        max_segment_size: Option<u32>,
+    ) -> io::Result<HlsManifest> {
         let data = if url_tail == "main.m3u8" || url_tail == "master.m3u8" {
             // HLS master playlist.
             let mut master = HlsMaster::new(&mp4, true);
@@ -900,7 +917,11 @@ impl HlsManifest {
         };
 
         let file = &*mp4.data_ref.file;
-        let mem_file = MemFile::from_file(data.into_bytes(), "application/vnd.apple.mpegurl; charset=utf-8", file)?;
+        let mem_file = MemFile::from_file(
+            data.into_bytes(),
+            "application/vnd.apple.mpegurl; charset=utf-8",
+            file,
+        )?;
         Ok(HlsManifest(mem_file))
     }
 
@@ -932,7 +953,11 @@ impl MediaSegment {
         Ok(MediaSegment(mem_file))
     }
 
-    fn from_uri_(mp4: &MP4, url_tail: &str, range_end: Option<u64>) -> io::Result<(&'static str, Arc<Vec<u8>>)> {
+    fn from_uri_(
+        mp4: &MP4,
+        url_tail: &str,
+        range_end: Option<u64>,
+    ) -> io::Result<(&'static str, Arc<Vec<u8>>)> {
         // initialization section.
         if let Ok((track_id, ext)) = scan_fmt!(url_tail, "init.{}.{}{e}", u32, String) {
             match ext.as_str() {
@@ -1034,7 +1059,7 @@ fn movie_fragment(
             let mut buffer = MemBuffer::new();
             frag.to_bytes(&mut buffer)?;
             return Ok(Arc::new(buffer.into_vec()));
-        }
+        },
     };
 
     // See if we have the data in the cache.
@@ -1050,11 +1075,13 @@ fn movie_fragment(
             let mut buffer = MemBuffer::new();
             frag.to_bytes(&mut buffer)?;
             (Arc::new(buffer.into_vec()), false)
-        }
+        },
     };
 
     // cache management.
-    let partial = range_end.map(|r| r != 0 && r < frag.len() as u64).unwrap_or(false);
+    let partial = range_end
+        .map(|r| r != 0 && r < frag.len() as u64)
+        .unwrap_or(false);
     if cached && !partial {
         FRAGMENTS.remove(&key);
     }

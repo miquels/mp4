@@ -3,9 +3,9 @@
 //! Cut a track into segments, either on sync (I-Frame) boundaries,
 //! or on fixed intervals.
 //!
+use crate::boxes::*;
 use std::cmp::Ordering;
 use std::io;
-use crate::boxes::*;
 
 const MAX_SEGMENT_DURATION_MERGED: f64 = 6.01;
 const MAX_SEGMENT_DURATION_MERGED2: f64 = 10.01;
@@ -41,7 +41,6 @@ fn squish_subtitle(s: Vec<Segment_>) -> Vec<Segment> {
     let mut idx = 0;
 
     while idx < s.len() {
-
         // Create a new Segment struct from the Segment_ struct.
         let st = &s[idx];
         let mut sb = Segment {
@@ -151,7 +150,11 @@ fn squish(s: Vec<Segment_>, max_segment_size: u32) -> Vec<Segment> {
 /// You use this to segment the video tracks into segments. The
 /// resulting timing data can then be used to segment the audio
 /// track(s) into segments with the exact same start_time and duration.
-pub fn track_to_segments(trak: &TrackBox, segment_duration: Option<u32>, max_segment_size: Option<u32>) -> io::Result<Vec<Segment>> {
+pub fn track_to_segments(
+    trak: &TrackBox,
+    segment_duration: Option<u32>,
+    max_segment_size: Option<u32>,
+) -> io::Result<Vec<Segment>> {
     let media = trak.media();
     let table = media.media_info().sample_table();
     let handler = media.handler();
@@ -220,7 +223,9 @@ pub fn track_to_segments(trak: &TrackBox, segment_duration: Option<u32>, max_seg
                     // Cut the segment here if it would become too big.
                     // Some players (e.g. my Chromecast) cannot handle
                     // large segments. I suspect it runs out of memory.
-                    max_segment_size.map(|m| cur_seg_size + sample_size > m).unwrap_or(false)
+                    max_segment_size
+                        .map(|m| cur_seg_size + sample_size > m)
+                        .unwrap_or(false)
                 }
             },
         };

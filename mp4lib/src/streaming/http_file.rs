@@ -4,8 +4,8 @@
 //! used by an HTTP server to serve `GET` and `HEAD` requests.
 //!
 use std::cmp;
-use std::fs;
 use std::fmt::Write;
+use std::fs;
 use std::io;
 use std::ops::{Bound, Range, RangeBounds};
 use std::os::unix::fs::MetadataExt;
@@ -88,7 +88,7 @@ macro_rules! delegate_http_file {
                 self.0.mime_type()
             }
         }
-    }
+    };
 }
 pub(crate) use delegate_http_file;
 
@@ -110,7 +110,7 @@ fn crate_version() -> u64 {
         let mut r = 0;
         for n in env!("CARGO_PKG_VERSION").split(|c| c == '.' || c == '-' || c == '_') {
             if let Ok(x) = n.parse::<u16>() {
-                r  = r * 256 + (x as u64);
+                r = r * 256 + (x as u64);
                 v += 1;
                 if v == 3 {
                     break;
@@ -365,4 +365,3 @@ impl_http_file!(MemFile {
         Ok(size)
     }
 });
-
