@@ -109,6 +109,7 @@ impl TrackBox {
     /// empty edit. If so, delete that edit, and extend the duration of the
     /// first sample with the length of the empty edit.
     pub fn initial_empty_edit_to_dwell(&mut self) {
+
         let edit = match self.edit_list_mut() {
             Some(elst) => {
                 if elst.entries[0].media_time >= 0 {

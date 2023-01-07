@@ -80,9 +80,8 @@ mod box_response_body {
     use super::BoxResponseBody;
     pub type BoxBody = hyper::Body;
 
-    // The `axum::body::boxed` helper has an optimization where, if
-    // a body is already boxed, it won't be boxed again. So if possible,
-    // enable the "axum-box-body" feature and enjoy that optimization.
+    // We simply use hyper::Body, which is also pretty efficient.
+    // This interoperates well with the 'poem' framework.
     impl<B> BoxResponseBody for http::Response<B>
     where
         B: Stream<Item = std::io::Result<bytes::Bytes>> + Send + 'static,
@@ -234,9 +233,11 @@ pub async fn handle_pseudo(req: &Request<()>, path: FsPath<'_>) -> io::Result<Op
         if let Some(response) = not_modified(&req, path).await {
             return Ok(Some(response));
         }
-        let file = task::block_in_place(|| fs::File::open(&path))?;
-        let (mime, body) = task::block_in_place(|| super::subtitle::external(path, extra))?;
-        let data = http_file::MemFile::from_file(body, mime, &file)?;
+        let data = task::block_in_place(|| {
+            let file = fs::File::open(&path)?;
+            let (mime, body) = super::subtitle::external(path, extra)?;
+            http_file::MemFile::from_file(body, mime, &file)
+        })?;
         return Ok(Some(serve_file(req, data).await.box_body()));
     }
 
@@ -289,7 +290,7 @@ pub async fn handle_pseudo(req: &Request<()>, path: FsPath<'_>) -> io::Result<Op
         return Ok(Some(response));
     }
 
-    let mp4stream = pseudo::Mp4Stream::open(path, tracks)?;
+    let mp4stream = task::block_in_place(|| pseudo::Mp4Stream::open(path, tracks))?;
     Ok(Some(serve_file(req, mp4stream).await.box_body()))
 }
 

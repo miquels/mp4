@@ -31,9 +31,9 @@ impl FromBytes for ChapterListBox {
         }
         */
         let _skip = u8::from_bytes(stream)?;
-        println!("XXX _skip {}", _skip);
+        // println!("XXX _skip {}", _skip);
         let count = u32::from_bytes(stream)?;
-        println!("XXX chapter count {}", count);
+        // println!("XXX chapter count {}", count);
         for _ in 0 .. count {
             chapters.push(Chapter::from_bytes(stream)?);
         }

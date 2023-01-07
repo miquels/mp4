@@ -131,6 +131,8 @@ pub struct ExtXMedia {
     group_id: String,
     /// Name, usually just the language.
     pub name: String,
+    /// Audio codec (e.g. "mp4a.40.2" or "ac-3")
+    pub codec: String,
     /// Channels, 2 = stereo, 3 = 2.1, 4 = 4.0, 5 = 5.0, 6 = 5.1, 7 = 7.0, 8 = 7.1, 9 = 7.2
     pub channels: Option<u16>,
     /// Language in 2-letter or 3-letter form.
@@ -442,6 +444,7 @@ impl HlsMaster {
             let audio = ExtXMedia {
                 track_id: track.id,
                 type_: "AUDIO",
+                codec: info.codec_id.clone(),
                 group_id: format!("audio/{}", info.codec_id),
                 language: lang.map(|s| s.to_string()),
                 channels: Some(info.channel_count + info.lfe_channel as u16),
@@ -482,6 +485,7 @@ impl HlsMaster {
                     track_id: 0,
                     type_: "SUBTITLES",
                     group_id: "subs".to_string(),
+                    codec: "vtt".to_string(),
                     language: lang.map(|s| s.to_string()),
                     channels: None,
                     name: name.to_string(),
@@ -550,6 +554,7 @@ impl HlsMaster {
                 track_id: track.id,
                 type_: "SUBTITLES",
                 group_id: "subs".to_string(),
+                codec: "tx3g".to_string(),
                 language: lang.map(|s| s.to_string()),
                 channels: None,
                 name: name.to_string(),
@@ -650,7 +655,7 @@ impl HlsMaster {
     ///
     /// This method filters the subtitles so that for each language,
     /// only the 'main' subtitle remains.
-    pub fn uniqify_subtitles(&mut self, remove_forced: bool) {
+    pub fn dedup_subtitles(&mut self, remove_forced: bool) {
         // If there are entries with the same language, pick the one:
         // - that doesn't have the forced flag set, or
         // - the first we see.
@@ -705,7 +710,7 @@ impl HlsMaster {
 pub fn hls_master(mp4: &MP4, external_subs: bool, filter_subs: bool) -> String {
     let mut master = HlsMaster::new(&mp4, external_subs);
     if filter_subs {
-        master.uniqify_subtitles(true);
+        master.dedup_subtitles(true);
     }
     master.to_string()
 }
@@ -874,7 +879,7 @@ impl HlsManifest {
             // HLS master playlist.
             let mut master = HlsMaster::new(&mp4, true);
             if filter_subs {
-                master.uniqify_subtitles(true);
+                master.dedup_subtitles(true);
             }
             master.to_string()
         } else if let Ok(track) = scan_fmt!(url_tail, "media.{}.m3u8{e}", u32) {
@@ -932,6 +937,7 @@ impl MediaSegment {
         if let Ok((track_id, ext)) = scan_fmt!(url_tail, "init.{}.{}{e}", u32, String) {
             match ext.as_str() {
                 "mp4" => {
+                    // println!("XXX DBG from_uri_: mp4: {:#?}", mp4);
                     let init = super::fragment::media_init_section(&mp4, &[track_id]);
                     let mut buffer = MemBuffer::new();
                     init.write(&mut buffer)?;
