@@ -1,11 +1,12 @@
 //! Subtitle handling.
 //!
+use std::borrow::Cow;
 use std::fs;
-use std::io::{self, BufRead, Read, Seek, Write};
-use std::mem;
+use std::io::{self, BufRead, BufReader, Write};
 use std::str::FromStr;
 
 use scan_fmt::scan_fmt;
+use whatlang::detect;
 
 use super::fragment::FragmentSource;
 use crate::boxes::sbtl::Tx3GTextSample;
@@ -244,6 +245,7 @@ pub fn fragment(mp4: &MP4, format: Format, frag: &FragmentSource, tm_off: f64) -
 ///
 /// Return value is `(mime_type, raw_data)`.
 pub fn external(path: &str, to_format: &str) -> io::Result<(&'static str, Vec<u8>)> {
+
     // see if input and output formats are supported.
     let infmt = Format::from_str(path)?;
     let outfmt = Format::from_str(to_format)?;
@@ -253,16 +255,17 @@ pub fn external(path: &str, to_format: &str) -> io::Result<(&'static str, Vec<u8
         other => return Err(ioerr!(InvalidData, "unsupported input format {:?}", other)),
     };
 
-    // open subtitle file.
-    let mut stf = SubtitleFile::open(path, infmt)?;
-
     // shortcut for vtt -> vtt.
     if infmt == Format::Vtt && outfmt == Format::Vtt {
-        let mut buf = Vec::new();
-        let mut rdr = stf.file.into_inner();
-        rdr.read_to_end(&mut buf)?;
-        return Ok((mime, buf));
+        match fs::read_to_string(path) {
+            Ok(s) => return Ok((mime, s.into_bytes())),
+            Err(e) if e.kind() == io::ErrorKind::InvalidData => {},
+            Err(e) => return Err(e),
+        }
     }
+
+    // open subtitle file.
+    let mut stf = SubtitleFile::open(path, infmt)?;
 
     let mut buf = String::new();
     if outfmt == Format::Vtt {
@@ -319,69 +322,36 @@ struct SubtitleSample {
 }
 
 struct SubtitleFile {
-    file: io::BufReader<fs::File>,
-    buf: Vec<u8>,
-    is_utf8: bool,
+    data: String,
+    pos: usize,
 }
 
 impl SubtitleFile {
     fn open(path: &str, format: Format) -> io::Result<SubtitleFile> {
-        let mut file = fs::File::open(path)?;
         match format {
             Format::Vtt | Format::Srt => {},
             other => return Err(ioerr!(InvalidData, "unsupported input format {:?}", other)),
         }
-
-        // skip UTF-8 BOM.
-        let mut buf = [0u8; 3];
-        let mut is_bom = false;
-        if let Ok(_) = file.read_exact(&mut buf) {
-            if &buf[..] == &[0xef_u8, 0xbb, 0xbf] {
-                is_bom = true;
-            }
-        }
-        if !is_bom {
-            file.seek(io::SeekFrom::Start(0))?;
-        }
-
-        Ok(SubtitleFile {
-            file: io::BufReader::new(file),
-            buf: Vec::new(),
-            is_utf8: true,
-        })
+        let data = read_subtitle(path)?;
+        Ok(SubtitleFile{ data, pos: 0 })
     }
 
     fn read_line(&mut self, line: &mut String) -> io::Result<usize> {
-        let start_len = line.len();
-
-        // read next line and change CRLF -> LF.
-        // we re-use the read buffer.
-        let mut buf = mem::replace(&mut self.buf, Vec::new());
-        buf.truncate(0);
-        let len = self.file.read_until(b'\n', &mut buf)?;
-        if len == 0 {
-            return Ok(0);
-        }
-        if buf.ends_with(b"\r\n") {
-            let len = buf.len();
-            buf.truncate(len - 1);
-            buf[len - 2] = b'\n';
-        }
-        mem::swap(&mut buf, &mut self.buf);
-
-        // Convert to utf-8.
-        if self.is_utf8 {
-            match std::str::from_utf8(&self.buf) {
-                Ok(l) => line.push_str(l),
-                Err(_) => self.is_utf8 = false,
+        match self.data[self.pos..].find('\n') {
+            Some(off) => {
+                let npos = self.pos + off + 1;
+                line.push_str(&self.data[self.pos..npos]);
+                self.pos += npos;
+                if line.ends_with("\r\n") {
+                    line.truncate(line.len() - 2);
+                    line.push('\n');
+                    Ok(off)
+                } else {
+                    Ok(off + 1)
+                }
             }
+            None => Ok(0),
         }
-        if !self.is_utf8 {
-            // It's not utf-8, so pretend it's latin-1.
-            self.buf.iter().for_each(|&b| line.push(b as char));
-        }
-
-        Ok(line.len() - start_len)
     }
 
     fn next(&mut self) -> Option<SubtitleSample> {
@@ -428,6 +398,160 @@ impl SubtitleFile {
             }
         }
     }
+}
+
+// Read the text from a .srt or .vtt file into a String.
+//
+// Srt files are often encoded as ISO-8859-X or windows-12xx instead of UTF-8,
+// so the character-set encoding is detected and converted to UTF-8 if needed.
+//
+// The language is also detected and returned as a iso-639-3 code.
+//
+fn decode_and_read(name: &str, detect_only: bool) -> io::Result<(String, &'static str, &'static str)> {
+    let mut buf = Vec::new();
+    let mut detector = chardetng::EncodingDetector::new();
+    let mut data = Vec::with_capacity(if detect_only { 256 } else { 65536 });
+    let mut sample = Vec::with_capacity(4200);
+    let mut state = false;
+
+    // Get the language from the filename, if any.
+    let mut words = name.rsplit('.');
+    let _ = words.next();
+    let tld = words.next().and_then(map_tld);
+
+    // Open file.
+    let file = fs::File::open(&name)?;
+    let mut reader = BufReader::with_capacity(65536, file);
+
+    // read the file. isolate the text portions and feed that to the decoder.
+    loop {
+        // line by line.
+        if detect_only {
+            data.truncate(0);
+        }
+        let len = data.len();
+        if reader.read_until(b'\n', &mut data)? == 0 {
+            break;
+        }
+        let mut line = &data[len..];
+        match state {
+            false => {
+                if line.windows(5).position(|slice| slice == &b" --> "[..]).is_some() {
+                    // start of cue.
+                    state = true;
+                }
+            },
+            true if line == b"\n" || line == b"\r\n" => {
+                // end of cue.
+                state = false;
+            },
+            true => {
+                // add the line to the sample we're going to use for language detection.
+                if sample.len() < 4096 {
+                    sample.extend(line);
+                } else if detect_only {
+                    break;
+                }
+
+                // 0xb6 is ¶, the paragraph sign. often used as musical note.
+                // this confuses the detector!
+                if line.contains(&0xb6) && std::str::from_utf8(line).is_err() {
+                    buf.truncate(0);
+                    buf.extend(line);
+                    buf.iter_mut().for_each(|b| if *b == 0xb6 { *b = 0x20 });
+                    line = &buf[..];
+                }
+                // and add line to the detector.
+                detector.feed(line, false);
+            },
+        }
+    }
+    detector.feed(b"", true);
+
+    // find out the encoding.
+    let encoding = detector.guess(tld, true);
+
+    // decode sample and data. data first, in case there is a BOM and
+    // a different encoding is chosen - then we use that for the sample too.
+    let (mut cow, mut encoding, _) = encoding.decode(&data);
+
+    // detect the language, if needed.
+    let lang = if tld.is_none() || detect_only {
+        let (sample, _, _) = encoding.decode(&sample);
+        detect(&sample).map(|i| i.lang().code()).unwrap_or("und")
+    } else {
+        "und"
+    };
+
+    if detect_only {
+        // no need to double-check the encoding, the language guess doesn't
+        // really care if ISO-8859-2 was detected while it was ISO-8859-1.
+        return Ok((String::new(), lang, encoding.name()));
+    }
+
+    if tld.is_none() {
+
+        // if we didn't have a tld hint, try again now that we know the
+        // language. if we have a tld, this is a west-european language.
+        let tld = map_tld(lang);
+        let enc = encoding.name();
+        if tld.is_some() && enc != "UTF-8" && enc != "ISO-8859-1" && enc != "windows-1252" {
+
+            // we would expect UTF-8, ISO-8859-1, or windows1252, but it isn't.
+            // detect the charset again, now with tld info. note that we feed
+            // the entire srt/vtt data into the detector, not just the cues,
+            // but that should not matter for western languages.
+            let mut detector = chardetng::EncodingDetector::new();
+            detector.feed(&data, true);
+            let encoding2 = detector.guess(tld, true);
+
+            if encoding != encoding2 {
+                // different encoding! decode again.
+                (cow, encoding, _) = encoding2.decode(&data);
+            }
+        }
+    }
+
+    // if the cow is a borrowed string that starts at the same
+    // location as data, it was UTF-8 without a BOM, and we can just convert
+    // the entire 'data' buffer without allocating a new string.
+    let s = match cow {
+        Cow::Borrowed(c) if c.as_ptr() == data.as_ptr() => {
+            // unsafe would be faster, oh well.
+            String::from_utf8(data).unwrap()
+        },
+        _ => cow.to_string(),
+    };
+    Ok((s, lang, encoding.name()))
+}
+
+// Map a language identifier into a Top Level Domain.
+fn map_tld(lang: &str) -> Option<&'static [u8]> {
+    match lang {
+        "en"|"eng" => Some("uk"),
+        "nl"|"nld"|"dut" => Some("nl"),
+        "es|esp"|"spa" => Some("es"),
+        "de|ger" => Some("de"),
+        "fr|fra"|"fre" => Some("fr"),
+        _ => None,
+    }.map(|t| t.as_bytes())
+}
+
+// Read the text from a .srt or .vtt file into a String.
+//
+// Srt files are often encoded as ISO-8859-X or windows-12xx instead of UTF-8,
+// so the character-set encoding is detected and converted to UTF-8 if needed.
+//
+fn read_subtitle(filename: &str) -> io::Result<String> {
+    let (subs, _, _) = decode_and_read(filename, false)?;
+    Ok(subs)
+}
+
+/// Subtitle files should have a language tag embedded in the filename.
+/// However, if they don't, this can probe the language of the cues.
+pub fn subtitle_probe_lang(filename: &str) -> io::Result<&'static str> {
+    let (_, lang, _) = decode_and_read(filename, true)?;
+    Ok(lang)
 }
 
 // parse 04:02.500 --> 04:05.000
