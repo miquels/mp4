@@ -148,14 +148,19 @@ pub struct ExtXMedia {
     /// filename (without directory) if this is an external subtitle file.
     pub filename: Option<String>,
     /// Skip when rendering the master playlist.
-    pub not_in_master: bool,
+    pub in_master: bool,
 }
 
 impl ExtXMedia {
     /// Build ExtXMedia type SUBTITLE from the info in a .srt or .vtt filename.
     pub fn external_subtitle(filename: &str) -> ExtXMedia {
+
         // look up language and language code.
-        let (language, sdh, forced) = subtitle_info_from_name(filename);
+        use super::subtitle::subtitle_info;
+        let (language, sdh, forced, in_master) = match subtitle_info(filename, None) {
+            Ok(x) => (x.0, x.1, x.2, true),
+            Err(_) => ("und".to_string(), false, false, false),
+        };
         let (lang, name) = lang(&language);
 
         ExtXMedia {
@@ -167,20 +172,21 @@ impl ExtXMedia {
             channels: None,
             name: name.to_string(),
             auto_select: true,
-            default: false,
+            default: forced,
             forced,
             sdh,
             commentary: false,
             filename: Some(filename.to_string()),
-            not_in_master: false,
+            in_master,
         }
     }
 
-    // Internal, for de-dupping.
+    // Internal, for de-dupping of subtitles.
     fn equal(&self, other: &ExtXMedia) -> bool {
-        self.channels == other.channels && self.language == other.language &&
-            self.forced == other.forced && self.sdh == other.sdh &&
-            self.commentary == other.commentary && self.codec == other.codec
+        self.language == other.language &&
+            self.forced == other.forced &&
+            self.sdh == other.sdh &&
+            self.commentary == other.commentary
     }
 }
 
@@ -215,11 +221,12 @@ impl Display for ExtXMedia {
         )?;
         write!(f, r#"DEFAULT={},"#, if self.default { "YES" } else { "NO" })?;
         if let Some(filename) = self.filename.as_ref() {
-            // note, either keep the "./", or escape the ":".
+            let filename = filename.rsplit('/').next().unwrap();
             let uri_path = utf8_percent_encode(filename, PATH_ESCAPE);
-            write!(f, "URI=./media.ext:{}:as.m3u8", uri_path)?;
+            // note, either keep the "./", or escape the ":".
+            write!(f, r#"URI="./media.ext:{}:as.m3u8""#, uri_path)?;
         } else {
-            write!(f, "URI=media.{}.m3u8", self.track_id)?;
+            write!(f, r#"URI="media.{}.m3u8""#, self.track_id)?;
         }
         write!(f, "\n")
     }
@@ -329,44 +336,6 @@ fn want_language(lang: Option<&str>, list: &[&str]) -> bool {
     }
 }
 
-// Get the subtitle info from the tags embedded in the name.
-//
-// See also:
-// - https://jellyfin.org/docs/general/server/media/external-files/ (naming)
-// - https://www.rfc-editor.org/rfc/rfc5646 (language codes).
-//
-fn subtitle_info_from_name(name: &str) -> (String, bool, bool) {
-    let mut forced = false;
-    let mut sdh = false;
-    let mut lang = "und".to_string();
-
-    let fields: Vec<_> = name.split('.').collect();
-    if fields.len() < 3 {
-        return (lang, sdh, forced);
-    }
-
-    let mut idx = fields.len() - 2;
-    while idx > 0 {
-        if fields[idx].eq_ignore_ascii_case("forced") {
-            forced = true;
-            idx -= 1;
-            continue;
-        }
-        if fields[idx].eq_ignore_ascii_case("sdh") {
-            sdh = true;
-            idx -= 1;
-            continue;
-        }
-        break;
-    }
-
-    if idx > 0 {
-        lang = fields[idx].to_string();
-    }
-
-    (lang, sdh, forced)
-}
-
 // Find external subtitles.
 //
 // These are the files that have the same basename without .mp4 as the main file,
@@ -381,19 +350,18 @@ fn lookup_subtitles(mp4path: Option<&String>) -> Vec<String> {
         Some(p) => p,
         None => return subs,
     };
-    let filename = mp4path.split('/').last().unwrap();
-    if !filename.ends_with(".mp4") {
+    if !mp4path.ends_with(".mp4") {
         return subs;
     }
-    let prefix = &filename[..filename.len() - 3];
+    let prefix = &mp4path[..mp4path.len() - 3];
 
     let _ = (|| {
         for entry in fs::read_dir(parent)? {
             let entry = entry?;
-            if let Some(filename) = entry.file_name().to_str() {
-                if filename.starts_with(prefix) && (filename.ends_with(".srt") || filename.ends_with(".vtt"))
+            if let Ok(path) = entry.path().into_os_string().into_string() {
+                if path.starts_with(prefix) && (path.ends_with(".srt") || path.ends_with(".vtt"))
                 {
-                    subs.push(filename.to_string());
+                    subs.push(path);
                 }
             }
         }
@@ -423,14 +391,14 @@ impl Display for HlsMaster {
 
         if self.audio_tracks.len() > 0 {
             write!(f, "# AUDIO\n")?;
-            for a in self.audio_tracks.iter().filter(|t| !t.not_in_master) {
+            for a in self.audio_tracks.iter().filter(|t| t.in_master) {
                 a.fmt(f)?;
             }
         }
 
         if self.subtitles.len() > 0 {
             write!(f, "# SUBTITLES\n")?;
-            for a in self.subtitles.iter().filter(|t| !t.not_in_master) {
+            for a in self.subtitles.iter().filter(|t| t.in_master) {
                 a.fmt(f)?;
             }
         }
@@ -498,12 +466,21 @@ impl HlsMaster {
             let track_lang = track.language.to_string();
             let (lang, name) = lang(&track_lang);
             let mut name = name.to_string();
-            if let Some(ref handler_name) = track.name {
-                name += &format!(" - {}", handler_name);
-            } else if info.channel_count >= 3 {
-                name += &format!(" ({}.{})", info.channel_count, info.lfe_channel as u8);
-            }
+            //
+            // apple's mediastreamvalidator says that audio tracks in
+            // different groups cannot have different names, so adding
+            // the channel count is noit useful. also, track.name contains
+            // junk more often than not, so don't add itt either.
+            //
+            // if let Some(ref handler_name) = track.name {
+            //     name += &format!(" - {}", handler_name);
+            // } else if info.channel_count >= 3 {
+            //     name += &format!(" ({}.{})", info.channel_count, info.lfe_channel as u8);
+            // }
             let commentary = name.contains("Commentary");
+            if commentary {
+                name += " (Commentary)";
+            }
 
             let audio = ExtXMedia {
                 track_id: track.id,
@@ -519,7 +496,7 @@ impl HlsMaster {
                 sdh: false,
                 commentary,
                 filename: None,
-                not_in_master: false,
+                in_master: true,
             };
             audio_tracks.push(audio);
         }
@@ -527,7 +504,7 @@ impl HlsMaster {
         Self::uniqify_extxmedia(&mut audio_tracks);
 
         // Subtitle tracks.
-        let mut subtitles = Vec::new();
+        let mut subtitles = Vec::<ExtXMedia>::new();
 
         // External subtitles.
         if external_subs {
@@ -541,7 +518,9 @@ impl HlsMaster {
                 next_id += 1;
 
                 // Skip duplicates when rendering master playlist.
-                subm.not_in_master = subtitles.iter().any(|s| subm.equal(s));
+                if subtitles.iter().any(|s| s.in_master && subm.equal(s)) {
+                    subm.in_master = false;
+                }
 
                 subtitles.push(subm);
             }
@@ -585,7 +564,7 @@ impl HlsMaster {
                 continue;
             }
 
-            let mut subm = ExtXMedia {
+            let subm = ExtXMedia {
                 track_id: track.id,
                 type_: "SUBTITLES",
                 group_id: "subs".to_string(),
@@ -594,17 +573,18 @@ impl HlsMaster {
                 channels: None,
                 name: name.to_string(),
                 auto_select: true,
-                default: false,
+                default: forced,
                 forced,
                 sdh,
                 commentary: false,
                 filename: None,
-                not_in_master: false,
+                in_master: true,
             };
 
             // Skip duplicates when rendering master playlist.
-            subm.not_in_master = subtitles.iter().any(|s| s.filename.is_some() && subm.equal(s));
-            subtitles.push(subm);
+            if !subtitles.iter().any(|s| s.in_master && s.filename.is_some() && subm.equal(s)) {
+                subtitles.push(subm);
+            }
         }
 
         if subtitles.len() > 0 {
@@ -624,6 +604,9 @@ impl HlsMaster {
                 }
                 if a.forced != b.forced {
                     return a.forced.cmp(&b.forced);
+                }
+                if a.name != b.name {
+                    return a.name.cmp(&b.name);
                 }
                 a.filename.cmp(&b.filename)
             });
@@ -676,8 +659,16 @@ impl HlsMaster {
         let mut hm = HashMap::new();
         let mut idx = 0;
         while idx < media.len() {
-            let e = hm.entry(&media[idx].name).or_insert(Vec::new());
-            e.push(idx);
+            let m = &media[idx];
+            if m.in_master {
+                let key = if m.type_ == "AUDIO" {
+                    format!("{}.{}", m.name, m.group_id)
+                } else {
+                    m.name.clone()
+                };
+                let e = hm.entry(key).or_insert(Vec::new());
+                e.push(idx);
+            }
             idx += 1;
         }
         let dups: Vec<_> = hm.drain().map(|e| e.1).filter(|v| v.len() > 1).collect();
@@ -958,7 +949,7 @@ impl HlsManifest {
         let file = &*mp4.data_ref.file;
         let mem_file = MemFile::from_file(
             data.into_bytes(),
-            "application/vnd.apple.mpegurl; charset=utf-8",
+            "application/x-mpegURL",
             file,
         )?;
         Ok(HlsManifest(mem_file))

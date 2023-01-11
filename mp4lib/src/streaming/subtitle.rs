@@ -6,7 +6,6 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::str::FromStr;
 
 use scan_fmt::scan_fmt;
-use whatlang::detect;
 
 use super::fragment::FragmentSource;
 use crate::boxes::sbtl::Tx3GTextSample;
@@ -312,7 +311,7 @@ pub fn duration(fspath: &str) -> io::Result<f64> {
     while let Some(sample) = stf.next() {
         duration = std::cmp::max(duration, sample.start + sample.duration);
     }
-    Ok(duration as f64 / 1000_f64)
+    Ok((duration as f64 / 1000_f64).ceil())
 }
 
 struct SubtitleSample {
@@ -337,11 +336,14 @@ impl SubtitleFile {
     }
 
     fn read_line(&mut self, line: &mut String) -> io::Result<usize> {
+        if self.pos == self.data.len() {
+            return Ok(0);
+        }
         match self.data[self.pos..].find('\n') {
             Some(off) => {
                 let npos = self.pos + off + 1;
                 line.push_str(&self.data[self.pos..npos]);
-                self.pos += npos;
+                self.pos = npos;
                 if line.ends_with("\r\n") {
                     line.truncate(line.len() - 2);
                     line.push('\n');
@@ -449,8 +451,6 @@ fn decode_and_read(name: &str, detect_only: bool) -> io::Result<(String, &'stati
                 // add the line to the sample we're going to use for language detection.
                 if sample.len() < 4096 {
                     sample.extend(line);
-                } else if detect_only {
-                    break;
                 }
 
                 // 0xb6 is ¶, the paragraph sign. often used as musical note.
@@ -478,7 +478,7 @@ fn decode_and_read(name: &str, detect_only: bool) -> io::Result<(String, &'stati
     // detect the language, if needed.
     let lang = if tld.is_none() || detect_only {
         let (sample, _, _) = encoding.decode(&sample);
-        detect(&sample).map(|i| i.lang().code()).unwrap_or("und")
+        whatlang::detect_lang(&sample).map(|l| l.code()).unwrap_or("und")
     } else {
         "und"
     };
@@ -547,11 +547,94 @@ fn read_subtitle(filename: &str) -> io::Result<String> {
     Ok(subs)
 }
 
-/// Subtitle files should have a language tag embedded in the filename.
-/// However, if they don't, this can probe the language of the cues.
-pub fn subtitle_probe_lang(filename: &str) -> io::Result<&'static str> {
-    let (_, lang, _) = decode_and_read(filename, true)?;
-    Ok(lang)
+// See if a language string in the form "nl", "dut", "nl_NL" is a known
+// language, then map that to the shortest ISO-639 string (2 or 3 chars).
+fn valid_lang(lang: &str) -> Option<&'_ str> {
+    use isolang::Language;
+
+    if lang.contains("_") {
+        let lang = lang.split('_').next().unwrap();
+        if Language::from_639_1(lang).is_some() {
+            return Some(lang);
+        }
+    }
+
+    match lang.len() {
+        2 => Language::from_639_1(lang).map(|_| lang),
+        3 => {
+            let l3 = Language::from_639_3(lang)?;
+            l3.to_639_1().or_else(|| Some(l3.to_639_3()))
+        },
+        _ => None,
+    }
+}
+
+/// Get the subtitle info from the tags embedded in the filename. If the 
+/// filename doesn't include a language tag, the file is opened and
+/// we probe for the filename using [whatlang](https://docs.rs/whatlang).
+///
+/// If the `mp4file` is passed, that filename without `.mp4` is used as
+/// a basename. If the `filename` starts with `basename`, only tags
+/// _after_ that are considered. As a result, with `video.en.nl.srt`
+/// and `video.en.mp4`, `en` is not seen as a tag, only `nl` is.
+///
+/// Returns a tuple with:
+/// - ISO-693 language tag (2 letter code or 3 letter code)
+/// - sdh
+/// - forced
+///
+/// See also:
+/// - https://jellyfin.org/docs/general/server/media/external-files/ (naming)
+/// - https://www.rfc-editor.org/rfc/rfc5646 (language codes).
+///
+pub fn subtitle_info(filename: &str, mp4file: Option<&str>) -> io::Result<(String, bool, bool)> {
+    let mut forced = false;
+    let mut sdh = false;
+    let mut lang = None;
+    let mut used_prefix = false;
+
+    if let Some(prefix) = mp4file.and_then(|f| f.strip_suffix("mp4")) {
+        if let Some(suffix) = filename.strip_prefix(prefix) {
+            let mut flags = suffix.split('.');
+            // First flag is the language.
+            lang = flags.next();
+            for flag in flags {
+                match flag {
+                    "sdh"|"cc"|"hi" => sdh = true,
+                    "forced"|"foreign" => forced = true,
+                    _ => {},
+                }
+            }
+            used_prefix = true;
+        }
+    }
+
+    if !used_prefix {
+        // Start at the last flag and work in reverse.
+        // Heuristic: first unknown flag must be the language.
+        for flag in filename.rsplit('.').skip(1) {
+            match flag {
+                "sdh"|"cc"|"hi" => sdh = true,
+                "forced"|"foreign" => forced = true,
+                _ => {
+                    lang = Some(flag);
+                    break;
+                }
+            }
+        }
+    }
+
+    if let Some(l) = lang {
+        lang = match valid_lang(l) {
+            Some(l) => Some(l),
+            None => {
+                let (_, l, _) = decode_and_read(filename, true)?;
+                (l != "und").then(|| valid_lang(l)).flatten()
+            }
+        }
+    }
+
+    Ok((lang.unwrap_or("und").to_string(), sdh, forced))
 }
 
 // parse 04:02.500 --> 04:05.000
