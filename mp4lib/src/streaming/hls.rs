@@ -879,6 +879,7 @@ fn hls_subtitle(dirname: &str, name: &str) -> io::Result<String> {
     m += "#EXT-X-VERSION:6\n";
     m += "## Created by mp4lib.rs\n";
     m += "#\n";
+    m += "#EXT-X-INDEPENDENT-SEGMENTS\n";
     m += &format!("#EXT-X-TARGETDURATION:{}\n", duration);
     m += "#EXT-X-PLAYLIST-TYPE:VOD\n";
     m += &format!("#EXTINF:{}\n", duration);
