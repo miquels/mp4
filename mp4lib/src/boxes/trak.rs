@@ -90,13 +90,15 @@ impl TrackBox {
     /// If there are multiple edits, this will only return the offset from the
     /// first edit. TODO: maybe we should return an error in that case.
     ///
-    /// If there's an initial empty edit, it is ignored. Deal with it another way.
+    /// If there's an initial empty edit, it is ignored. Deal with it another way,
+    /// for example with `initial_empty_edit_to_dwell` (for video) or just
+    /// ignore it (for audio).
     ///
     /// Return value is expressed in movie timescale units.
     pub fn composition_time_shift(&self) -> Option<u32> {
         if let Some(elst) = self.edit_list() {
            for entry in &elst.entries {
-                if elst.entries[0].media_time > 0 {
+                if entry.media_time > 0 {
                     return Some(entry.media_time as u32);
                 }
             }
@@ -110,16 +112,35 @@ impl TrackBox {
     /// first sample with the length of the empty edit.
     pub fn initial_empty_edit_to_dwell(&mut self) {
 
-        let edit = match self.edit_list_mut() {
-            Some(elst) => {
-                if elst.entries[0].media_time >= 0 {
-                    return;
-                }
-                elst.entries.vec.remove(0)
-            },
-            None => return,
+        let handler = self.media().handler();
+        let (is_audio, is_video) = (handler.is_audio(), handler.is_video());
+        let media_timescale = self.media().media_header().timescale;
+
+        // Initial empty edit?
+        let elst = match self.edit_list_mut() {
+            Some(elst) if elst.entries[0].media_time < 0 => elst,
+            _ => return,
         };
 
+        // audio often has fixed-length samples and it would confuse the codec to lengthen
+        // the first sample. However, if it a very short empty edit, just get rid of it.
+        if is_audio {
+            if media_timescale > 0 {
+                let d = elst.entries[0].segment_duration as f64 / (media_timescale as f64);
+                // less than 2.5 ms .. we don't care.
+                if d < 0.0025 {
+                    elst.entries.vec.remove(0);
+                }
+            }
+            return;
+        }
+
+        // the below only works for video.
+        if !is_video {
+            return;
+        }
+
+        let edit = elst.entries.vec.remove(0);
         let media_timescale = self.media().media_header().timescale as u64;
         let segment_duration = edit.segment_duration as u64;
         let offset = (media_timescale * segment_duration / self.movie_timescale as u64) as u32;

@@ -136,7 +136,15 @@ fn fmp4_track(movie: &MovieBox, trak: &TrackBox, track_id: u32) -> TrackBox {
             }
 
             if entry.media_time >= 0 {
-                // XXX log warning/error if this is _not_ the last edit.
+                if idx != elst.entries.len() - 1 {
+                    // XXX warn here, or when opening the mp4?
+                    log::warn!(
+                        "fmp4_track: track #{} elst entry #{} media_time {}: not last entry",
+                        trak.track_id(),
+                        idx,
+                        entry.media_time
+                    );
+                }
                 // set duration to zero, the init segment has no frames.
                 entry.segment_duration = 0;
                 new_elst.entries.push(entry);
