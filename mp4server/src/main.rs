@@ -120,7 +120,7 @@ async fn serve(opts: ServeOpts) -> Result<()> {
     {
         let addr = IpAddr::V6(Ipv6Addr::from(0u128));
         let sockaddr = SocketAddr::new(addr, opts.port);
-        let svc = app.into_make_service_with_connect_info::<SocketAddr, _>();
+        let svc = app.into_make_service_with_connect_info::<SocketAddr>();
         axum::Server::bind(&sockaddr).serve(svc).await.unwrap();
     }
 
