@@ -454,7 +454,7 @@ impl HlsMaster {
                 continue;
             }
 
-            let avg_bw = track.size / cmp::max(1, track.duration.as_secs());
+            let avg_bw = 8 * track.size / cmp::max(1, track.duration.as_secs());
             if let Some(entry) = audio_codecs.get_mut(&info.codec_id) {
                 if avg_bw > *entry {
                     *entry = avg_bw;
@@ -623,7 +623,7 @@ impl HlsMaster {
             if track.duration.as_secs() == 0 {
                 continue;
             }
-            let avg_bw = track.size / cmp::max(1, track.duration.as_secs());
+            let avg_bw = 8 * track.size / cmp::max(1, track.duration.as_secs()) * 8;
             video = Some(Video {
                 track_id: track.id,
                 bandwidth: avg_bw,
