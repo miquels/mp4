@@ -23,6 +23,7 @@ pub fn open_mp4(path: impl Into<String>, mmap_all: bool) -> io::Result<Arc<MP4>>
             // TODO?: we probably should only do this for fragmented mp4,
             // not for pseudo-streaming mp4.
             for track in mp4.movie_mut().tracks_mut().iter_mut() {
+                track.convert_to_negative_composition_offset();
                 track.initial_empty_edit_to_dwell();
             }
             let mp4 = Arc::new(mp4);

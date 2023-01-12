@@ -106,6 +106,54 @@ impl TrackBox {
         None
     }
 
+    /// Change editlist entry + version 0 CTTS into no editlist entry +
+    /// version 1 CTTS (with begative offsets).
+    pub fn convert_to_negative_composition_offset(&mut self) {
+        let id = self.track_id();
+        let elst = match self.edit_list() {
+            Some(elst) => elst,
+            None => return,
+        };
+
+        // We _could_ probably handle this. Should we bother? Or panic?
+        if elst.entries.iter().filter(|e| e.media_time > 0).count() > 1 {
+            log::warn!(
+                "track #{}: more than one edit list with media_time > 0",
+                id,
+            );
+        }
+
+        // See if there's a edit list for this.
+        let mut offset = 0;
+        let mut idx = 0;
+        while idx < elst.entries.len() {
+            if elst.entries[idx].media_time <= 0 {
+                idx += 1;
+                continue;
+            }
+            offset = elst.entries[idx].media_time;
+            break;
+        }
+        if offset == 0 {
+            return;
+        }
+
+        // get a handle to the CTTS table.
+        let stbl = self.media_mut().media_info_mut().sample_table_mut();
+        let ctts = match stbl.composition_time_to_sample_mut() {
+            Some(ctts) => ctts,
+            None => return,
+        };
+
+        // Adjust the offsets.
+        for entry in ctts.entries.iter_mut() {
+            entry.offset -= offset as i32;
+        }
+
+        // And remove the edit list entry.
+        let elst = self.edit_list_mut().unwrap();
+        elst.entries.vec.remove(idx);
+    }
 
     /// See if the track has an edit list. If so, check if there is an initial
     /// empty edit. If so, delete that edit, and extend the duration of the
@@ -114,7 +162,7 @@ impl TrackBox {
 
         let handler = self.media().handler();
         let (is_audio, is_video) = (handler.is_audio(), handler.is_video());
-        let media_timescale = self.media().media_header().timescale;
+        let media_timescale = self.media().media_header().timescale as u64;
 
         // Initial empty edit?
         let elst = match self.edit_list_mut() {
@@ -127,8 +175,8 @@ impl TrackBox {
         if is_audio {
             if media_timescale > 0 {
                 let d = elst.entries[0].segment_duration as f64 / (media_timescale as f64);
-                // less than 2.5 ms .. we don't care.
-                if d < 0.0025 {
+                // less than 10 ms .. we don't care.
+                if d < 0.01 {
                     elst.entries.vec.remove(0);
                 }
             }
@@ -141,7 +189,6 @@ impl TrackBox {
         }
 
         let edit = elst.entries.vec.remove(0);
-        let media_timescale = self.media().media_header().timescale as u64;
         let segment_duration = edit.segment_duration as u64;
         let offset = (media_timescale * segment_duration / self.movie_timescale as u64) as u32;
 
