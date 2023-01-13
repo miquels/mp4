@@ -406,6 +406,9 @@ impl Display for HlsMaster {
         if let Some(video) = self.video.as_ref() {
             let mut streaminf = ExtXStreamInf {
                 bandwidth: video.bandwidth,
+                // Apple's `mediastreamvalidator` utility says that avg_bandwidth
+                // is not optional, so let's include it always. XXX is this right?
+                avg_bandwidth: Some(video.bandwidth),
                 codecs: vec![video.codec.clone()],
                 subtitles: self.subtitles.len() > 0,
                 resolution: video.resolution,
