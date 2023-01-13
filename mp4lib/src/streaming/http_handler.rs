@@ -178,7 +178,7 @@ pub async fn handle_hls(
     // HLS manifest.
     if extra.ends_with(".m3u8") {
         let data = task::block_in_place(|| {
-            let mp4 = super::lru_cache::open_mp4(path, false)?;
+            let mp4 = super::lru_cache::open_mp4(path, false, true)?;
             hls::HlsManifest::from_uri(&*mp4, extra, filter_subs, max_segment_size)
         })?;
         return Ok(Some(serve_file(req, data.0).await.box_body()));
@@ -187,7 +187,7 @@ pub async fn handle_hls(
     // Media data.
     if extra.ends_with(".mp4") || extra.ends_with(".m4a") || extra.ends_with(".vtt") {
         let data = task::block_in_place(|| {
-            let mp4 = super::lru_cache::open_mp4(path, false)?;
+            let mp4 = super::lru_cache::open_mp4(path, false, true)?;
             hls::MediaSegment::from_uri(&*mp4, extra, range_end(req))
         })?;
         return Ok(Some(serve_file(req, data.0).await.box_body()));
@@ -249,7 +249,7 @@ pub async fn handle_pseudo(req: &Request<()>, path: FsPath<'_>) -> io::Result<Op
             return Ok(Some(response));
         }
         let file = task::block_in_place(|| fs::File::open(&caps[1]))?;
-        let mp4 = task::block_in_place(|| super::lru_cache::open_mp4(path, false))?;
+        let mp4 = task::block_in_place(|| super::lru_cache::open_mp4(path, false, true))?;
 
         let info = crate::track::track_info(&mp4);
         let body = serde_json::to_string_pretty(&info).unwrap();

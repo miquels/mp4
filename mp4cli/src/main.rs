@@ -416,7 +416,7 @@ fn mediainfo(opts: MediainfoOpts) -> Result<()> {
 
 fn dump(opts: DumpOpts) -> Result<()> {
     let mut reader = Mp4File::open(&opts.input, false)?;
-    let mp4 = MP4::read(&mut reader)?;
+    let mp4 = MP4::read_dont_validate(&mut reader)?;
 
     let infh = reader.file();
     let stdout = io::stdout();
@@ -473,7 +473,11 @@ fn dump(opts: DumpOpts) -> Result<()> {
 
 fn boxes(opts: BoxesOpts) -> Result<()> {
     let mut reader = Mp4File::open(&opts.input, true)?;
-    let mut mp4 = MP4::read(&mut reader)?;
+    let mut mp4 = if opts.track.is_some() {
+        MP4::read(&mut reader)?
+    } else {
+        MP4::read_dont_validate(&mut reader)?
+    };
 
     if opts.nolimit {
         use std::sync::atomic::Ordering;

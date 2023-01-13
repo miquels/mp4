@@ -8,7 +8,7 @@ def_box! {
     },
     fourcc => "ctts",
     version => [0, entries],
-    impls => [ boxinfo, debug, fromtobytes ],
+    impls => [ boxinfo, debug, fromtobytes, fullbox ],
 }
 
 impl CompositionOffsetBox {
@@ -23,16 +23,6 @@ impl CompositionOffsetBox {
             iter.cur_entry = iter.entries[0].clone();
         }
         iter
-    }
-}
-
-impl FullBox for CompositionOffsetBox {
-    fn version(&self) -> Option<u8> {
-        if self.entries.iter().any(|e| e.offset < 0) {
-            Some(1)
-        } else {
-            None
-        }
     }
 }
 

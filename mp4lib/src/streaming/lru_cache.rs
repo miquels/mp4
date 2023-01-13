@@ -12,7 +12,7 @@ use crate::mp4box::MP4;
 
 /// A cached version of [`Mp4File::open`](crate::io::Mp4File::open) and
 /// [`MP4::read`](crate::MP4::read).
-pub fn open_mp4(path: impl Into<String>, mmap_all: bool) -> io::Result<Arc<MP4>> {
+pub fn open_mp4(path: impl Into<String>, mmap_all: bool, check_editlist: bool) -> io::Result<Arc<MP4>> {
     static MP4_FILES: Lazy<LruCache<String, Arc<MP4>>> = Lazy::new(|| LruCache::new(Duration::new(60, 0)));
     let path = path.into();
     let mp4 = match MP4_FILES.get(&path) {
@@ -20,6 +20,17 @@ pub fn open_mp4(path: impl Into<String>, mmap_all: bool) -> io::Result<Arc<MP4>>
         None => {
             let mut reader = Mp4File::open(&path, mmap_all)?;
             let mut mp4 = MP4::read(&mut reader)?;
+            if check_editlist {
+                let mut valid = true;
+                for track in mp4.movie().tracks().iter() {
+                    if track.validate_simple_editlist() == false {
+                        valid = false;
+                    }
+                }
+                if !valid {
+                    return Err(ioerr!(InvalidInput, "cannot handle complicated EditList in MP4"));
+                }
+            }
             // TODO?: we probably should only do this for fragmented mp4,
             // not for pseudo-streaming mp4.
             for track in mp4.movie_mut().tracks_mut().iter_mut() {
@@ -32,6 +43,7 @@ pub fn open_mp4(path: impl Into<String>, mmap_all: bool) -> io::Result<Arc<MP4>>
         },
     };
     MP4_FILES.expire();
+
     Ok(mp4)
 }
 

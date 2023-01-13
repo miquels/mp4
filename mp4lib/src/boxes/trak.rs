@@ -1,7 +1,7 @@
 use std::io;
 
 use crate::boxes::prelude::*;
-use crate::boxes::{AacSampleEntry, SampleTableBox, TrackHeaderBox, MediaBox, EditBox, EditListBox};
+use crate::boxes::{AacSampleEntry, TrackHeaderBox, MediaBox, EditBox, EditListBox};
 use crate::sample_info::sample_info_iter;
 
 #[doc(inline)]
@@ -213,6 +213,16 @@ impl TrackBox {
         entries[0].delta += offset;
     }
 
+    fn duration_to_secs(&self, duration: impl Into<u64>, media: bool) -> f64 {
+        let duration = duration.into() as f64;
+        let timescale = if media {
+            self.media().media_header().timescale
+        } else {
+            self.movie_timescale
+        };
+        duration / std::cmp::max(1, timescale) as f64
+    }
+
     /// Check if this track is valid (has header and media boxes).
     pub fn is_valid(&self) -> bool {
         let mut valid = true;
@@ -237,44 +247,123 @@ impl TrackBox {
             },
         }
 
-        // The must be exactly one MediaBox present.
-        match first_box!(&self.boxes, SampleTableBox) {
-            Some(m) => {
-                if !m.is_valid() {
-                    valid = false;
-                }
-            },
-            None => {
-                log::error!("TrackBox(id {}): no SampleTableBox present", track_id);
+        if let Some(_) = self.edit_list() {
+            let tkhd = self.track_header();
+            if tkhd.duration.0 == 0 {
+                log::error!("TrackBox(id {}): duration 0, but has an edit list!", track_id);
                 valid = false;
-            },
+            }
         }
 
-        // If there is an edit list, the first entry must be valid
-        // for the entire track.
-        if let Some(elst) = self.edit_list() {
-            let tkhd = self.track_header();
-            if tkhd.duration.0 != 0 {
+        valid
+    }
 
-                // If the first entry has about the same duration as the track,
-                // assume it covers the entire track.
-                let entry = &elst.entries[0];
-                let x = (entry.segment_duration as f64) / (tkhd.duration.0 as f64);
-                if x < 0.95f64 {
-                    log::error!("TrackBox(id {}): EditBox: first entry: does not cover entire duration", track_id);
+    /// If the track has an edit list, see if it is a simple one, so
+    /// that it's possible to transmux this track into an fMP4 track.
+    ///
+    /// We accept:
+    /// - zero or one empty edits at the start
+    /// - zero or one negative edits at the start
+    /// - followed by zero or on edits over the entire track (for CTTS offsets).
+    ///
+    pub fn validate_simple_editlist(&self) -> bool {
+        let track_id = self.track_id();
+        let mut valid = true;
+
+        let elst = match self.edit_list() {
+            Some(elst) => elst,
+            None => return valid,
+        };
+        let tkhd = self.track_header();
+
+        let mut ctts_shift = false;
+        for idx in 0 .. elst.entries.len() {
+            let entry = &elst.entries[idx];
+
+            if entry.media_rate != 1 {
+                log::error!("TrackBox(id {}): edit list entry #{}: media_rate {}",
+                    track_id,
+                    idx,
+                    entry.media_rate
+                );
+                valid = false;
+                continue;
+            }
+
+            if entry.media_time < 0 {
+                if idx != 0 {
+                    log::error!("TrackBox(id {}): edit list entry #{}: media_time < 0",
+                        track_id,
+                        idx,
+                    );
                     valid = false;
                 }
-                if entry.media_rate != 1 {
-                    log::error!("TrackBox(id {}): EditBox: first entry: does not have media_rate 1", track_id);
+                continue;
+            }
+
+            if entry.segment_duration == 0 {
+                if idx != 0 {
+                    log::error!("TrackBox(id {}): edit list entry #{}: \
+                                 segment_duration = 0",
+                        track_id,
+                        idx)
+                    ;
                     valid = false;
+                    continue;
                 }
-                if entry.media_time > i32::MAX as i64 {
-                    log::error!("TrackBox(id {}): EditBox: first entry: media_time too large", track_id);
-                    valid = false;
+
+                let d = self.duration_to_secs(entry.segment_duration, false);
+                if d > 1.0 {
+                    log::warn!("TrackBox(id {}): edit list entry #{}: priming: \
+                                segment_duration > 1 ({:.3})",
+                        idx,
+                        track_id,
+                        d
+                    );
                 }
-                if entry.media_time < 0 {
-                    log::error!("TrackBox(id {}): EditBox: first entry: media_time negative", track_id);
-                    valid = false;
+                continue;
+            }
+
+            if ctts_shift {
+                log::warn!("TrackBox(id {}): edit list entry #{}: \
+                            spurious edit at end of track (ignored)",
+                    track_id,
+                    idx,
+                );
+                continue;
+            }
+            ctts_shift = true;
+
+            // Check that this edit convers the entire track.
+            let seg_d = self.duration_to_secs(entry.segment_duration, false);
+            let track_d = self.duration_to_secs(tkhd.duration.0, false);
+            if seg_d / track_d < 0.98 {
+                log::error!("TrackBox(id {}): edit list entry #{}: \
+                            segment_duration != track duration ({:.0}/{:.0})",
+                     track_id,
+                    idx,
+                    seg_d,
+                    track_d,
+                );
+                valid = false;
+                break;
+            }
+
+            // Do a check to see if the segment duration is the same as the
+            // offset of the first CTTS entry.
+            let stbl = self.media().media_info().sample_table();
+            if let Some(ctts) = stbl.composition_time_to_sample() {
+                if ctts.entries.len() > 0 {
+                    let offset = ctts.entries[0].offset;
+                    if offset as i64 != entry.media_time {
+                        log::warn!("TrackBox(id {}): edit list entry #{}: \
+                                    ,media_time != ctts[0].offset ({} - {})",
+                            track_id,
+                            idx,
+                            entry.media_time,
+                            offset,
+                        );
+                    }
                 }
             }
         }

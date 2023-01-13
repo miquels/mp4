@@ -124,7 +124,7 @@ impl SampleTableBox {
         }
 
         if let Some(box_) = first_box!(&self.boxes, SampleSizeBox) {
-            if box_.entries.len() == 0 {
+            if box_.size == 0 && box_.entries.len() == 0 {
                 log::error!("SampleTableBox: SampleSizeBox: no entries");
                 valid = false;
             }

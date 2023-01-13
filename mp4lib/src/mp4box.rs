@@ -342,6 +342,18 @@ impl Debug for MP4 {
 impl MP4 {
     /// Read a ISOBMFF box structure into memory.
     pub fn read<R: ReadBytes>(file: R) -> io::Result<MP4> {
+        MP4::read2(file, true)
+    }
+
+    /// Read a ISOBMFF box structure into memory.
+    ///
+    /// The resulting `MP4` is not validated, so if there's no `moov` box
+    /// and you call `MP4.movie()` the library will panic.
+    pub fn read_dont_validate<R: ReadBytes>(file: R) -> io::Result<MP4> {
+        MP4::read2(file, false)
+    }
+
+    fn read2<R: ReadBytes>(file: R, validate: bool) -> io::Result<MP4> {
         let data_ref = file.data_ref(file.size())?;
         let input_file = file.input_filename().map(|s| s.to_string());
         let boxes = read_boxes(file)?;
@@ -350,6 +362,11 @@ impl MP4 {
             data_ref,
             input_file,
         };
+        if validate {
+            if !mp4.is_valid() {
+                return Err(ioerr!(InvalidInput, "invalid MP4 file"));
+            }
+        }
         Ok(mp4)
     }
 
