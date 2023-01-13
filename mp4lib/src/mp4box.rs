@@ -345,12 +345,11 @@ impl MP4 {
         let data_ref = file.data_ref(file.size())?;
         let input_file = file.input_filename().map(|s| s.to_string());
         let boxes = read_boxes(file)?;
-        let mut mp4 = MP4 {
+        let mp4 = MP4 {
             boxes,
             data_ref,
             input_file,
         };
-        mp4.insert_file_type_box();
         Ok(mp4)
     }
 
@@ -408,6 +407,7 @@ impl MP4 {
     }
     */
 
+    /*
     pub(crate) fn insert_file_type_box(&mut self) {
         if first_box!(&self.boxes, FileTypeBox).is_some() {
             return;
@@ -418,7 +418,7 @@ impl MP4 {
             compatible_brands: vec![FourCC::new("mp41")],
         };
         self.boxes.insert(0, MP4Box::FileTypeBox(ftype));
-    }
+    }*/
 }
 
 /// Read a collection of boxes from a stream.

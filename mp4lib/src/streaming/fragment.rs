@@ -360,6 +360,13 @@ pub fn movie_fragment(mp4: &MP4, seq_num: u32, source: &[FragmentSource]) -> io:
     let movie = mp4.movie();
     let mut mdat = MediaDataBox::default();
 
+    // Start with the SegmentTypeBox.
+    let styp = SegmentTypeBox {
+        major_brand: FourCC::new("iso5"),
+        minor_version: 1,
+        compatible_brands: vec![FourCC::new("avc1"), FourCC::new("mp41")],
+    };
+
     // Create moof and push movie fragment header.
     let mut moof = MovieFragmentBox::default();
     moof.boxes.push(
@@ -402,8 +409,9 @@ pub fn movie_fragment(mp4: &MP4, seq_num: u32, source: &[FragmentSource]) -> io:
         }
     }
 
-    // moof + mdat.
+    // styp + moof + mdat.
     let mut boxes = Vec::new();
+    boxes.push(styp.to_mp4box());
     boxes.push(moof.to_mp4box());
     boxes.push(mdat.to_mp4box());
 
