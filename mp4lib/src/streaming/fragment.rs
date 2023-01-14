@@ -145,9 +145,11 @@ fn fmp4_track(movie: &MovieBox, trak: &TrackBox, track_id: u32) -> TrackBox {
                         entry.media_time
                     );
                 }
-                // set duration to zero, the init segment has no frames.
-                entry.segment_duration = 0;
-                new_elst.entries.push(entry);
+                if entry.media_time > 0 {
+                    // set duration to zero, the init segment has no frames.
+                    entry.segment_duration = 0;
+                    new_elst.entries.push(entry);
+                }
                 break;
             }
             new_elst.entries.push(entry);

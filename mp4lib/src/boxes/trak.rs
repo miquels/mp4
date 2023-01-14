@@ -90,9 +90,8 @@ impl TrackBox {
     /// If there are multiple edits, this will only return the offset from the
     /// first edit. TODO: maybe we should return an error in that case.
     ///
-    /// If there's an initial empty edit, it is ignored. Deal with it another way,
-    /// for example with `initial_empty_edit_to_dwell` (for video) or just
-    /// ignore it (for audio).
+    /// If there's an initial empty edit, you should probably also take that into
+    /// account. This method can't.
     ///
     /// Return value is expressed in movie timescale units.
     pub fn composition_time_shift(&self) -> Option<u32> {
@@ -160,9 +159,10 @@ impl TrackBox {
     /// first sample with the length of the empty edit.
     pub fn initial_empty_edit_to_dwell(&mut self) {
 
-        let handler = self.media().handler();
-        let (is_audio, is_video) = (handler.is_audio(), handler.is_video());
+        // let handler = self.media().handler();
+        // let (is_audio, is_video) = (handler.is_audio(), handler.is_video());
         let media_timescale = self.media().media_header().timescale as u64;
+        let movie_timescale = self.movie_timescale;
 
         // Initial empty edit?
         let elst = match self.edit_list_mut() {
@@ -170,15 +170,18 @@ impl TrackBox {
             _ => return,
         };
 
+/*
+        FIXME: initial_empty_edit_to_dwell doesn't work to well on audio tracks.
+               This can be fixed by updating `tfdt` instead. For now, just leave
+               it like this, because after the initial segment it has the same effect.
+
         // audio often has fixed-length samples and it would confuse the codec to lengthen
         // the first sample. However, if it a very short empty edit, just get rid of it.
         if is_audio {
-            if media_timescale > 0 {
-                let d = elst.entries[0].segment_duration as f64 / (media_timescale as f64);
-                // less than 10 ms .. we don't care.
-                if d < 0.01 {
-                    elst.entries.vec.remove(0);
-                }
+            let d = elst.entries[0].segment_duration as f64 / (movie_timescale as f64);
+            // less than 10 ms .. we don't care.
+            if d < 0.01 {
+                elst.entries.vec.remove(0);
             }
             return;
         }
@@ -187,10 +190,10 @@ impl TrackBox {
         if !is_video {
             return;
         }
-
+*/
         let edit = elst.entries.vec.remove(0);
         let segment_duration = edit.segment_duration as u64;
-        let offset = (media_timescale * segment_duration / self.movie_timescale as u64) as u32;
+        let offset = (media_timescale * segment_duration / movie_timescale as u64) as u32;
 
         let stts = self
             .media_mut()
