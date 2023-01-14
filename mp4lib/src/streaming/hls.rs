@@ -236,8 +236,10 @@ impl Display for ExtXMedia {
 pub struct Video {
     /// MP4 track id
     pub track_id: u32,
+    /// Average bandwidth
+    pub avg_bandwidth: u64,
     /// Peak bandwidth
-    pub bandwidth: u64,
+    pub peak_bandwidth: u64,
     /// Codec (e.g. "avc1.4d401f")
     pub codec: String,
     /// Width x height
@@ -405,10 +407,10 @@ impl Display for HlsMaster {
 
         if let Some(video) = self.video.as_ref() {
             let mut streaminf = ExtXStreamInf {
-                bandwidth: video.bandwidth,
+                bandwidth: video.peak_bandwidth,
                 // Apple's `mediastreamvalidator` utility says that avg_bandwidth
                 // is not optional, so let's include it always. XXX is this right?
-                avg_bandwidth: Some(video.bandwidth),
+                avg_bandwidth: Some(video.avg_bandwidth),
                 codecs: vec![video.codec.clone()],
                 subtitles: self.subtitles.len() > 0,
                 resolution: video.resolution,
@@ -421,7 +423,8 @@ impl Display for HlsMaster {
             if self.audio_codecs.len() > 0 {
                 for (audio_codec, audio_bw) in self.audio_codecs.iter() {
                     streaminf.audio = Some(format!("audio/{}", audio_codec));
-                    streaminf.bandwidth = video.bandwidth + *audio_bw as u64;
+                    streaminf.avg_bandwidth = Some(video.avg_bandwidth + *audio_bw as u64);
+                    streaminf.bandwidth = video.peak_bandwidth + *audio_bw as u64;
                     streaminf.codecs = vec![video.codec.to_string(), audio_codec.to_string()];
                     streaminf.fmt(f)?;
                 }
@@ -622,14 +625,24 @@ impl HlsMaster {
                 SpecificTrackInfo::VideoTrackInfo(info) => info,
                 _ => continue,
             };
+
             // Skip empty tracks.
             if track.duration.as_secs() == 0 {
                 continue;
             }
-            let avg_bw = 8 * track.size / cmp::max(1, track.duration.as_secs()) * 8;
+
+            let avg_bw = track.size / cmp::max(1, track.duration.as_secs()) * 8;
+            let mut peak_bw = avg_bw;
+            if let Some(trak) = mp4.movie().track_by_id(track.id) {
+                if let Ok(bw) = super::segmenter::track_segment_peak_bw(trak, None, None) {
+                    peak_bw = bw * 8;
+                }
+            }
+
             video = Some(Video {
                 track_id: track.id,
-                bandwidth: avg_bw,
+                avg_bandwidth: avg_bw,
+                peak_bandwidth: peak_bw,
                 codec: info.codec_id.clone(),
                 resolution: (info.width, info.height),
                 frame_rate: info.frame_rate,

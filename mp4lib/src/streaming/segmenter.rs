@@ -7,8 +7,14 @@ use crate::boxes::*;
 use std::cmp::Ordering;
 use std::io;
 
-const MAX_SEGMENT_DURATION_MERGED: f64 = 6.01;
-const MAX_SEGMENT_DURATION_MERGED2: f64 = 10.01;
+// For the first 6 seconds.
+const MAX_SEGMENT_DURATION_INIT: f64 = 2.01;
+// Normal max.
+const MAX_SEGMENT_DURATION: f64 = 6.01;
+// Max if this is the first fragment of a segment and it's short (<1.2s),
+// or if the fragment we're merging into this segment is non-sync,
+// to improve the chances of it being merged.
+const MAX_SEGMENT_DURATION_LONG: f64 = 10.01;
 
 /// A segment.
 ///
@@ -90,10 +96,14 @@ fn squish_subtitle(s: Vec<Segment_>) -> Vec<Segment> {
     v
 }
 
-fn squish(s: Vec<Segment_>, max_segment_size: u32) -> Vec<Segment> {
+// Merge short fragments together, we want to have segments of at least a
+// few seconds ideally.
+fn squish(s: Vec<Segment_>, max_segment_size: u32) -> (Vec<Segment>, u64) {
     let mut v = Vec::new();
-
+    let mut max_bw = 0u64;
     let mut idx = 0;
+    let mut current_time = 0.0;
+
     while idx < s.len() {
         // Create a new Segment struct from the Segment_ struct.
         let st = &s[idx];
@@ -106,38 +116,47 @@ fn squish(s: Vec<Segment_>, max_segment_size: u32) -> Vec<Segment> {
         let mut segment_size = st.size;
         idx += 1;
 
-        // Merge short segments. Not at the beginning though, having a
-        // few short segments at the start might be better.
+        // Merge short segments.
         //
-        // TODO: when creating the fmp4 segment, put these short segments
-        // in multiple MOOF/MDAT frags and flush after each one. Some
-        // players can take advantage of that.
+        // TODO: when creating the fmp4 segment, and the segment exists of
+        // multiple fragments, put the fragments in multiple MOOF/MDAT frags
+        // and flush after each one. Some players can take advantage of that.
         let start_idx = idx;
-        while idx > 8 && idx < s.len() {
+        while idx < s.len() {
             let sn = &s[idx];
 
             let short_initial = idx == start_idx && sb.duration < 1.2;
-            let max_duration = if short_initial || !sn.is_sync {
-                MAX_SEGMENT_DURATION_MERGED2
+            let max_duration = if current_time < MAX_SEGMENT_DURATION {
+                MAX_SEGMENT_DURATION_INIT
+            } else if short_initial || !sn.is_sync {
+                MAX_SEGMENT_DURATION_LONG
             } else {
-                MAX_SEGMENT_DURATION_MERGED
+                MAX_SEGMENT_DURATION
             };
 
+            // Stop if the segment would become to long or too big, however
+            // make sure that the first segment is always at least two seconds.
             let too_long = sb.duration + sn.duration > max_duration;
             let too_big = max_segment_size > 0 && segment_size + sn.size > max_segment_size;
-            if too_big || too_long {
+            if (too_big || too_long) && current_time > 2.0 {
                 break;
             }
 
             sb.end_sample = sn.end_sample;
             sb.duration += sn.duration;
             segment_size += sn.size;
+            current_time += sn.duration;
             idx += 1;
+        }
+
+        let bw = (segment_size as f64 / sb.duration) as u64;
+        if bw > max_bw {
+            max_bw = bw;
         }
 
         v.push(sb);
     }
-    v
+    (v, max_bw)
 }
 
 /// Parse a track into segments, each starting at a sync sample.
@@ -155,6 +174,24 @@ pub fn track_to_segments(
     segment_duration: Option<u32>,
     max_segment_size: Option<u32>,
 ) -> io::Result<Vec<Segment>> {
+    let (segs, _) = track_to_segments2(trak, segment_duration, max_segment_size)?;
+    Ok(segs)
+}
+
+pub(crate) fn track_segment_peak_bw(
+    trak: &TrackBox,
+    segment_duration: Option<u32>,
+    max_segment_size: Option<u32>,
+) -> io::Result<u64> {
+    let (_, bw) = track_to_segments2(trak, segment_duration, max_segment_size)?;
+    Ok(bw)
+}
+
+fn track_to_segments2(
+    trak: &TrackBox,
+    segment_duration: Option<u32>,
+    max_segment_size: Option<u32>,
+) -> io::Result<(Vec<Segment>, u64)> {
     let media = trak.media();
     let table = media.media_info().sample_table();
     let handler = media.handler();
@@ -253,12 +290,12 @@ pub fn track_to_segments(
         cur_time += sample_duration as u64;
     }
 
-    let segments = if handler.is_subtitle() {
-        squish_subtitle(segments)
+    let (segments, max_bw) = if handler.is_subtitle() {
+        (squish_subtitle(segments), 1000)
     } else {
         squish(segments, max_segment_size.unwrap_or(0))
     };
-    Ok(segments)
+    Ok((segments, max_bw))
 }
 
 /// Parse a track into segments, based on a list of segment time/duration.
