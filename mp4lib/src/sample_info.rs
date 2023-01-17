@@ -71,7 +71,7 @@ pub fn sample_info_iter<'a>(trak: &'a TrackBox) -> SampleInfoIterator<'a> {
     let stbl = trak.media().media_info().sample_table();
     let media_timescale = mdhd.timescale;
 
-    let comp_time_shift_ = trak.composition_time_shift().unwrap_or(0) as i32;
+    let comp_time_shift_ = trak.composition_time_shift(false).unwrap_or(0) as i32;
 
     SampleInfoIterator {
         stsz_iter: stbl.sample_size().iter(),
@@ -162,7 +162,7 @@ impl<'a> Iterator for SampleInfoIterator<'a> {
 
         if let Some(ctts_iter) = self.ctts_iter.as_mut() {
             if let Some(delta) = ctts_iter.next() {
-                sample.composition_delta = delta - self.comp_time_shift;
+                sample.composition_delta = delta + self.comp_time_shift;
             }
         }
 

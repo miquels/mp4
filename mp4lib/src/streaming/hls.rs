@@ -443,7 +443,7 @@ impl HlsMaster {
     /// See the documentation of the [`hls_master`][hls_master] function
     /// for details.
     pub fn new(mp4: &MP4, external_subs: bool) -> HlsMaster {
-        let tracks = crate::track::track_info(mp4);
+        let tracks = crate::track::track_info2(mp4, true);
         let mut next_id = tracks.iter().map(|t| t.id).max().unwrap_or(0) + 1;
 
         let mut audio_codecs = HashMap::new();
@@ -871,8 +871,8 @@ pub fn hls_track(mp4: &MP4, track_id: u32, max_segment_size: Option<u32>) -> io:
         // Skip segments that are < 0.1 ms.
         if seg.duration.partial_cmp(&0.0001) == Some(std::cmp::Ordering::Greater) {
             m += &format!(
-                "#EXTINF:{:.5}\n{}/c.{}.{}.{}-{}.{}\n",
-                seg.duration, prefix, track_id, seq, seg.start_sample, seg.end_sample, suffix
+                "#EXTINF:{:.6},{:.6}\n{}/c.{}.{}.{}-{}.{}\n",
+                seg.duration, seg.start_time, prefix, track_id, seq, seg.start_sample, seg.end_sample, suffix
             );
         }
     }

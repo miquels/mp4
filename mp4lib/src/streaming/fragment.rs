@@ -6,6 +6,7 @@
 //! If we split on non-sync samples, the segments are technicaly
 //! not valid CMAF (but will probably work with HLS and DASH).
 //!
+use std::cmp;
 use std::convert::TryInto;
 use std::fs;
 use std::io;
@@ -116,51 +117,6 @@ fn fmp4_track(movie: &MovieBox, trak: &TrackBox, track_id: u32) -> TrackBox {
     tkhd.flags.set_in_movie(true);
     tkhd.flags.set_in_preview(true);
     boxes.push(MP4Box::TrackHeaderBox(tkhd));
-
-    // add EditListBox, if present.
-    if let Some(elst) = trak.edit_list() {
-        // We can deal with only two edits:
-        // - an initial empty edit
-        // - one composition time offset edit over the entire length of the track
-        //   (usually used with version 0 ctts).
-        //
-        // If there are more than two edits, or of another type, then
-        // the movie will most likely not play correctly.
-        let mut new_elst = EditListBox::default();
-        for idx in 0..elst.entries.len() {
-            let mut entry = elst.entries[idx].clone();
-
-            if elst.entries.len() == 1 && entry.media_time == 0 {
-                // Just a single edit covering the whole track, dismiss.
-                break;
-            }
-
-            if entry.media_time >= 0 {
-                if idx != elst.entries.len() - 1 {
-                    // XXX warn here, or when opening the mp4?
-                    log::warn!(
-                        "fmp4_track: track #{} elst entry #{} media_time {}: not last entry",
-                        trak.track_id(),
-                        idx,
-                        entry.media_time
-                    );
-                }
-                if entry.media_time > 0 {
-                    // set duration to zero, the init segment has no frames.
-                    entry.segment_duration = 0;
-                    new_elst.entries.push(entry);
-                }
-                break;
-            }
-            new_elst.entries.push(entry);
-        }
-
-        if new_elst.entries.len() > 0 {
-            let mut edts = EditBox::default();
-            edts.boxes.push(new_elst);
-            boxes.push(edts.to_mp4box());
-        }
-    }
 
     // media box.
     let mdia = trak.media();
@@ -494,9 +450,12 @@ fn track_fragment(
         }
     }
 
+    let shift = track.composition_time_shift(false)?;
+
     // Decode time.
+    let decode_time = first_sample.decode_time + cmp::max(0, shift) as u64;
     let tfdt = TrackFragmentBaseMediaDecodeTimeBox {
-        base_media_decode_time: VersionSizedUint(first_sample.decode_time),
+        base_media_decode_time: VersionSizedUint(decode_time),
     };
     traf.boxes.push(tfdt.to_mp4box());
 
@@ -525,7 +484,7 @@ fn track_fragment(
             sample_size: default_or(&dfl.sample_size, sample.size),
             sample_composition_time_offset: default_or(
                 &dfl.sample_composition_time_offset,
-                sample.composition_delta,
+                sample.composition_delta + cmp::min(shift, 0) as i32,
             ),
         };
         trun.entries.push(entry);

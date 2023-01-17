@@ -16,26 +16,23 @@ pub fn open_mp4(path: impl Into<String>, mmap_all: bool, check_editlist: bool) -
     static MP4_FILES: Lazy<LruCache<String, Arc<MP4>>> = Lazy::new(|| LruCache::new(Duration::new(60, 0)));
     let path = path.into();
     let mp4 = match MP4_FILES.get(&path) {
-        Some(mp4) => mp4,
+        Some(mp4) => {
+            if check_editlist {
+                for track in mp4.movie().tracks().iter() {
+                    track.composition_time_shift(true)?;
+                }
+            }
+            mp4
+        },
         None => {
             let mut reader = Mp4File::open(&path, mmap_all)?;
             let mut mp4 = MP4::read(&mut reader)?;
-            if check_editlist {
-                let mut valid = true;
-                for track in mp4.movie().tracks().iter() {
-                    if track.validate_simple_editlist() == false {
-                        valid = false;
+            for track in mp4.movie_mut().tracks_mut().iter_mut() {
+                if let Err(e) = track.simplify_offsets() {
+                    if check_editlist {
+                        return Err(e);
                     }
                 }
-                if !valid {
-                    return Err(ioerr!(InvalidInput, "cannot handle complicated EditList in MP4"));
-                }
-            }
-            // TODO?: we probably should only do this for fragmented mp4,
-            // not for pseudo-streaming mp4.
-            for track in mp4.movie_mut().tracks_mut().iter_mut() {
-                track.convert_to_negative_composition_offset();
-                track.initial_empty_edit_to_dwell();
             }
             let mp4 = Arc::new(mp4);
             MP4_FILES.put(path, mp4.clone());
