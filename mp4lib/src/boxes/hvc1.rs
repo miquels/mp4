@@ -10,7 +10,7 @@ use crate::boxes::prelude::*;
 use crate::track::VideoTrackInfo;
 
 def_box! {
-    /// HEVC sample entry (VideoSampleEntry 'hvc1' or 'hev1').
+    /// HEVC sample entry (VideoSampleEntry 'hvc1').
     ///
     /// Contains: 
     ///
@@ -46,6 +46,68 @@ def_box! {
 }
 
 impl HEVCSampleEntry {
+    /// Return video specific track info.
+    pub fn track_info(&self) -> VideoTrackInfo {
+        let config = first_box!(self.boxes, HEVCConfigurationBox);
+        let codec_id = match config {
+            Some(ref c) => c.configuration.codec_id(),
+            None => "hvc1.unknown".to_string(),
+        };
+        let codec_name = match config {
+            Some(ref c) => c.configuration.codec_name(),
+            None => "HEVC",
+        }.to_string();
+        let frame_rate = match config {
+            Some(ref c) => c.configuration.frame_rate(),
+            None => 0f64,
+        };
+        VideoTrackInfo {
+            codec_id,
+            codec_name: Some(codec_name.to_string()),
+            width: self.width,
+            height: self.height,
+            frame_rate,
+        }
+    }
+}
+
+def_box! {
+    /// HEV1 sample entry (VideoSampleEntry 'hev1').
+    ///
+    /// Contains: 
+    ///
+    /// - HEVCConfigurationBox (one)
+    /// - MPEG4BitRateBox (optional)
+    /// - MPEG4ExtensionDescriptorsBox (optional)
+    /// - extra boxes.
+    HEV1SampleEntry {
+        skip:                   6,
+        data_reference_index:   u16,
+        skip:                   16,
+        width:                 u16,
+        height:                 u16,
+        // defaults to 72, 72
+        _video_horizontal_dpi:  FixedFloat16_16,
+        _video_vertical_dpi:    FixedFloat16_16,
+        skip:                   4,
+        // defaults to 1
+        _video_frame_count:     u16,
+        // Video encoder name is a fixed-size pascal string.
+        // _video_encoder_name: PascalString<32>,
+        skip:                   32,
+        // defaults to 0x0018;
+        video_pixel_depth:      u16,
+        // always -1
+        _pre_defined:           u16,
+        // hvcC, etc.
+        boxes:              Vec<MP4Box>,
+    },
+    fourcc => "hev1",
+    version => [], 
+    impls => [ basebox, boxinfo, debug, fromtobytes ],
+}
+
+impl HEV1SampleEntry {
     /// Return video specific track info.
     pub fn track_info(&self) -> VideoTrackInfo {
         let config = first_box!(self.boxes, HEVCConfigurationBox);
@@ -172,12 +234,46 @@ impl HEVCDecoderConfigurationRecord {
     /// - profile_compatibility, dot + 32-bit hex number (max 9 chars)
     /// - tier and level, e.g. '.H120' (max 5 chars)
     /// - up to 6 constraint bytes, bytes are dot-separated and hex-encoded.
-    pub fn codec_id(&self) -> String {
+    ///
+    /// This doesn't appear to be right though.
+    pub fn codec_id_as_docced(&self) -> String {
         let profile_space = (self.profile_flags & 0b11100000) >> 5;
         let profile_indication = self.profile_flags & 0b00000111;
         let tier = self.profile_flags & 0x20;
         format!("hcv1.{}{:02x}.{:x}.{}{}",
             (profile_space + 65) as char,
+            profile_indication,
+            self.profile_compatibility,
+            if tier == 0 { 'L' } else { 'H' },
+            self.level_indication,
+        )
+    }
+
+    /// Return codec id.
+    ///
+    /// - 'hev1.' ' prefix (5 chars) [wrong, should either be hcv1 or hev1!!]
+    /// - profile, e.g. '1'
+    /// - profile_compatibility, dot + 32-bit hex number (max 9 chars)
+    /// - tier and level, e.g. '.H120' (max 5 chars)
+    /// - up to 6 constraint bytes, bytes are dot-separated and hex-encoded: 'B0'.
+    ///
+    /// FIXME: I'm not sure how a codec string for HECV should be constructed.
+    /// This seems to work, somewhat, but it creates strings like:
+    ///
+    /// hev1.1.60000000.L120.B0,ac-3
+    ///
+    /// While you would expect
+    ///
+    /// hev1.1.6.L123.B0,ac-3
+    ///
+    /// If anyone can find the documentation, please contact me. Seems
+    /// related to https://www.w3.org/TR/webcodecs-hevc-codec-registration/ .
+    ///
+    pub fn codec_id(&self) -> String {
+        let profile_space = (self.profile_flags & 0b11100000) >> 5;
+        let profile_indication = self.profile_flags & 0b00000111;
+        let tier = self.profile_flags & 0x20;
+        format!("hev1.{:x}.{:x}.{}{}.B0",
             profile_indication,
             self.profile_compatibility,
             if tier == 0 { 'L' } else { 'H' },

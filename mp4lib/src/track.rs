@@ -145,12 +145,23 @@ impl Display for UnknownTrackInfo {
 
 /// Extract general track information for all tracks in the movie.
 pub fn track_info(mp4: &MP4) -> Vec<TrackInfo> {
+    track_info2(mp4, false)
+}
+
+// Extract general track information for all tracks in the movie.
+pub(crate) fn track_info2(mp4: &MP4, for_hls: bool) -> Vec<TrackInfo> {
     let mut v = Vec::new();
 
     let movie = mp4.movie();
     let mvhd = movie.movie_header();
 
     for track in &movie.tracks() {
+        if for_hls {
+            // Skip tracks we cannot handle.
+            if track.composition_time_shift(true).is_err() {
+                continue;
+            }
+        }
         let mut info = TrackInfo::default();
 
         let tkhd = track.track_header();
@@ -186,6 +197,17 @@ pub fn track_info(mp4: &MP4) -> Vec<TrackInfo> {
             avc1_info.frame_rate = (avc1_info.frame_rate * 1000.0).round() / 1000.0;
             info.specific_info = SpecificTrackInfo::VideoTrackInfo(avc1_info);
         } else if let Some(hevc) = first_box!(stsd.entries, HEVCSampleEntry) {
+            let mut hevc_info = hevc.track_info();
+            if hevc_info.frame_rate == 0f64 {
+                let sample_count = stbl.sample_size().count;
+                let timescale = std::cmp::max(1000, mdhd.timescale) as f64;
+                let fr = sample_count as f64 / (mdhd.duration.0 as f64 / timescale);
+                log::debug!("track::track_info: hvcc.framerate == 0, estimate: {}", fr);
+                hevc_info.frame_rate = fr;
+            }
+            hevc_info.frame_rate = (hevc_info.frame_rate * 1000.0).round() / 1000.0;
+            info.specific_info = SpecificTrackInfo::VideoTrackInfo(hevc_info);
+        } else if let Some(hevc) = first_box!(stsd.entries, HEV1SampleEntry) {
             let mut hevc_info = hevc.track_info();
             if hevc_info.frame_rate == 0f64 {
                 let sample_count = stbl.sample_size().count;

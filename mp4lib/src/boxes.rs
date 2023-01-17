@@ -75,6 +75,7 @@ def_boxes! {
     Wide, b"wide";
 
     HEVCSampleEntry, b"hvc1" => hvc1;
+    HEV1SampleEntry, b"hev1";
     HEVCConfigurationBox, b"hvcC";
 
     ProgressiveDownloadInfoBox, b"pdin" => pdin;
