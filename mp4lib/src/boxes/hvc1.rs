@@ -50,7 +50,7 @@ impl HEVCSampleEntry {
     pub fn track_info(&self) -> VideoTrackInfo {
         let config = first_box!(self.boxes, HEVCConfigurationBox);
         let codec_id = match config {
-            Some(ref c) => c.configuration.codec_id(),
+            Some(ref c) => c.configuration.codec_id("hvc1"),
             None => "hvc1.unknown".to_string(),
         };
         let codec_name = match config {
@@ -112,7 +112,7 @@ impl HEV1SampleEntry {
     pub fn track_info(&self) -> VideoTrackInfo {
         let config = first_box!(self.boxes, HEVCConfigurationBox);
         let codec_id = match config {
-            Some(ref c) => c.configuration.codec_id(),
+            Some(ref c) => c.configuration.codec_id("hev1"),
             None => "hvc1.unknown".to_string(),
         };
         let codec_name = match config {
@@ -229,56 +229,53 @@ impl HEVCDecoderConfigurationRecord {
 
     /// Return codec id.
     ///
-    /// - 'hev1.' or 'hvc1.' prefix (5 chars)
-    /// - profile, e.g. '.A12' (max 4 chars)
-    /// - profile_compatibility, dot + 32-bit hex number (max 9 chars)
-    /// - tier and level, e.g. '.H120' (max 5 chars)
-    /// - up to 6 constraint bytes, bytes are dot-separated and hex-encoded.
+    /// - 'hev1.' or 'hvc1. prefix (this is the fourcc)
+    /// - profile space (0 = '', 1 = 'A', 2 = 'B', 3 = 'C').
+    /// - profile_indication in hex
+    /// - profile_compatibility
+    ///   - first reverse the bits
+    ///   - then for each of the 4 bytes of the 32 bits int, dot + byte in hex
+    ///     - start at LSB, trailing zero bytes may be omitted
+    /// - tier and level, e.g. '.H120' (note, decimal)
+    /// - up to 6 constraint bytes, bytes are dot-separated and hex-encoded: '.B0'.
     ///
-    /// This doesn't appear to be right though.
-    pub fn codec_id_as_docced(&self) -> String {
-        let profile_space = (self.profile_flags & 0b11100000) >> 5;
-        let profile_indication = self.profile_flags & 0b00000111;
-        let tier = self.profile_flags & 0x20;
-        format!("hcv1.{}{:02x}.{:x}.{}{}",
-            (profile_space + 65) as char,
-            profile_indication,
-            self.profile_compatibility,
-            if tier == 0 { 'L' } else { 'H' },
-            self.level_indication,
-        )
-    }
+    /// For some more info see
+    /// [the Chromium source](https://chromium.googlesource.com/chromium/src/+/master/media/base/video_codecs.cc#707)
+    /// and [3GPP TS 26.244 version 12.3.0 Release 12, page 61](https://www.etsi.org/deliver/etsi_ts/126200_126299/126244/12.03.00_60/ts_126244v120300p.pdf).
+    pub fn codec_id(&self, fourcc: &'static str) -> String {
+        use std::fmt::Write;
+        let mut s = String::new();
+        let _= write!(s, "{}.", fourcc);
 
-    /// Return codec id.
-    ///
-    /// - 'hev1.' ' prefix (5 chars) [wrong, should either be hcv1 or hev1!!]
-    /// - profile, e.g. '1'
-    /// - profile_compatibility, dot + 32-bit hex number (max 9 chars)
-    /// - tier and level, e.g. '.H120' (max 5 chars)
-    /// - up to 6 constraint bytes, bytes are dot-separated and hex-encoded: 'B0'.
-    ///
-    /// FIXME: I'm not sure how a codec string for HECV should be constructed.
-    /// This seems to work, somewhat, but it creates strings like:
-    ///
-    /// hev1.1.60000000.L120.B0,ac-3
-    ///
-    /// While you would expect
-    ///
-    /// hev1.1.6.L123.B0,ac-3
-    ///
-    /// If anyone can find the documentation, please contact me. Seems
-    /// related to https://www.w3.org/TR/webcodecs-hevc-codec-registration/ .
-    ///
-    pub fn codec_id(&self) -> String {
-        let profile_space = (self.profile_flags & 0b11100000) >> 5;
-        let profile_indication = self.profile_flags & 0b00000111;
+        // profile space.
+        let profile_space = (self.profile_flags & 0b11000000) >> 6;
+        let profile_idc = self.profile_flags & 0b00011111;
+        if profile_space > 0 {
+            let _ = write!(s, "{}", (profile_space as u8 - 1 + b'A') as char);
+        }
+        let _ = write!(s, "{:x}", profile_idc);
+
+        // profile compatibility.
+        let mut rev = self.profile_compatibility.reverse_bits();
+        while rev > 0 {
+            let _ = write!(s, ".{:x}", rev & 0xff);
+            rev >>= 8;
+        }
+
+        // Tier and level indication.
         let tier = self.profile_flags & 0x20;
-        format!("hev1.{:x}.{:x}.{}{}.B0",
-            profile_indication,
-            self.profile_compatibility,
-            if tier == 0 { 'L' } else { 'H' },
-            self.level_indication,
-        )
+        let _ = write!(s, ".{}{}", if tier == 0 { 'L' } else { 'H' }, self.level_indication);
+
+        // constraint flags.
+        let mut flags = (self.constraint_indicator_flags_hi as u64) << 32;
+        flags |= self.constraint_indicator_flags_lo as u64;
+        while flags > 0 {
+            let _ = write!(s, ".{:x}", (flags & 0xff0000000000) >> 40);
+            flags <<= 8;
+            flags &= 0xffffffffffff;
+        }
+
+        s
     }
 
     /// Decode the frame rate.
