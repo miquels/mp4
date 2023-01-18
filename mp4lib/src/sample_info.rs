@@ -38,7 +38,6 @@ pub struct SampleInfoIterator<'a> {
     stss_iter: Option<SyncSampleIterator<'a>>,
     chunk_offset: &'a ChunkOffsetBox,
     media_timescale: u32,
-    comp_time_shift_: i32,
     comp_time_shift: i32,
     fpos: u64,
     cur_sample: u32,
@@ -47,50 +46,47 @@ pub struct SampleInfoIterator<'a> {
 }
 
 impl SampleInfoIterator<'_> {
+    /// Return an iterator over the SampleTableBox of this track.
+    ///
+    /// It iterates over multiple tables within the SampleTableBox, and
+    /// for each sample returns a SampleInfo.
+    pub fn new<'a>(trak: &'a TrackBox) -> SampleInfoIterator<'a> {
+        let mdhd = trak.media().media_header();
+        let stbl = trak.media().media_info().sample_table();
+        let media_timescale = mdhd.timescale;
+
+        SampleInfoIterator {
+            stsz_iter: stbl.sample_size().iter(),
+            stts_iter: stbl.time_to_sample().iter(),
+            stsc_iter: stbl.sample_to_chunk().iter(),
+            ctts_iter: stbl.composition_time_to_sample().map(|ctts| ctts.iter()),
+            stss_iter: stbl.sync_samples().map(|stss| stss.iter()),
+            chunk_offset: stbl.chunk_offset_table(),
+            media_timescale,
+            comp_time_shift: 0,
+            fpos: 0,
+            cur_sample: 1,
+            cur_chunk: 1,
+            pending: None,
+        }
+    }
+
+    /// Like new, but the edit list will be taken into account for the
+    /// value of the `composition_delta` field .
+    ///
+    /// This can fail if the edit list is too complicated.
+    pub fn with_edit_list<'a>(trak: &'a TrackBox) -> io::Result<SampleInfoIterator<'a>> {
+        let mut iter = SampleInfoIterator::new(trak);
+        iter.comp_time_shift = trak.composition_time_shift(true)? as i32;
+        Ok(iter)
+    }
+
     /// Timescale of the media being iterated over.
     pub fn timescale(&self) -> u32 {
         self.media_timescale
     }
 
-    /// For the composition_delta field, also take any edit lists for the track in account.
-    pub fn with_edit_list(&mut self, use_elst: bool) {
-        if use_elst {
-            self.comp_time_shift = self.comp_time_shift_;
-        } else {
-            self.comp_time_shift = 0;
-        }
-    }
-}
-
-/// Return an iterator over the SampleTableBox of this track.
-///
-/// It iterates over multiple tables within the SampleTableBox, and
-/// for each sample returns a SampleInfo.
-pub fn sample_info_iter<'a>(trak: &'a TrackBox) -> SampleInfoIterator<'a> {
-    let mdhd = trak.media().media_header();
-    let stbl = trak.media().media_info().sample_table();
-    let media_timescale = mdhd.timescale;
-
-    let comp_time_shift_ = trak.composition_time_shift(false).unwrap_or(0) as i32;
-
-    SampleInfoIterator {
-        stsz_iter: stbl.sample_size().iter(),
-        stts_iter: stbl.time_to_sample().iter(),
-        stsc_iter: stbl.sample_to_chunk().iter(),
-        ctts_iter: stbl.composition_time_to_sample().map(|ctts| ctts.iter()),
-        stss_iter: stbl.sync_samples().map(|stss| stss.iter()),
-        chunk_offset: stbl.chunk_offset_table(),
-        media_timescale,
-        comp_time_shift_,
-        comp_time_shift: 0,
-        fpos: 0,
-        cur_sample: 1,
-        cur_chunk: 1,
-        pending: None,
-    }
-}
-
-impl<'a> SampleInfoIterator<'a> {
+    /// Seek to a sample.
     pub fn seek(&mut self, to_sample: u32) -> io::Result<()> {
         self.stsz_iter.seek(to_sample)?;
         self.stts_iter.seek(to_sample)?;

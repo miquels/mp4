@@ -9,6 +9,10 @@ license = "MIT OR Apache-2.0"
 name = "mp4server"
 path = "src/main.rs"
 
+# Include debug info in release builds.
+[profile.release]
+debug = true
+
 [dependencies]
 mp4lib = { version = "0.1", features = [ "axum-box-body"], path = "../mp4lib" }
 

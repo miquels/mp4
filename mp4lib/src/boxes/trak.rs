@@ -2,7 +2,6 @@ use std::io;
 
 use crate::boxes::prelude::*;
 use crate::boxes::{AacSampleEntry, TrackHeaderBox, MediaBox, EditBox, EditListBox, EditListEntry};
-use crate::sample_info::sample_info_iter;
 
 #[doc(inline)]
 pub use crate::sample_info::{SampleInfo, SampleInfoIterator};
@@ -323,7 +322,7 @@ impl TrackBox {
     /// It iterates over multiple tables within the SampleTableBox, and
     /// for each sample returns a SampleInfo.
     pub fn sample_info_iter(&self) -> SampleInfoIterator<'_> {
-        sample_info_iter(self)
+        SampleInfoIterator::new(self)
     }
 }
 
