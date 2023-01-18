@@ -315,14 +315,6 @@ impl TrackBox {
             },
         }
 
-        if let Some(_) = self.edit_list() {
-            let tkhd = self.track_header();
-            if tkhd.duration.0 == 0 {
-                log::error!("TrackBox(id {}): duration 0, but has an edit list!", track_id);
-                valid = false;
-            }
-        }
-
         valid
     }
 
