@@ -118,6 +118,11 @@ impl SampleTableBox {
                 log::error!("SampleTableBox: ChunkOffsetBox: no entries");
                 valid = false;
             }
+        } else if let Some(box_) = first_box!(&self.boxes, ChunkLargeOffsetBox) {
+            if box_.entries.len() == 0 {
+                log::error!("SampleTableBox: ChunkLargeOffsetBox: no entries");
+                valid = false;
+            }
         } else {
             log::error!("SampleTableBox: no ChunkOffsetBox present");
             valid = false;
