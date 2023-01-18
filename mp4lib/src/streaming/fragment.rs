@@ -302,12 +302,13 @@ fn build_sample_flags(is_sync: bool) -> SampleFlags {
 }
 
 // Helper.
-fn default_or<A, B>(dfl: &Option<A>, val: B) -> Option<B> {
-    if dfl.is_some() {
-        None
-    } else {
-        Some(val)
+fn default_or<A: PartialEq<A>>(dfl: &Option<A>, val: A) -> Option<A> {
+    if let Some(dfl) = dfl {
+        if *dfl == val {
+            return None;
+        }
     }
+    Some(val)
 }
 
 /// Generate a MovieFragmentBox + MediaDataBox for a range of samples from one or more tracks.

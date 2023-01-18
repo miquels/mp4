@@ -230,15 +230,21 @@ impl TrackBox {
         // get delta from the first sample.
         let ctts0 = ctts.entries[0].offset;
 
-        // no change?
-        if shift == 0 && ctts0 == 0 {
+        // nothing to change?;
+        if ctts0 == 0 {
             return Ok(());
         }
 
         // Adjust the offsets.
-        if ctts0 != 0 {
-            for entry in ctts.entries.iter_mut() {
-                entry.offset -= ctts0 as i32;
+        for entry in ctts.entries.iter_mut() {
+            entry.offset -= ctts0;
+        }
+
+        // Check if we still need an edit list entry.
+        if shift == ctts0 as i64 {
+            if let Some((idx, _)) = iter_box!(&self.boxes, EditBox).enumerate().next() {
+                self.boxes.remove(idx);
+                return Ok(());
             }
         }
 
@@ -246,7 +252,7 @@ impl TrackBox {
         let movie_timescale = self.movie_timescale;
         let track_duration = self.track_header().duration.0;
 
-        // There should be just one edit list entry.
+        // Make sure there is exactly one edit list entry.
         let elst = match self.edit_list_mut() {
             Some(elst) => {
                 elst.entries.vec.truncate(1);
@@ -262,17 +268,16 @@ impl TrackBox {
             },
         };
         let entry = &mut elst.entries[0];
+        entry.media_rate = 1;
 
         // Now update that entry.
         let d = shift + ctts0 as i64;
         if d > 0 {
             // empty edit.
-            entry.media_rate = 1;
             entry.media_time = -1;
             entry.segment_duration = d as u64 * movie_timescale as u64 / media_timescale;
         } else {
             // edit to skip some samples at the start.
-            entry.media_rate = 1;
             entry.media_time = -d;
             entry.segment_duration = track_duration;
         };
