@@ -118,6 +118,11 @@ fn fmp4_track(movie: &MovieBox, trak: &TrackBox, track_id: u32) -> TrackBox {
     tkhd.flags.set_in_preview(true);
     boxes.push(MP4Box::TrackHeaderBox(tkhd));
 
+    // empty edit box.
+    let mut entries = ArraySized32::new();
+    entries.push(EditListEntry::default());
+    boxes.push(MP4Box::EditListBox(EditListBox { entries }));
+
     // media box.
     let mdia = trak.media();
     let mut media_boxes = Vec::new();

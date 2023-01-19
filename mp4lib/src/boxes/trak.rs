@@ -231,56 +231,40 @@ impl TrackBox {
         let ctts0 = ctts.entries[0].offset;
 
         // nothing to change?;
-        if ctts0 == 0 {
+        if shift == 0 && ctts0 == 0 {
             return Ok(());
         }
 
         // Adjust the offsets.
-        for entry in ctts.entries.iter_mut() {
-            entry.offset -= ctts0;
-        }
-
-        // Check if we still need an edit list entry.
-        if shift == ctts0 as i64 {
-            if let Some((idx, _)) = iter_box!(&self.boxes, EditBox).enumerate().next() {
-                self.boxes.remove(idx);
-                return Ok(());
-            }
+        if ctts0 != 0 {
+	    for entry in ctts.entries.iter_mut() {
+	        entry.offset -= ctts0;
+	    }
         }
 
         let media_timescale = self.media().media_header().timescale as u64;
         let movie_timescale = self.movie_timescale;
         let track_duration = self.track_header().duration.0;
 
-        // Make sure there is exactly one edit list entry.
-        let elst = match self.edit_list_mut() {
-            Some(elst) => {
-                elst.entries.vec.truncate(1);
-                elst
-            },
-            None => {
-                let mut entries = ArraySized32::new();
-                entries.push(EditListEntry::default());
-                self.boxes.push(MP4Box::EditBox(EditBox {
-                    boxes: vec![ EditListBox { entries } ],
-                }));
-                self.edit_list_mut().unwrap()
-            },
-        };
-        let entry = &mut elst.entries[0];
-        entry.media_rate = 1;
+        // Update the editlist.
+        let elst = self.edit_list_mut().unwrap();
+        elst.entries.vec.clear();
 
-        // Now update that entry.
         let d = shift + ctts0 as i64;
         if d > 0 {
-            // empty edit.
-            entry.media_time = -1;
-            entry.segment_duration = d as u64 * movie_timescale as u64 / media_timescale;
-        } else {
-            // edit to skip some samples at the start.
-            entry.media_time = -d;
-            entry.segment_duration = track_duration;
-        };
+            // empty edit first.
+            elst.entries.push(EditListEntry{
+                media_time: -1,
+                media_rate: 1,
+                segment_duration: d as u64 * movie_timescale as u64 / media_timescale,
+            });
+        }
+        // followed by an entry that covers the entire track.
+        elst.entries.push(EditListEntry{
+            media_time: if d < 0 { -d } else { 0 },
+            media_rate: 1,
+            segment_duration: track_duration,
+        });
 
         Ok(())
     }

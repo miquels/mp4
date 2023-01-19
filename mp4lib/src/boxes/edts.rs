@@ -25,11 +25,17 @@ def_box! {
 }
 
 /// Entry in an edit list.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct EditListEntry {
     pub segment_duration:   u64,
     pub media_time:     i64,
     pub media_rate: u16,
+}
+
+impl Default for EditListEntry {
+    fn default() -> EditListEntry {
+        EditListEntry { segment_duration: 0, media_time: 0, media_rate: 1 }
+    }
 }
 
 impl FromBytes for EditListEntry {
