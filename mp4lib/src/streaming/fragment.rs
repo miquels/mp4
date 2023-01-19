@@ -110,6 +110,10 @@ fn track_extends(trak: &TrackBox, track_id: u32) -> TrackExtendsBox {
 fn fmp4_track(movie: &MovieBox, trak: &TrackBox, track_id: u32) -> TrackBox {
     let mut boxes = Vec::new();
 
+    let mdia = trak.media();
+    let minf = mdia.media_info();
+    let stbl = minf.sample_table();
+
     // add TrackHeaderBox.
     let mut tkhd = trak.track_header().clone();
     tkhd.track_id = track_id;
@@ -118,13 +122,25 @@ fn fmp4_track(movie: &MovieBox, trak: &TrackBox, track_id: u32) -> TrackBox {
     tkhd.flags.set_in_preview(true);
     boxes.push(MP4Box::TrackHeaderBox(tkhd));
 
-    // empty edit box.
+    // edit box.
+    let mut entry = EditListEntry::default();
+    if stbl.composition_time_to_sample().is_none() {
+        // We should be able to handle this with a negative
+        // sample_composition_time_offset in the TrackRunEntry,
+        // but it appears that not all players support that.
+        // So use the EditList.
+        //
+        // See also `SampleDefaults::new()`.
+        match trak.composition_time_shift(false) {
+            Ok(val) if val < 0 => entry.media_time = -val,
+            _ => {},
+        }
+    }
     let mut entries = ArraySized32::new();
-    entries.push(EditListEntry::default());
+    entries.push(entry);
     boxes.push(MP4Box::EditListBox(EditListBox { entries }));
 
     // media box.
-    let mdia = trak.media();
     let mut media_boxes = Vec::new();
 
     // add media header.
@@ -153,7 +169,6 @@ fn fmp4_track(movie: &MovieBox, trak: &TrackBox, track_id: u32) -> TrackBox {
     }
 
     // Media Information Box.
-    let minf = mdia.media_info();
     let hdlr = mdia.handler();
     let handler_type = hdlr.handler_type.to_be_bytes();
 
@@ -184,7 +199,7 @@ fn fmp4_track(movie: &MovieBox, trak: &TrackBox, track_id: u32) -> TrackBox {
     let mut sample_boxes = Vec::new();
 
     // Boxes that need to be cloned.
-    let sample_desc = minf.sample_table().sample_description().clone();
+    let sample_desc = stbl.sample_description().clone();
     sample_boxes.push(MP4Box::SampleDescriptionBox(sample_desc));
 
     // Add empty boxes.
@@ -194,7 +209,7 @@ fn fmp4_track(movie: &MovieBox, trak: &TrackBox, track_id: u32) -> TrackBox {
     sample_boxes.push(MP4Box::ChunkOffsetBox(ChunkOffsetBox::default()));
 
     // Clone the SampleGroupDescriptionBox.
-    if let Some(sgpd) = minf.sample_table().sample_group_description() {
+    if let Some(sgpd) = stbl.sample_group_description() {
         sample_boxes.push(sgpd.clone().to_mp4box());
     }
 
@@ -278,11 +293,14 @@ impl SampleDefaults {
             sample_flags = Some(build_sample_flags(true));
         }
 
-        // If there is no composition offset box, the default is 0.
-        let sample_composition_time_offset = if tables.composition_time_to_sample().is_some() {
-            None
-        } else {
-            Some(0)
+        // If there's no CTTS table, we return a default. This means the
+        // TrackRunBox entries will have sample_composition_time_offset None.
+        // However there could still be a composition time shift. We handle
+        // positive ones by adjusting `tfdt`, and negative ones by using
+        // an `EditBox` - see `fmp4_track()`.
+        let sample_composition_time_offset = match tables.composition_time_to_sample() {
+            Some(_) => None,
+            None => Some(0),
         };
 
         SampleDefaults {
@@ -307,13 +325,16 @@ fn build_sample_flags(is_sync: bool) -> SampleFlags {
 }
 
 // Helper.
+//
+// This means, if there _is_ a default, then we can assume all values
+// are the same, so return None. If there is no default, we must
+// return an individual value.
 fn default_or<A: PartialEq<A>>(dfl: &Option<A>, val: A) -> Option<A> {
-    if let Some(dfl) = dfl {
-        if *dfl == val {
-            return None;
-        }
+    if dfl.is_some() {
+        None
+    } else {
+        Some(val)
     }
-    Some(val)
 }
 
 /// Generate a MovieFragmentBox + MediaDataBox for a range of samples from one or more tracks.
