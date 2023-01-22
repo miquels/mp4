@@ -10,7 +10,7 @@ use http_body::Body as _;
 use structopt::StructOpt;
 use tower::ServiceBuilder;
 use tower_http::compression::{
-    predicate::{DefaultPredicate, NotForContentType, Predicate},
+    predicate::{DefaultPredicate, NotForContentType, Predicate, SizeAbove},
     CompressionLayer,
 };
 use tower_http::cors::{self, CorsLayer};
@@ -79,8 +79,10 @@ async fn serve(opts: ServeOpts) -> Result<()> {
     let x_plb = HeaderName::from_static("x-playback-session-id");
 
     let compress_predicate = DefaultPredicate::new()
-        .and(NotForContentType::const_new("movie/"))
-        .and(NotForContentType::const_new("audio/"));
+        .and(NotForContentType::const_new("video/"))
+        .and(NotForContentType::const_new("audio/"))
+        .and(NotForContentType::const_new("image/"))
+        .and(SizeAbove::new(16000));
 
     let middleware_stack = ServiceBuilder::new()
         .layer(TraceLayer::new_for_http())
