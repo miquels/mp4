@@ -23,6 +23,10 @@ In no particular order.
 - investigate interfacing with `gstreamer`. it would be very cool to be able
   to transmux MKV or even transcode other formats.
 
+- pseudostreaming is broken for files > 750MB, where we mmap() parts of the
+  file on-demand instead of the entire file. some off-by-one error or somesuch.
+  mp4lib/src/streaming/pseudo.rs around line 430.
+
 ## OPTIMIZATIONS
 
 we use `mmap` to read the MOOV box, and normal reads to read the
