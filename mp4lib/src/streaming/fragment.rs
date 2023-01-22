@@ -150,17 +150,13 @@ fn fmp4_track(movie: &MovieBox, trak: &TrackBox, track_id: u32) -> TrackBox {
 
     // add handler. copy, but change "sbtl" => "subt".
     let hdlr = mdia.handler();
-    let b = hdlr.handler_type.to_be_bytes();
-    match &b[..] {
-        b"sbtl" | b"subt" => {
-            media_boxes.push(MP4Box::HandlerBox(HandlerBox {
-                handler_type: FourCC::new("subt"),
-                name: ZString::from("SubtitleHandler"),
-            }));
-        },
-        _ => {
-            media_boxes.push(MP4Box::HandlerBox(hdlr.clone()));
-        },
+    if hdlr.is_subtitle() {
+        media_boxes.push(MP4Box::HandlerBox(HandlerBox {
+            handler_type: FourCC::new("subt"),
+            name: ZString::from("SubtitleHandler"),
+        }));
+    } else {
+        media_boxes.push(MP4Box::HandlerBox(hdlr.clone()));
     }
 
     // extended language tag, if present.
@@ -169,9 +165,6 @@ fn fmp4_track(movie: &MovieBox, trak: &TrackBox, track_id: u32) -> TrackBox {
     }
 
     // Media Information Box.
-    let hdlr = mdia.handler();
-    let handler_type = hdlr.handler_type.to_be_bytes();
-
     // first, add the HeaderBox.
     let mut media_info_boxes = Vec::new();
     if let Some(vmhd) = first_box!(&minf.boxes, VideoMediaHeaderBox) {
@@ -184,7 +177,7 @@ fn fmp4_track(movie: &MovieBox, trak: &TrackBox, track_id: u32) -> TrackBox {
         media_info_boxes.push(MP4Box::SubtitleMediaHeaderBox(sthd.clone()));
     }
     if let Some(_) = first_box!(&minf.boxes, NullMediaHeaderBox) {
-        if handler_type == *b"subt" || handler_type == *b"sbtl" {
+        if hdlr.is_subtitle() {
             media_info_boxes.push(MP4Box::SubtitleMediaHeaderBox(SubtitleMediaHeaderBox::default()));
         } else {
             media_info_boxes.push(MP4Box::NullMediaHeaderBox(NullMediaHeaderBox::default()));
@@ -449,9 +442,12 @@ fn track_fragment(
     }
     let first_sample = samples[0].clone();
 
-    // Readahead.
-    let end = samples[samples.len() - 1].fpos;
-    readahead(data_ref.file.as_ref(), samples[0].fpos, end + 1_000_000);
+    // Readahead, unless it's a subtitle track.
+    if !track.media().handler().is_subtitle() {
+        let last = &samples[samples.len() - 1];
+        let end = last.fpos + last.size as u64;
+        readahead(data_ref.file.as_ref(), samples[0].fpos, end + 1_000_000);
+    }
 
     // Track fragment.
     let mut traf = TrackFragmentBox::default();
