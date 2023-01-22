@@ -247,6 +247,11 @@ impl HttpFile for Mp4Stream {
         self.pos += n as u64;
         Ok(n)
     }
+
+    /// MIME type.
+    fn mime_type(&self) -> &str {
+        "video/mp4"
+    }
 }
 
 impl std::fmt::Debug for Mp4Stream {
