@@ -22,7 +22,6 @@ use std::ops::{Bound, Range, RangeBounds};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use memmap::Mmap;
 use once_cell::sync::Lazy;
 
 use super::lru_cache::{open_mp4, LruCache};
@@ -71,7 +70,6 @@ impl Mp4Stream {
         let file = fs::File::open(&path)?;
         let meta = file.metadata()?;
         let modified = meta.modified().unwrap();
-        let len = meta.len();
         let etag = build_etag(meta, super::http_file::E::GENERATED);
 
         // If no tracks were selected, we choose the first video and the first audio track.
