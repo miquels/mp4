@@ -53,7 +53,6 @@ pub struct Mp4Stream {
     start: u64,
     end: u64,
     pos: u64,
-    mmap: Option<Mmap>,
 }
 
 impl Mp4Stream {
@@ -74,18 +73,6 @@ impl Mp4Stream {
         let modified = meta.modified().unwrap();
         let len = meta.len();
         let etag = build_etag(meta, super::http_file::E::GENERATED);
-
-        // This is kind of aribitraty.
-        //
-        // Depending on the file size, we either mmap the entire file, or,
-        // every `read_at` the part we need. This is supposing that mapping
-        // really large files is more expensive than mapping parts of it
-        // multiple times. Is that actually true? XXX TESTME
-        let mmap = if len < 750_000_000 && tracks.len() > 0 {
-            Some(unsafe { Mmap::map(&file)? })
-        } else {
-            None
-        };
 
         // If no tracks were selected, we choose the first video and the first audio track.
         if tracks.len() == 0 {
@@ -116,7 +103,6 @@ impl Mp4Stream {
             start: 0,
             end: size,
             pos: 0,
-            mmap,
         })
     }
 
@@ -160,7 +146,7 @@ impl Mp4Stream {
 
         // Okay we have to map the mdat section.
         let mapping = InitSection::mapping(&self.key)?;
-        let n = mapping.read_at(&self.file, self.mmap.as_ref(), buf, offset)?;
+        let n = mapping.read_at(&self.file, buf, offset)?;
         done += n;
         //println!("read {} bytes ({} via mapping)", done, n);
         Ok(done)
@@ -319,9 +305,9 @@ impl MdatMapping {
     fn get(&self, index: usize) -> MdatEntry {
         let offset = index * 14;
         let data = &self.map[offset..offset + 14];
-        let hi = data[0] as u64;
+        let hi = (data[0] as u64) << 32;
         let mdat_offset = u32::from_ne_bytes(data[1..5].try_into().unwrap()) as u64 | hi;
-        let hi = data[5] as u64;
+        let hi = (data[5] as u64) << 32;
         let virt_offset = u32::from_ne_bytes(data[6..10].try_into().unwrap()) as u64 | hi;
         let size = u32::from_ne_bytes(data[10..14].try_into().unwrap());
         MdatEntry {
@@ -334,7 +320,6 @@ impl MdatMapping {
     fn read_at(
         &self,
         file: &fs::File,
-        mmap: Option<&Mmap>,
         mut buf: &mut [u8],
         offset: u64,
     ) -> io::Result<usize> {
@@ -426,34 +411,26 @@ impl MdatMapping {
         // forwards in the original MP4 file. Minimizes seeks.
         entries.sort_unstable_by(|a, b| a.mdat_offset.cmp(&b.mdat_offset));
 
-        // Mmap the range we need, unless we already mmap'ed the whole file.
-        let mut holder = None;
-        let (start, data) = match mmap {
-            Some(mmap) => (0, mmap),
-            None => {
-                let start = entries[0].mdat_offset;
-                let end = entries[entries.len() - 1].mdat_offset + entries[entries.len() - 1].size;
-                let data = unsafe {
-                    memmap::MmapOptions::new()
-                        .offset(start)
-                        .len((end - start) as usize)
-                        .map(file)
-                }?;
-                holder.replace(data);
-                (start, holder.as_ref().unwrap())
-            },
-        };
+        // Mmap the range we need.
+        let start = entries[0].mdat_offset;
+        let end = entries[entries.len() - 1].mdat_offset + entries[entries.len() - 1].size;
+        let data = unsafe {
+            memmap::MmapOptions::new()
+                .offset(start)
+                .len((end - start) as usize)
+                .map(file)
+        }?;
 
         // and copy.
         let mut count = 0;
         for entry in &entries {
-            let buf_index = (entry.virt_offset - offset) as usize;
-            let sample_index = (entry.mdat_offset - start) as usize;
-            let left = buf.len() - buf_index;
+            let buf_offset = (entry.virt_offset - offset) as usize;
+            let sample_offset = (entry.mdat_offset - start) as usize;
+            let left = buf.len() - buf_offset;
             let size = std::cmp::min(left, entry.size as usize);
-            //println!("buf_index {}, buf.len {}, sample_index {}, data.len {}, size {}",
-            //    buf_index, buf.len(), sample_index, data.len(), size);
-            buf[buf_index..buf_index + size].copy_from_slice(&data[sample_index..sample_index + size]);
+            //println!("buf_offset {}, buf.len {}, sample_offset {}, data.len {}, size {}",
+            //    buf_offset, buf.len(), sample_offset, data.len(), size);
+            buf[buf_offset..buf_offset + size].copy_from_slice(&data[sample_offset..sample_offset + size]);
             count += size;
             //if left == size {
             //    break;
@@ -465,10 +442,18 @@ impl MdatMapping {
 }
 
 // Per track rewritten boxes.
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct InitChunk {
     stsc: SampleToChunkBox,
     stco: ChunkOffsetBox,
+}
+
+impl InitChunk {
+    fn new() -> InitChunk {
+        let mut data = InitChunk::default();
+        data.stco.set_large();
+        data
+    }
 }
 
 // Rewritten init sections, for the specific tracks, and with interleaving.
@@ -588,6 +573,7 @@ impl InitSection {
             for entry in &mut table.boxes {
                 match entry {
                     MP4Box::ChunkOffsetBox(ref mut b) => mem::swap(&mut chunks.stco, b),
+                    MP4Box::ChunkLargeOffsetBox(ref mut b) => mem::swap(&mut chunks.stco, b),
                     MP4Box::SampleToChunkBox(ref mut b) => mem::swap(&mut chunks.stsc, b),
                     _ => {},
                 }
@@ -610,7 +596,7 @@ impl InitSection {
         // Initialize empty chunks vec (one entry per track).
         let mut chunks = Vec::new();
         for _ in tracks {
-            chunks.push(InitChunk::default());
+            chunks.push(InitChunk::new());
         }
 
         // Store an iterator for each track segment.

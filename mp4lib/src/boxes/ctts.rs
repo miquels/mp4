@@ -7,7 +7,7 @@ def_box! {
         entries:        ArraySized32<CompositionOffsetEntry>,
     },
     fourcc => "ctts",
-    version => [0, entries],
+    version => [1, entries],
     impls => [ boxinfo, debug, fromtobytes, fullbox ],
 }
 

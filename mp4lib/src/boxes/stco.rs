@@ -113,19 +113,21 @@ impl ChunkOffsetBox {
     }
 
     /// Add an offset to the list.
-    ///
-    /// If this is a `ChunkOffsetBox` that was created by `from_bytes`, it is
-    /// read-only and this method will panic.
     pub fn push(&mut self, offset: u64) {
         if offset as i64 + self.offset > u32::MAX as i64 {
-            self.fourcc = FourCC::new("co64");
-            self.large = true;
+            self.set_large();
         }
 
         match &mut self.entries.0 {
             Entries_::Large(e) => e.push(offset),
             Entries_::Normal(_) => unreachable!(),
         }
+    }
+
+    /// Make sure this box is always written as `co64`.
+    pub fn set_large(&mut self) {
+        self.fourcc = FourCC::new("co64");
+        self.large = true;
     }
 
     /// Returns an iterator over all offsets in the box.
@@ -135,14 +137,16 @@ impl ChunkOffsetBox {
 
     // Check all the offsets in the table and decide whether to write a stco or co64 box.
     fn check_offsets(&mut self) {
+        if self.large {
+            return;
+        }
         let offset = self.offset;
         let large = match &self.entries.0 {
             Entries_::Normal(entries) => entries.iter_cloned().any(|e| (e as i64 + offset) > u32::MAX as i64),
             Entries_::Large(entries) => entries.iter_cloned().any(|e| (e as i64 + offset) > u32::MAX as i64),
         };
         if large {
-            self.fourcc = FourCC::new("co64");
-            self.large = true;
+            self.set_large();
         }
     }
 }
