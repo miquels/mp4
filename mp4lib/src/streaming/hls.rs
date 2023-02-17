@@ -561,7 +561,7 @@ impl HlsMaster {
                 } else if track_name.contains("SDH") || (lname.contains("hearing") && lname.contains("impaired")) {
                     sdh = true;
                     name = format!("{} (SDH)", name);
-                } else if !track_name.eq_ignore_ascii_case(&name) {
+                } else if track_name.as_str() != "Dub" && !track_name.eq_ignore_ascii_case(&name) {
                     name = format!("{} ({})", name, track_name);
                 }
             }
