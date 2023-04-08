@@ -23,6 +23,7 @@ def_box! {
 }
 
 def_box! {
+     /// Base Media Information Header Atom (Apple/Quicktime)
     BaseMediaInformationHeaderBox {
         boxes:      Vec<MP4Box>,
     },
@@ -30,6 +31,30 @@ def_box! {
     version => [],
     impls => [ basebox, boxinfo, debug, fromtobytes ],
 }
+
+def_box! {
+    /// Base Media Info Atom (Apple/Quicktime)
+    BaseMediaInformationBox {
+        graphics_mode:  u16,
+        opcolor:        OpColor,
+        balance:        u16,
+        skip:           2,
+    },
+    fourcc => "gmin",
+    version => [0],
+    impls => [ boxinfo, debug, fromtobytes, fullbox ],
+}
+
+/*
+def_box! {
+    /// Text Media Info Atom (Apple/Quicktime)
+    TextMediaInformationBox {
+        matrix:         Matrix,
+    },
+    fourcc => "text",
+    version => [],
+    impls => [ basebox, boxinfo, debug, fromtobytes ],
+}*/
 
 def_box! {
     SoundMediaHeaderBox {
@@ -40,6 +65,7 @@ def_box! {
     version => [0],
     impls => [ boxinfo, debug, fromtobytes, fullbox ],
 }
+
 def_box! {
     #[derive(Default)]
     NullMediaHeaderBox {

@@ -163,6 +163,13 @@ impl ExtXMedia {
         };
         let (lang, name) = lang(&language);
 
+        let mut name = name.to_string();
+        if forced {
+            name += " (forced)";
+        } else if sdh {
+            name += " (SDH)";
+        }
+
         ExtXMedia {
             track_id: 0,
             type_: "SUBTITLES",
@@ -170,7 +177,7 @@ impl ExtXMedia {
             codec: "vtt".to_string(),
             language: lang.map(|s| s.to_string()),
             channels: None,
-            name: name.to_string(),
+            name,
             auto_select: true,
             default: forced,
             forced,

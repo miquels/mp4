@@ -1080,3 +1080,11 @@ impl ToBytes for P16String {
         stream.write(self.0[..len].as_bytes())
     }
 }
+
+def_struct! {
+    /// OpColor
+    OpColor,
+        red:    u16,
+        green:  u16,
+        blue:   u16,
+}

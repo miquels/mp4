@@ -15,6 +15,7 @@ use self::prelude::*;
 use crate::mp4box::{BoxHeader, GenericBox};
 
 def_boxes! {
+    BaseMediaInformationBox, b"gmin";
     BaseMediaInformationHeaderBox, b"gmhd";
     BtrtBox, b"btrt";
     CleanApertureBox, b"clap";
@@ -33,6 +34,7 @@ def_boxes! {
     SegmentTypeBox, b"styp";
     SoundMediaHeaderBox, b"smhd";
     SubtitleMediaHeaderBox, b"sthd";
+//    TextMediaInformationBox, b"text";
     TrackExtendsBox, b"trex";
     TrackFragmentBaseMediaDecodeTimeBox, b"tfdt";
     TrackSelectionBox, b"tsel";

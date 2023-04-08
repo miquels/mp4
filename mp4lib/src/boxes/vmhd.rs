@@ -24,12 +24,3 @@ impl Default for VideoMediaHeaderFlags {
         Self(0x01)
     }
 }
-
-def_struct! {
-    /// OpColor
-    OpColor,
-        red:    u16,
-        green:  u16,
-        blue:   u16,
-}
-
